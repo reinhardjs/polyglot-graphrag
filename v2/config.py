@@ -67,17 +67,43 @@ LLM_BASE_URL = SYNTHESIS_LLM_BASE_URL
 LLM_API_KEY  = SYNTHESIS_LLM_API_KEY
 LLM_MODEL    = SYNTHESIS_LLM_MODEL
 
-# ── Auxiliary Model Identities (loaded by serve_gpu.py on startup) ────────────
-# SWAP any of these to change the embedding/reranking/NER model. The daemon
-# loads whatever HuggingFace model name you specify here. Change VECTOR_DIM
-# above to match and re-ingest after swapping.
+# ── Auxiliary Model Identities & Behavior Flags ────────────────────────────────
+# Each model has an identity (HuggingFace name) AND behavior flags that tell
+# the daemon HOW to load and use it. This is what makes the system truly
+# model-agnostic — swap any model by changing these, no code changes needed.
 #
-# To swap the embedding model: change EMBED_MODEL_NAME + VECTOR_DIM + re-ingest.
-# To swap the reranker:         change RERANK_MODEL_NAME, restart daemon only.
-# To swap the NER fallback:     change GLINER_MODEL_NAME + GLINER_LABELS.
+# SUPPORTED EMBEDDING MODELS:
+#   jina-embeddings-v3:  dim 1024, tasks: retrieval.passage/query, trust_remote
+#   jina-embeddings-v4:  dim 2048, tasks: retrieval/text-matching/code, needs
+#                        torch≥2.6 + transformers≥4.52 + peft≥0.15.2 + maybe flash_attn
+#   embeddinggemma-300m: dim 768, vanilla SentenceTransformer (no task, no trust_remote)
+#   Any SentenceTransformer-compatible model on HuggingFace
+#
+# To swap: change EMBED_MODEL_NAME + VECTOR_DIM + the flags below + re-ingest.
+
+# ── Embedding Model ────────────────────────────────────────────────────────────
 EMBED_MODEL_NAME  = "jinaai/jina-embeddings-v3"
+
+# Behavior flags: set these per-model. The daemon reads them at startup.
+EMBED_TRUST_REMOTE    = True    # Jina needs this; most others (BGE, Gemma) don't
+EMBED_USE_HALF        = True    # fp16 conversion — saves VRAM, boosts speed
+EMBED_TASK_PASSAGE    = "retrieval.passage"  # Jina-specific task adapter (None = vanilla)
+EMBED_TASK_QUERY      = "retrieval.query"    # Jina-specific; set None for non-Jina
+EMBED_MAX_LENGTH      = 32768   # max input tokens (None = model default)
+EMBED_MATRYOSHKA_DIM  = None    # for models supporting MRL (Jina v4: 128-2048)
+
+# ── Reranker ───────────────────────────────────────────────────────────────────
 RERANK_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
+RERANK_USE_HALF    = True    # fp16 conversion
+
+# ── GLiNER (NER fallback) ──────────────────────────────────────────────────────
 GLINER_MODEL_NAME = "urchade/gliner_multi-v2.1"
+
+# ── Extraction LLM Behavior ────────────────────────────────────────────────────
+# Some LLMs (Gemma E4B, Gemma 12B) are "reasoning" models that put output in
+# `reasoning_content` instead of `content`. Set True if your extraction model
+# does this so the daemon reads the right field.
+EXTRACTION_READS_REASONING = False
 
 # ── Prompt Templates (per-model overridable) ──────────────────────────────────
 # Extraction prompt: sent to the EXTRACTION_LLM. {doc_id} and {text} are

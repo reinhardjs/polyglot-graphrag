@@ -49,45 +49,65 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 def _load_all():
     """Preload the auxiliary models onto the GPU at startup.
 
-    Model identities are read from config.py at startup. To swap any component,
-    change the corresponding constant in config.py and restart the daemon:
-
-        EMBED_MODEL_NAME  → embedder   (re-ingest if VECTOR_DIM changes)
-        RERANK_MODEL_NAME → reranker   (restart only)
-        GLINER_MODEL_NAME → NER model  (restart only)
-
-    GLiNER is lazy-loaded on first /extract_graph call to save ~1.6 GB VRAM
-    when it's not needed (E2B LLM is the primary extractor).
+    ALL model-specific behavior is driven by config.py flags:
+      EMBED_TRUST_REMOTE   → trust_remote_code param
+      EMBED_USE_HALF       → fp16 conversion toggle
+      EMBED_TASK_PASSAGE   → encode() task for docs (None = vanilla)
+      EMBED_TASK_QUERY     → encode() task for queries
+      RERANK_USE_HALF      → fp16 for reranker
+      VECTOR_DIM           → validated against loaded model output dim
     """
     global _jina, _reranker
     from sentence_transformers import SentenceTransformer, CrossEncoder
 
     print(f"[gpu-daemon] loading models on {DEVICE} ...", flush=True)
     print(f"[gpu-daemon]   embed:  {C.EMBED_MODEL_NAME}", flush=True)
-    print(f"[gpu-daemon]   rerank: {C.RERANK_MODEL_NAME}", flush=True)
+    print(f"[gpu-daemon]     half: {C.EMBED_USE_HALF}", flush=True)
+    print(f"[gpu-daemon]     task: {C.EMBED_TASK_PASSAGE}/{C.EMBED_TASK_QUERY}", flush=True)
 
-    # Embedding model (identity from config)
-    _jina = SentenceTransformer(
-        C.EMBED_MODEL_NAME,
-        trust_remote_code=True,
-        device=DEVICE,
-    ).half()
+    # ── Embedding model (identity + flags from config) ───
+    load_kw = {"device": DEVICE}
+    if C.EMBED_TRUST_REMOTE:
+        load_kw["trust_remote_code"] = True
 
-    # Validate embedding dimension matches config
+    try:
+        _jina = SentenceTransformer(C.EMBED_MODEL_NAME, **load_kw)
+    except Exception as e:
+        print(f"[gpu-daemon] FATAL: failed to load embedder "
+              f"'{C.EMBED_MODEL_NAME}': {e}", flush=True)
+        import sys; sys.exit(1)
+
+    if C.EMBED_USE_HALF:
+        try:
+            _jina = _jina.half()
+        except Exception as e:
+            print(f"[gpu-daemon] WARNING: .half() failed ({e}), "
+                  f"running fp32 — VRAM will be higher", flush=True)
+
+    # Validate dimension
     dim = _jina.get_sentence_embedding_dimension()
     if dim != C.VECTOR_DIM:
         print(
-            f"[gpu-daemon] WARNING: EMBED_MODEL output dim={dim} "
-            f"but VECTOR_DIM={C.VECTOR_DIM} in config — UPDATE config!",
+            f"[gpu-daemon] WARNING: model output dim={dim} "
+            f"but VECTOR_DIM={C.VECTOR_DIM} — UPDATE VECTOR_DIM in config!",
             flush=True,
         )
 
-    # Reranker (identity from config)
-    _reranker = CrossEncoder(C.RERANK_MODEL_NAME, device=DEVICE).half()
+    # ── Reranker ───
+    _reranker = CrossEncoder(C.RERANK_MODEL_NAME, device=DEVICE)
+    if C.RERANK_USE_HALF:
+        try:
+            _reranker = _reranker.half()
+        except Exception:
+            pass  # some rerankers don't support fp16; OK
 
-    # Warm each model with a tiny dummy pass so first real request is fast.
-    _jina.encode(["warm"], task="retrieval.passage")
+    # ── Warm models ───
+    embed_kw = {}
+    if C.EMBED_TASK_PASSAGE:
+        embed_kw["task"] = C.EMBED_TASK_PASSAGE
+    _jina.encode(["warm"], **embed_kw)
     _reranker.predict([("warm", "warm")])
+
     print(
         f"[gpu-daemon] resident models loaded on {DEVICE} "
         f"(GLiNER lazy-loaded on demand). "
@@ -145,14 +165,20 @@ class AskReq(BaseModel):
 # ── Endpoints ────────────────────────────────────────────────────────────────
 @app.post("/embed_late")
 def embed_late(req: EmbedLateReq):
-    """Late-style embedding: sentence-split, embed each with retrieval.passage."""
+    """Late-style embedding: sentence-split, embed each.
+
+    Uses the task from config.EMBED_TASK_PASSAGE (Jina: "retrieval.passage").
+    For vanilla models (BGE, Gemma), it's None — standard encode().
+    """
     import re
     sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', req.text)
                  if s.strip()]
     if not sentences:
         sentences = [req.text.strip()]
-    vecs = _jina.encode(sentences, task="retrieval.passage",
-                        convert_to_numpy=True, show_progress_bar=False)
+    encode_kw = {"convert_to_numpy": True, "show_progress_bar": False}
+    if C.EMBED_TASK_PASSAGE:
+        encode_kw["task"] = C.EMBED_TASK_PASSAGE
+    vecs = _jina.encode(sentences, **encode_kw)
     return {
         "doc_id": req.doc_id,
         "chunks": [
@@ -164,8 +190,10 @@ def embed_late(req: EmbedLateReq):
 
 @app.post("/embed_query")
 def embed_query(req: EmbedQueryReq):
-    vec = _jina.encode([req.text], task="retrieval.query",
-                       convert_to_numpy=True, show_progress_bar=False)[0]
+    encode_kw = {"convert_to_numpy": True, "show_progress_bar": False}
+    if C.EMBED_TASK_QUERY:
+        encode_kw["task"] = C.EMBED_TASK_QUERY
+    vec = _jina.encode([req.text], **encode_kw)[0]
     return {"vector": vec.tolist()}
 
 
@@ -224,8 +252,10 @@ def ask(req: AskReq):
     from qdrant_client.models import PointStruct
 
     # 1. Embed query in-process (resident model on GPU)
-    vec = _jina.encode([req.query], task="retrieval.query",
-                       convert_to_numpy=True, show_progress_bar=False)[0].tolist()
+    encode_kw = {"convert_to_numpy": True, "show_progress_bar": False}
+    if C.EMBED_TASK_QUERY:
+        encode_kw["task"] = C.EMBED_TASK_QUERY
+    vec = _jina.encode([req.query], **encode_kw)[0].tolist()
 
     # 2. SEMANTIC CACHE
     if req.synthesize and not req.skip_cache:
@@ -339,20 +369,35 @@ def health():
 
 @app.get("/models")
 def models():
-    """Return currently loaded model identities (from config.py).
+    """Return currently loaded model identities AND behavior flags (from config.py).
 
-    Use this to verify which models the daemon loaded at startup.
-    Swap any by changing config.py and restarting.
+    Use this to verify which models the daemon loaded and how they're configured.
+    Swap any by changing config.py and restarting the daemon.
     """
     return {
         "embedder": {
             "name": C.EMBED_MODEL_NAME,
             "dim": C.VECTOR_DIM,
+            "half": C.EMBED_USE_HALF,
+            "task_passage": C.EMBED_TASK_PASSAGE,
+            "task_query": C.EMBED_TASK_QUERY,
+            "trust_remote": C.EMBED_TRUST_REMOTE,
+            "matryoshka_dim": C.EMBED_MATRYOSHKA_DIM,
         },
-        "reranker": C.RERANK_MODEL_NAME,
+        "reranker": {
+            "name": C.RERANK_MODEL_NAME,
+            "half": C.RERANK_USE_HALF,
+        },
         "gliner": C.GLINER_MODEL_NAME,
-        "extraction_llm": C.EXTRACTION_LLM_MODEL,
-        "synthesis_llm": C.SYNTHESIS_LLM_MODEL,
+        "extraction": {
+            "model": C.EXTRACTION_LLM_MODEL,
+            "url": C.EXTRACTION_LLM_BASE_URL,
+            "reads_reasoning": C.EXTRACTION_READS_REASONING,
+        },
+        "synthesis": {
+            "model": C.SYNTHESIS_LLM_MODEL,
+            "url": C.SYNTHESIS_LLM_BASE_URL,
+        },
         "entity_resolution": {
             "threshold": C.ENTITY_RESOLUTION_THRESHOLD,
             "index": C.ENTITY_VECTOR_INDEX,
