@@ -96,11 +96,15 @@ curl -s -X POST http://127.0.0.1:8000/ask \
 
 | Stage | Cold | Cache hit |
 |-------|------|-----------|
-| retrieval total | 0.22 s | — |
-| synthesis (E4B) | 6.38 s | 0 s |
-| **full pipeline** | **6.61 s** | **0.13 s** |
+| embed (Jina, GPU) | 0.09 s | — |
+| qdrant search | 0.04 s | — |
+| neo4j subgraph | 0.01 s | — |
+| rerank (BGE, GPU) | 0.12 s | — |
+| **retrieval total** | **0.29 s** | — |
+| synthesis (E4B) | 6.35 s | 0 s |
+| **full pipeline** | **6.64 s** | **0.13 s** |
 
-> Cache hit is 36× faster and spends 0 E4B tokens. Retrieval-only (synthesize=false) always runs fresh at ~0.2s. Run `bench_rag.py` for per-stage breakdown.
+> 96% of cold latency is E4B generation. Retrieval-only at 0.29s. Cache hit at 0.13s (50× faster than cold). Run `bench_rag.py` for per-stage breakdown.
 
 ## Hermes integration
 
@@ -135,7 +139,7 @@ hermes
 - CUDA torch 2.3.1+cu121 installed in rag-env (cuda: True 12.1)
 - serve_gpu.py loads Jina/MiniLM/BGE on GPU at startup; GLiNER lazy-loaded
 - E2B (:8082) extraction returns valid JSON; E4B (:8084) synthesis streams clean answers
-- `/ask` endpoint: retrieval-only ~0.2s, full synth ~6.6s, cache hit ~0.13s (36× speedup)
+- `/ask` endpoint: retrieval-only ~0.29s, full synth ~6.6s, cache hit ~0.13s (50× speedup)
 - Route labels in every response: source, path (hybrid/qdrant/graph), hits per leg, rerank scores
 - Hermes plugin auto-invokes rag_query → sourced answers (bob/SEV-2, PR-482/carol, checkout↔billing)
 - Multilingual: Indonesian doc (adr-021) ingested; CANON_MAP maps ID→EN

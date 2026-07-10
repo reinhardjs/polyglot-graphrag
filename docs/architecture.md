@@ -96,11 +96,26 @@ Gemma E4B QAT Q4_0       | 3.0       | systemd, :8084
 jina-embeddings-v3 fp16  | 3.0       | daemon, shared
 bge-reranker-v2-m3 fp16  | 1.0       | daemon, shared
 all-MiniLM-L6-v2 fp16    | 0.1       | daemon, shared
-GLiNER fp16 (lazy)       | 1.6       | daemon, loaded only on extract_graph
-CUDA context + overhead  | 0.5       |
--------------------------|-----------|------
-TOTAL                    | 10.7      | / 12 GB
+| GLiNER fp16 (lazy)       | 1.6       | daemon, loaded only on extract_graph |
+| CUDA context + overhead  | 0.5       |                          |
+|-------------------------|-----------|------|
+| TOTAL                    | 10.7      | / 12 GB |
 ```
+> GLiNER not in this total — only loaded if `/extract_graph` is called (ingest fallback), adding ~1.6 GB.
+
+## Performance (RTX 3060, all models on GPU)
+
+| Stage | Cold | Cache hit |
+|-------|------|-----------|
+| embed (Jina, GPU) | 0.09s | — |
+| qdrant search | 0.04s | — |
+| neo4j subgraph | 0.01s | — |
+| rerank (BGE, GPU) | 0.12s | — |
+| **retrieval total** | **0.29s** | — |
+| synthesis (E4B) | 6.35s | 0s |
+| **full pipeline** | **6.64s** | **0.13s** |
+
+96% of cold latency is E4B generation. Cache hit is 50× faster than cold.
 
 ## Key design decisions
 
@@ -126,6 +141,4 @@ TOTAL                    | 10.7      | / 12 GB
 
 - Edge types are almost all `ASSOCIATED_WITH` (E2B JSON tends to omit relationship semantics — GLiNER fallback co-occurrence is the safety net).
 - Canonicalisation is exact-match only; multi-word entity merging not implemented.
-- No semantic cache (identical questions re-run the full pipeline).
-- No conversation/multi-turn support (each query is stateless).
-- E4B synthesis includes the reasoning trace (bullet-point chain) before the answer.
+- No multi-turn conversation support (each query is stateless).
