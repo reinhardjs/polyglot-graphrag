@@ -19,7 +19,8 @@ parent directory.
 first `/extract_graph` call (E2B LLM is primary; GLiNER is fallback). Query-only
 workloads (embed + rerank + synthesize) stay ~1.6 GB lighter.
 
-> MiniLM was removed in v2.2.1 — zero-shot routing benchmarked at 50% accuracy.
+> **v2.4.1** — dual-architecture reranking, pool-capped CPU, model-agnostic config.
+> MiniLM was removed in v2.2.1, CANON_MAP replaced in v2.3.0, fully modular in v2.4.0.
 > Parallel retrieval (always run both legs) is safer and costs the same time.
 
 Prerequisite: `rag-env` must have CUDA torch:

@@ -1,4 +1,4 @@
-# GraphRAG v2.2.0 — Full Architecture
+# GraphRAG v2.4.1 — Full Architecture
 
 ---
 
@@ -376,3 +376,7 @@ graph TB
 | v2.0 | Jul 9 | GPU aux models, E2B+E4B, /ask API, Hermes plugin |
 | v2.1.0 | Jul 10 | Hash sparse, Neo4j profiles, delete-before-reingest, tokenizer fix |
 | v2.2.0 | Jul 10 | Semantic cache, route labels, clean E4B output |
+| v2.2.1 | Jul 10 | Remove MiniLM — 50% accuracy, parallel retrieval is better |
+| v2.3.0 | Jul 10 | Vector-driven entity resolution, CANON_MAP removed |
+| v2.4.0 | Jul 10 | Fully modular — model-agnostic config, behavior flags |
+| v2.4.1 | Jul 10 | Dual-architecture reranking, CPU pool cap, fp16 fix |

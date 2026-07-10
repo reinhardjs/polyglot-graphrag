@@ -151,3 +151,5 @@ This project follows [Semantic Versioning](https://semver.org/).
 | Jul 10 | Update docs/ + CHANGELOG, git commit v2.2.0 |
 | Jul 10 | **v2.2.1**: remove MiniLM zero-shot routing — 50% accuracy, parallel retrieval is better |
 | Jul 10 | **v2.3.0**: vector-driven entity resolution — CANON_MAP removed, Neo4j vector index, verbatim E2B extraction, aliases + source_docs, cross-lingual Jina v3 merging |
+| Jul 10 | **v2.4.0**: fully modular — all model behavior in config flags (trust_remote, half, task, matryoshka). Add /models endpoint. Sync serve_cpu.py (remove MiniLM). MODEL_SWITCHING.md with 5 config snippets |
+| Jul 10 | **v2.4.1**: dual-architecture reranking — BGE v2-m3 on both GPU (full pool) and CPU (cap=15). Fix fp16 poison on CPU (14s→3.8s). CPU /ask from 3.8s→2.2s (2.3×). Pool cap quality proven (5→27 doc sweep). Benchmark docs |
