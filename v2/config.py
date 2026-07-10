@@ -102,7 +102,7 @@ RERANK_USE_HALF    = True    # fp16 conversion
 # params is 2.7× faster than v2-m3 on CPU. Capping the fused pool to 10 docs
 # keeps rerank under 500ms so the i5 doesn't freeze.
 RERANK_MODEL_NAME_CPU = "BAAI/bge-reranker-v2-m3"   # same as GPU, capped pool delivers speed
-RERANK_CPU_POOL_CAP   = 10  # only rerank top-N from fused Qdrant+Neo4j pool
+RERANK_CPU_POOL_CAP   = 15  # sweet spot: 4.5/5 avg overlap, 2.2s /ask on CPU
 
 # ── GLiNER (NER fallback) ──────────────────────────────────────────────────────
 GLINER_MODEL_NAME = "urchade/gliner_multi-v2.1"
