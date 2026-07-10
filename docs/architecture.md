@@ -150,3 +150,4 @@ Cache hit (synthesize=true): <0.01s — 50× faster than cold.
 - Entity resolution threshold (0.88) is a tunable constant — higher reduces false merges, lower connects more variants.
 - No multi-turn conversation support (each query is stateless).
 - **No incremental ingest** — currently batch-only (ingest.py rebuilds all). `/ingest` endpoint planned (see `docs/ingest-endpoint-plan.md`) for single-doc updates. Frequent engineering doc changes need this + optional file-watcher.
+- **Single-domain only** — Qdrant collection is hardcoded to `engineering_chunks`. Multi-domain support (legal, hospitality, accounting, etc.) is planned via namespace-based collections and Neo4j domain labels (see `docs/multi-domain-plan.md`).
