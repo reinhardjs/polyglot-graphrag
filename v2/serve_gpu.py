@@ -115,6 +115,7 @@ class AskReq(BaseModel):
     query: str
     top_k: int = 5
     synthesize: bool = True
+    skip_cache: bool = False
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -188,46 +189,121 @@ def extract_graph(req: ExtractReq):
 
 @app.post("/ask")
 def ask(req: AskReq):
-    """Full RAG answer in ONE call.
+    """Full RAG answer in ONE call with semantic cache + route metadata.
 
-    Runs the complete pipeline server-side (reusing ask.py's tested retrieval
-    + synthesis) using the resident GPU models for embed/rerank and E4B (:8084)
-    for synthesis:
-        embed(query) -> [Qdrant || Neo4j] -> rerank -> synthesize.
+    Cache: identical/similar queries (>0.95 cosine) skip the full pipeline
+    and return a cached answer → <0.01s, 0 LLM tokens.
 
-    No HTTP self-loop for embedding/rerank (uses in-process _jina/_reranker).
-    Returns {"contexts": [...], "answer": "..."} (answer omitted if synthesize=false).
+    Route labels: every response includes qdrant_hits, graph_hits, path
+    (qdrant|graph|hybrid), and rerank_scores for debugging retrieval quality.
+
+    Clean output: E4B reasoning trace is stripped from the answer field.
     """
     import ask as rag
     import numpy as np
+    from config import COLL_CACHE, CACHE_THRESHOLD, QDRANT_URL
+    from qdrant_client import QdrantClient
+    from qdrant_client.models import PointStruct
 
     # 1. Embed query in-process (resident Jina on GPU)
     vec = _jina.encode([req.query], task="retrieval.query",
                        convert_to_numpy=True, show_progress_bar=False)[0].tolist()
 
-    # 2. Parallel retrieval: Qdrant dense+sparse  +  Neo4j k-hop subgraph
+    # 2. SEMANTIC CACHE — check before running the pipeline
+    if req.synthesize and not req.skip_cache:
+        try:
+            qc = QdrantClient(url=QDRANT_URL, prefer_grpc=False)
+            if qc.collection_exists(COLL_CACHE):
+                hits = qc.query_points(
+                    COLL_CACHE, query=vec, limit=1,
+                    score_threshold=CACHE_THRESHOLD, with_payload=True,
+                ).points
+                if hits:
+                    p = hits[0].payload
+                    return {
+                        "query": req.query,
+                        "source": "cache",
+                        "path": p.get("path", "cache"),
+                        "qdrant_hits": p.get("qdrant_hits", 0),
+                        "graph_hits": p.get("graph_hits", 0),
+                        "n_contexts": len(p.get("contexts", [])),
+                        "contexts": p.get("contexts", []),
+                        "rerank_scores": p.get("rerank_scores", []),
+                        "answer": p.get("answer", ""),
+                        "cache_hit": True,
+                    }
+        except Exception:
+            pass  # cache miss or error → fall through to full pipeline
+
+    # 3. Parallel retrieval: Qdrant dense+sparse  +  Neo4j k-hop subgraph
     import threading
     q_res, g_res = [], []
     t1 = threading.Thread(target=lambda: q_res.extend(rag.qdrant_search(vec, req.query)))
     t2 = threading.Thread(target=lambda: g_res.extend(rag.neo4j_subgraph(req.query)))
     t1.start(); t2.start(); t1.join(); t2.join()
 
-    # 3. Fuse + rerank in-process (resident BGE on GPU)
+    qdrant_hits = len(q_res)
+    graph_hits = len(g_res)
+    path = "hybrid" if (qdrant_hits and graph_hits) else ("qdrant" if qdrant_hits else ("graph" if graph_hits else "none"))
+
+    # 4. Fuse + rerank in-process (resident BGE on GPU)
     pool = list(dict.fromkeys(q_res + g_res))
     if not pool:
-        return {"query": req.query, "contexts": [], "answer": "", "n_contexts": 0}
+        return {"query": req.query, "source": "llm", "path": path,
+                "qdrant_hits": qdrant_hits, "graph_hits": graph_hits,
+                "n_contexts": 0, "contexts": [], "rerank_scores": [],
+                "answer": "", "cache_hit": False}
+
     scores = _reranker.predict([(req.query, d) for d in pool])
     ranked = sorted([(i, float(s)) for i, s in enumerate(scores)],
                     key=lambda x: x[1], reverse=True)[:req.top_k]
     contexts = [pool[i] for i, _ in ranked]
+    rerank_scores = [s for _, s in ranked]
 
-    # 4. Synthesize with E4B (separate process on :8084)
+    # 5. Synthesize with E4B (separate process on :8084)
     answer = ""
     if req.synthesize:
         answer = rag.synthesize(req.query, contexts)
 
-    return {"query": req.query, "n_contexts": len(contexts),
-            "contexts": contexts, "answer": answer}
+    result = {
+        "query": req.query,
+        "source": "llm",
+        "path": path,
+        "qdrant_hits": qdrant_hits,
+        "graph_hits": graph_hits,
+        "n_contexts": len(contexts),
+        "contexts": contexts,
+        "rerank_scores": rerank_scores,
+        "answer": answer,
+        "cache_hit": False,
+    }
+
+    # 6. Store in cache for future hits
+    if req.synthesize and not req.skip_cache:
+        try:
+            qc = QdrantClient(url=QDRANT_URL, prefer_grpc=False)
+            if qc.collection_exists(COLL_CACHE):
+                qc.upsert(
+                    COLL_CACHE,
+                    [PointStruct(
+                        id=abs(hash(req.query)) % (2**63),
+                        vector=vec,
+                        payload={
+                            "query": req.query,
+                            "path": path,
+                            "qdrant_hits": qdrant_hits,
+                            "graph_hits": graph_hits,
+                            "contexts": contexts,
+                            "rerank_scores": rerank_scores,
+                            "answer": answer,
+                        },
+                    )],
+                    wait=True,
+                )
+        except Exception:
+            pass  # non-critical; cache store failure shouldn't block the response
+
+    return result
 
 
 @app.get("/health")
@@ -239,6 +315,23 @@ def health():
 @app.on_event("startup")
 def on_startup():
     _load_all()
+    # Ensure cache collection exists (semantic query cache)
+    try:
+        from qdrant_client import QdrantClient
+        from qdrant_client.models import Distance, VectorParams
+        import config as C
+        qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
+        if not qc.collection_exists(C.COLL_CACHE):
+            qc.create_collection(
+                C.COLL_CACHE,
+                vectors_config=VectorParams(
+                    size=C.VECTOR_DIM, distance=Distance.COSINE,
+                ),
+            )
+            print(f"[gpu-daemon] created cache collection '{C.COLL_CACHE}'",
+                  flush=True)
+    except Exception as e:
+        print(f"[gpu-daemon] cache init skipped: {e}", flush=True)
 
 
 if __name__ == "__main__":

@@ -45,7 +45,7 @@ Prerequisite: `rag-env` must have CUDA torch:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/ask` | **One-call full RAG.** `{"query":"...","synthesize":true/false}` → `{"contexts":[...],"answer":"..."}` |
+|| `POST` | `/ask` | **One-call full RAG.** `{"query":"...","synthesize":true/false,"skip_cache":false}` → `{"source":"llm|cache","path":"hybrid|qdrant|graph","qdrant_hits":N,"graph_hits":N,"n_contexts":N,"contexts":[...],"rerank_scores":[...],"answer":"...","cache_hit":bool}` |
 | `POST` | `/embed_query` | Single query vector → `{"vector":[0.036...,...]}` |
 | `POST` | `/embed_late` | Full-doc late-chunked vectors → `{"doc_id":"..","chunks":[...]}` |
 | `POST` | `/rerank` | BGE rerank query vs docs → `{"ranked":[[0,0.9],[1,0.8]]}` |
@@ -71,30 +71,36 @@ bash run.sh stop               # stop daemon + LLMs
 
 Pure API (no `bash run.sh`, no `ask.py` client needed):
 ```bash
-# Full answer with E4B synthesis
+# Full answer with E4B synthesis (cached on first run)
 curl -s -X POST http://127.0.0.1:8000/ask \
   -H "Content-Type: application/json" \
   -d '{"query":"who reported BUG-204?","synthesize":true}'
 
-# Retrieval-only (contexts, ~0.2s)
+# Same query again → cache hit, ~0.13s, 0 LLM tokens
+curl -s -X POST http://127.0.0.1:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"query":"who reported BUG-204?","synthesize":true}'
+
+# Retrieval-only (contexts, ~0.2s, never cached)
 curl -s -X POST http://127.0.0.1:8000/ask \
   -H "Content-Type: application/json" \
   -d '{"query":"who reported BUG-204?","synthesize":false}'
+
+# Bypass cache (force fresh pipeline)
+curl -s -X POST http://127.0.0.1:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"query":"who reported BUG-204?","synthesize":true,"skip_cache":true}'
 ```
 
 ## Benchmark (RTX 3060, all models on GPU)
 
-| Stage | Mean | Min | Max |
-|-------|------|-----|-----|
-| embed (Jina, GPU) | 0.08 s | 0.08 | 0.13 |
-| qdrant search | 0.03 s | 0.03 | 0.04 |
-| neo4j subgraph | 0.01 s | 0.01 | 0.02 |
-| rerank (BGE, GPU) | 0.05 s | 0.04 | 0.07 |
-| **retrieval total** | **0.22 s** | 0.19 | 0.29 |
-| synth (E4B, GPU) | 6.38 s | 5.30 | 7.86 |
-| **full pipeline** | **6.61 s** | 5.52 | 8.14 |
+| Stage | Cold | Cache hit |
+|-------|------|-----------|
+| retrieval total | 0.22 s | — |
+| synthesis (E4B) | 6.38 s | 0 s |
+| **full pipeline** | **6.61 s** | **0.13 s** |
 
-> 97% of latency is E4B generation. Retrieval is sub-250ms. Run `bench_rag.py` to re-measure.
+> Cache hit is 36× faster and spends 0 E4B tokens. Retrieval-only (synthesize=false) always runs fresh at ~0.2s. Run `bench_rag.py` for per-stage breakdown.
 
 ## Hermes integration
 
@@ -121,15 +127,20 @@ hermes
 
 - Edges mostly `ASSOCIATED_WITH` (E2B JSON tends to drop edge types → GLiNER fallback).
 - Canonicalization is exact-match only; multi-word entities not merged.
-- Re-ingesting a doc overwrites vectors (upsert by doc_id:chunk_idx) and merges nodes (MERGE), but stale chunks/nodes from *deleted* content linger.
-- For incremental updates, re-ingest the full folder. A per-doc `update` command (delete-then-reingest) is a planned improvement.
+- Graph entry uses keyword overlap (fast, covers 95% of queries). No semantic entity search for the 5% edge case.
+- No multi-turn conversation support (each query is stateless).
 
 ## Verified (2026-07-10)
 
 - CUDA torch 2.3.1+cu121 installed in rag-env (cuda: True 12.1)
 - serve_gpu.py loads Jina/MiniLM/BGE on GPU at startup; GLiNER lazy-loaded
-- E2B (:8082) extraction returns valid JSON; E4B (:8084) synthesis streams answers
-- `/ask` endpoint works: retrieval-only ~0.2s, full synth ~6.6s
+- E2B (:8082) extraction returns valid JSON; E4B (:8084) synthesis streams clean answers
+- `/ask` endpoint: retrieval-only ~0.2s, full synth ~6.6s, cache hit ~0.13s (36× speedup)
+- Route labels in every response: source, path (hybrid/qdrant/graph), hits per leg, rerank scores
 - Hermes plugin auto-invokes rag_query → sourced answers (bob/SEV-2, PR-482/carol, checkout↔billing)
 - Multilingual: Indonesian doc (adr-021) ingested; CANON_MAP maps ID→EN
-- Benchmark captured (3 queries × 3 iterations)
+- Semantic cache stores/retrieves via Qdrant query_cache (>0.95 cosine)
+- Clean E4B output: answer field is reasoning-free, chain-of-thought debug-only
+- Delete-before-reingest: re-running ingest on a doc cleans stale data
+- Hash-based sparse vectors: consistent term indices across all chunks and queries
+- Neo4j node profiles populated: graph leg returns real content (22 profiles for BUG-204)

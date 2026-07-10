@@ -186,14 +186,24 @@ def synthesize(query: str, contexts: list) -> str:
         max_tokens=C.LLM_MAX_TOKENS_OUT,
         stream=True,
     )
-    out = []
+    reasoning_parts = []  # E4B chain-of-thought (debug only)
+    answer_parts = []     # clean final answer
     for chunk in stream:
         delta = chunk.choices[0].delta
-        txt = getattr(delta, "content", None) or getattr(delta, "reasoning_content", None) or ""
-        print(txt, end="", flush=True)
-        out.append(txt)
-    print()
-    return "".join(out)
+        # E4B puts reasoning in reasoning_content, clean answer in content
+        r = getattr(delta, "reasoning_content", None) or ""
+        c = getattr(delta, "content", None) or ""
+        if r:
+            print(r, end="", flush=True)  # stdout for debugging
+            reasoning_parts.append(r)
+        if c:
+            answer_parts.append(c)
+    # Print the clean answer on a new line
+    clean = "".join(answer_parts)
+    if clean:
+        print()  # separator between reasoning trace and answer
+        print(clean, flush=True)
+    return clean
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

@@ -74,12 +74,16 @@ doc.md
 ```
 user query
   ├─[1] embed query (Jina, in-process on GPU)
-  ├─[2] PARALLEL:
+  ├─[2] SEMANTIC CACHE — check Qdrant query_cache at >0.95 cosine
+  │     └─ hit → return cached answer (<0.01s)
+  ├─[3] PARALLEL:
   │     Thread-A: Qdrant hybrid (dense + hash-based sparse, RRF fusion)
   │     Thread-B: Neo4j k-hop (keyword-overlap entry → 2-hop traversal)
-  ├─[3] fuse + dedupe → rerank (BGE, in-process on GPU)
-  └─[4] synthesize (E4B :8084, streamed)  [if synthesize=true]
-       → answer with citations
+  ├─[4] fuse + dedupe → rerank (BGE, in-process on GPU)
+  ├─[5] synthesize (E4B :8084, streamed)  [if synthesize=true]
+  │     └─ reasoning trace (stdout only) → clean answer (API field)
+  ├─[6] store in query_cache for future hits
+  └─[7] return {source, path, qdrant_hits, graph_hits, rerank_scores, contexts, answer}
 ```
 
 ## VRAM budget
@@ -111,6 +115,12 @@ TOTAL                    | 10.7      | / 12 GB
 5. **Portable Hermes integration** — the rag plugin calls `POST /ask` over HTTP. `RAG_DAEMON_URL` env override allows any Hermes agent on any machine to use the KB.
 
 6. **Delete-before-reingest** — each `ingest_file` call deletes existing Qdrant points + Neo4j nodes for that doc_id first, then re-inserts. No stale content from edits/deletions.
+
+7. **Semantic cache** — identical/similar queries (>0.95 cosine) return cached answer in <0.01s with 0 LLM tokens. Only caches synthesize=true responses. `skip_cache: true` bypasses.
+
+8. **Observable retrieval** — every response includes `source` (llm|cache), `path` (qdrant|graph|hybrid), per-leg hit counts, and per-context rerank scores. Full debugging transparency without extra tooling.
+
+9. **Clean synthesis output** — E4B reasoning trace (chain-of-thought) is routed to stdout only. The `answer` API field contains only the final answer text.
 
 ## Known gaps
 

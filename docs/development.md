@@ -85,17 +85,25 @@ bash run.sh stop           # stop daemon + LLMs
 
 ### Smoke tests
 ```bash
-# Direct API
+# Direct API (full synth, caches on first run)
+curl -s -X POST http://127.0.0.1:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"query":"who reported BUG-204?","synthesize":true}'
+# → {"source":"llm","cache_hit":false,"path":"hybrid","answer":"..."}
+
+# Same query (cache hit — ~0.13s)
+curl -s -X POST http://127.0.0.1:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"query":"who reported BUG-204?","synthesize":true}'
+# → {"source":"cache","cache_hit":true,"answer":"..."}
+
+# Retrieval-only (never cached)
 curl -s -X POST http://127.0.0.1:8000/ask \
   -H "Content-Type: application/json" \
   -d '{"query":"who reported BUG-204?","synthesize":false}'
-# → {"n_contexts":5, ...}
 
-# Full answer
-curl -s -X POST http://127.0.0.1:8000/ask \
-  -H "Content-Type: application/json" \
-  -d '{"query":"who reported BUG-204 and what severity?","synthesize":true}'
-# → {"answer":"bob [1]. Severity: SEV-2 [1]", ...}
+# Check cache stats
+curl -s "http://localhost:6333/collections/query_cache" | python -c "import sys,json; d=json.load(sys.stdin); print(f'points: {d[\"result\"][\"points_count\"]}')"
 ```
 
 ### Benchmark
@@ -129,4 +137,5 @@ hermes chat --yolo -q "who reported BUG-204?"
 | Neo4j profiles empty | Re-ingest: `bash run.sh ingest sample_data` |
 | GLiNER first-load timeout | Raise client timeout to 300s; it downloads ~1.6 GB |
 | Port :8000 already in use | `fuser -k 8000/tcp` |
+| Cache always misses | Check `query_cache` collection exists and has points; daemon log for errors |
 | Neo4j container OOM | Check docker-compose heap settings (1-2 GB) |

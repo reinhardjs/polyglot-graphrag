@@ -29,6 +29,7 @@ QDRANT_PORT = 6333
 QDRANT_URL  = f"http://{QDRANT_HOST}:{QDRANT_PORT}"
 COLL_CHUNKS = "engineering_chunks"
 COLL_CACHE  = "query_cache"
+CACHE_THRESHOLD = 0.95   # cosine similarity above which we return cached answer
 
 NEO4J_URI      = "bolt://localhost:7687"
 NEO4J_USER     = "neo4j"

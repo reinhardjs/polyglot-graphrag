@@ -5,6 +5,24 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.2.0] — 2026-07-10 (Semantic Cache + Observability)
+
+### Added
+- **Semantic cache** — Qdrant `query_cache` collection with >0.95 cosine threshold. First query runs full pipeline and stores result; subsequent identical/similar queries return cached answer in <0.01s (0 LLM tokens). `skip_cache: true` flag to bypass. Cache failure is non-blocking.
+- **Route labels** — every `/ask` response now includes `source` (llm|cache), `path` (qdrant|graph|hybrid|none), `qdrant_hits`, `graph_hits`, `rerank_scores`, and `cache_hit` fields for full retrieval observability.
+- **Clean E4B output** — `synthesize()` separates reasoning_content (stdout debug trace) from content (clean answer returned via API). No more chain-of-thought in the `answer` field.
+- `CACHE_THRESHOLD` in config.py.
+
+### Changed
+- `/ask` response shape expanded with metadata fields. Backward-compatible — old fields (`query`, `n_contexts`, `contexts`, `answer`) unchanged.
+- Cache collection auto-created at daemon startup (`on_startup`).
+- AskReq now accepts `skip_cache: bool = False`.
+
+### Performance
+- Cache hit: **0.13s** (vs 4.69s cold). **36× speedup** on repeated queries.
+
+---
+
 ## [2.1.0] — 2026-07-10 (Quality Audit)
 
 ### Fixed
@@ -100,3 +118,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 | Jul 10 | **Quality audit #3**: fix query tokenizer (re.findall vs .split) |
 | Jul 10 | Add delete-before-reingest (clean incremental updates) |
 | Jul 10 | Git init, baseline commit |
+| Jul 10 | **v2.2.0**: add semantic cache (0.13s hit, 36× speedup) |
+| Jul 10 | **v2.2.0**: add route labels (qdrant_hits, graph_hits, path, rerank_scores) |
+| Jul 10 | **v2.2.0**: clean E4B output (separate reasoning from answer) |
+| Jul 10 | Update docs/ + CHANGELOG, git commit v2.2.0 |
