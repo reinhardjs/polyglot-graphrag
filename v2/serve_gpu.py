@@ -41,7 +41,6 @@ from typing import List, Dict, Any
 app = FastAPI(title="GraphRAG GPU Daemon (all aux models on CUDA)")
 
 _jina = None
-_mini = None
 _reranker = None
 _gliner = None
 
@@ -54,8 +53,13 @@ def _load_all():
     GLiNER is intentionally EXCLUDED here — it is only a fallback for graph
     extraction (E2B LLM is primary), so it is lazy-loaded on first
     /extract_graph call to save ~1.6 GB of resident VRAM.
+
+    MiniLM was removed in v2.2.1 — zero-shot routing was benchmarked at 50%
+    accuracy (3/6 queries misrouted). Parallel retrieval (always run both legs)
+    is safer, costs the same wall-clock time (~0.04s), and eliminates 0.1 GB
+    of wasted VRAM.
     """
-    global _jina, _mini, _reranker
+    global _jina, _reranker
     from sentence_transformers import SentenceTransformer, CrossEncoder
 
     print(f"[gpu-daemon] loading models on {DEVICE} ...", flush=True)
@@ -67,15 +71,11 @@ def _load_all():
         device=DEVICE,
     ).half()
 
-    # MiniLM — zero-shot routing encoder
-    _mini = SentenceTransformer("all-MiniLM-L6-v2", device=DEVICE).half()
-
     # BGE multilingual reranker
     _reranker = CrossEncoder("BAAI/bge-reranker-v2-m3", device=DEVICE).half()
 
     # Warm each model with a tiny dummy pass so first real request is fast.
     _jina.encode(["warm"], task="retrieval.passage")
-    _mini.encode(["warm"])
     _reranker.predict([("warm", "warm")])
     print(f"[gpu-daemon] resident models loaded on {DEVICE} "
           f"(GLiNER lazy-loaded on demand). "

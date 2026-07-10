@@ -33,14 +33,13 @@
                               │  │  │  │  ~3.0 GB     │  │  ~1.0 GB     │          │  │  │
                               │  │  │  └──────┬───────┘  └──────┬───────┘          │  │  │
                               │  │  │         │                  │                  │  │  │
-                              │  │  │  ┌──────┴───────┐  ┌──────┴────────────┐     │  │  │
-                              │  │  │  │ MiniLM       │  │ GLiNER (lazy)    │     │  │  │
-                              │  │  │  │ (routing     │  │ (NER fallback    │     │  │  │
-                              │  │  │  │  encoder)    │  │  for extraction) │     │  │  │
-                              │  │  │  │  ~0.1 GB     │  │  ~1.6 GB         │     │  │  │
-                              │  │  │  └──────────────┘  └──────────────────┘     │  │  │
+                              │  │  │  ┌──────┴─────────────────────────────────┐  │  │  │
+                              │  │  │  │ GLiNER (lazy)                          │  │  │  │
+                              │  │  │  │ NER fallback for extraction           │  │  │  │
+                              │  │  │  │ ~1.6 GB                                │  │  │  │
+                              │  │  │  └────────────────────────────────────────┘  │  │  │
                               │  │  │                                               │  │  │
-                              │  │  │  TOTAL AUX: ~5.7 GB (GLiNER not resident)    │  │  │
+                              │  │  │  TOTAL AUX: ~5.6 GB (GLiNER not resident)    │  │  │
                               │  │  └──────────────────────────────────────────────┘  │  │
                               │  │                                                     │  │
                               │  │  Endpoints:                                         │  │
@@ -52,7 +51,7 @@
                               │  │  └─────┬──────┘ └───────────┘ └──────────────┘    │  │
                               │  └───────┼────────────────────────────────────────────┘  │
                               │          │                                                │
-                              │  TOTAL GPU: ~10.7 GB / 12 GB                              │
+                              │  TOTAL GPU: ~10.6 GB / 12 GB                              │
                               └──────────┼────────────────────────────────────────────────┘
                                          │
                     ┌────────────────────┼────────────────────┐
@@ -302,7 +301,6 @@ graph TB
         subgraph Daemon["serve_gpu.py :8000"]
             JINA["Jina v3<br/>embeddings<br/>~3.0 GB"]
             BGE["BGE Reranker v2-m3<br/>cross-encoder<br/>~1.0 GB"]
-            MINI["MiniLM-L6-v2<br/>routing encoder<br/>~0.1 GB"]
             GLINER["GLiNER multi-v2.1<br/>NER fallback (lazy)<br/>~1.6 GB"]
         end
         E2B["Gemma E2B QAT Q4_0<br/>LLM Extraction<br/>:8082 ~1.5 GB"]
@@ -362,7 +360,7 @@ graph TB
     classDef agent fill:#6a1b9a,color:#fff,stroke:#8e24aa
     classDef user fill:#e65100,color:#fff,stroke:#ef6c00
 
-    class JINA,BGE,MINI,GLINER,E2B,E4B gpu
+    class JINA,BGE,GLINER,E2B,E4B gpu
     class QDRANT,NEO4J db
     class PLUGIN agent
     class CURL,DOCS user

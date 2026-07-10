@@ -95,11 +95,10 @@ Gemma E2B QAT Q4_0       | 1.5       | systemd, :8082
 Gemma E4B QAT Q4_0       | 3.0       | systemd, :8084
 jina-embeddings-v3 fp16  | 3.0       | daemon, shared
 bge-reranker-v2-m3 fp16  | 1.0       | daemon, shared
-all-MiniLM-L6-v2 fp16    | 0.1       | daemon, shared
-| GLiNER fp16 (lazy)       | 1.6       | daemon, loaded only on extract_graph |
-| CUDA context + overhead  | 0.5       |                          |
+GLiNER fp16 (lazy)       | 1.6       | daemon, loaded only on extract_graph
+CUDA context + overhead  | 0.5       |                          |
 |-------------------------|-----------|------|
-| TOTAL                    | 10.7      | / 12 GB |
+| TOTAL                    | 10.6      | / 12 GB |
 ```
 > GLiNER not in this total — only loaded if `/extract_graph` is called (ingest fallback), adding ~1.6 GB.
 
@@ -136,6 +135,8 @@ all-MiniLM-L6-v2 fp16    | 0.1       | daemon, shared
 8. **Observable retrieval** — every response includes `source` (llm|cache), `path` (qdrant|graph|hybrid), per-leg hit counts, and per-context rerank scores. Full debugging transparency without extra tooling.
 
 9. **Clean synthesis output** — E4B reasoning trace (chain-of-thought) is routed to stdout only. The `answer` API field contains only the final answer text.
+
+10. **No zero-shot routing (MiniLM removed)** — benchmarked at 50% accuracy on real queries. Parallel retrieval (always run both legs) is safer (wrong route loses context), costs the same wall-clock time (~0.04s since legs run concurrently), and frees 0.1 GB VRAM.
 
 ## Known gaps
 

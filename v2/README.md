@@ -10,15 +10,17 @@ parent directory.
 |-----------|-------|------|------|--------|
 | Extraction LLM | Gemma 4 E2B QAT Q4_0 | :8082 | ~1.5 GB | GPU (systemd) |
 | Synthesis LLM | Gemma 4 E4B QAT Q4_0 | :8084 | ~3.0 GB | GPU (systemd) |
-| Embeddings | jina-embeddings-v3 (fp16) | :8000 | ~4.1 GB shared | GPU (daemon) |
-| Router | all-MiniLM-L6-v2 (fp16) | :8000 | (shared) | GPU |
+| Embeddings | jina-embeddings-v3 (fp16) | :8000 | ~4.0 GB shared | GPU (daemon) |
 | Reranker | bge-reranker-v2-m3 (fp16) | :8000 | (shared) | GPU |
 | Graph extractor | gliner_multi-v2.1 (fp16) | :8000 | lazy-loaded | GPU |
 | **Full RAG** | `POST /ask` | :8000 | — | GPU |
 
-**Total GPU: ~10.7 GB / 12 GB** (1.5 GB headroom). GLiNER is lazy-loaded on
+**Total GPU: ~10.6 GB / 12 GB** (1.4 GB headroom). GLiNER is lazy-loaded on
 first `/extract_graph` call (E2B LLM is primary; GLiNER is fallback). Query-only
 workloads (embed + rerank + synthesize) stay ~1.6 GB lighter.
+
+> MiniLM was removed in v2.2.1 — zero-shot routing benchmarked at 50% accuracy.
+> Parallel retrieval (always run both legs) is safer and costs the same time.
 
 Prerequisite: `rag-env` must have CUDA torch:
 ```bash
@@ -32,7 +34,7 @@ Prerequisite: `rag-env` must have CUDA torch:
 | File | Purpose |
 |------|---------|
 | `config.py` | Ports, DB creds, GLiNER labels, CANON_MAP, token budgets, URLs |
-| `serve_gpu.py` | **Primary daemon.** Preloads Jina/MiniLM/BGE on GPU at startup. Exposes `/ask` (one-call RAG), `/embed_late`, `/embed_query`, `/rerank`, `/extract_graph`. |
+| `serve_gpu.py` | **Primary daemon.** Preloads Jina/BGE on GPU at startup. Exposes `/ask` (one-call RAG), `/embed_late`, `/embed_query`, `/rerank`, `/extract_graph`. |
 | `serve_cpu.py` | **CPU fallback.** Same API as `serve_gpu.py` but runs models on CPU (no CUDA torch). |
 | `ingest.py` | Late-embed → Qdrant, LLM extract (E2B :8082) → canonicalize → Neo4j. |
 | `ask.py` | CLI client: embed → Qdrant‖Neo4j → rerank → E4B synthesis. Thin; all model work delegated to daemon/LLMs. |
@@ -137,7 +139,7 @@ hermes
 ## Verified (2026-07-10)
 
 - CUDA torch 2.3.1+cu121 installed in rag-env (cuda: True 12.1)
-- serve_gpu.py loads Jina/MiniLM/BGE on GPU at startup; GLiNER lazy-loaded
+- serve_gpu.py loads Jina/BGE on GPU at startup; GLiNER lazy-loaded
 - E2B (:8082) extraction returns valid JSON; E4B (:8084) synthesis streams clean answers
 - `/ask` endpoint: retrieval-only ~0.29s, full synth ~6.6s, cache hit ~0.13s (50× speedup)
 - Route labels in every response: source, path (hybrid/qdrant/graph), hits per leg, rerank scores
