@@ -1,8 +1,23 @@
 # GraphRAG v2 — Version Requirements
 
-**Created:** 2026-07-10
+**Created:** 2026-07-10, updated 2026-07-11
 **Current:** v2.4.1 (dual-architecture, pool-capped CPU, modular config)
 **Next:** v2.5.0, v2.6.0
+
+> [!IMPORTANT]
+> **Review amendments (2026-07-11):** All requirements updated with findings
+> from full codebase review. See `> [!WARNING]` and `> [!CAUTION]` blocks
+> throughout for specific changes. Summary:
+> - **P0 bug fix:** `_sparse()` uses non-deterministic `hash()` across processes
+> - **P0 design:** `POST /ingest` must use `BackgroundTasks` (non-blocking)
+> - **P0 safety:** Entity resolution cache + lock for concurrent ingests
+> - **P0 fix:** `delete_doc_neo4j` over-deletes edges on shared nodes
+> - **P1:** Chunking target corrected to `serve_gpu.py`/`serve_cpu.py` (not `ask.py`)
+> - **P1:** `serve_cpu.py` parity for all new endpoints
+> - **P1:** Synthesis prompt consolidation (duplicated in 3 files)
+> - **P1:** Cache invalidation on re-ingest
+> - **P2:** Cross-domain query support (`collection` as list)
+> - **P2:** `_build_profile()` chunking-strategy awareness
 
 ---
 
@@ -11,8 +26,19 @@
 **Goal:** Turn the RAG from batch-only into API-driven, with namespace-isolated
 domains and checksum-based incremental updates. No more `bash run.sh ingest`.
 
-**Epoch:** ~4 hours total
+**Epoch:** ~6 hours total (revised from ~4h 44min after review)
 **Depends on:** v2.4.1 (done)
+
+### PRE-REQUISITE: `_sparse()` Hash Determinism Fix
+
+> [!CAUTION]
+> Python's `hash()` is randomized across processes (`PYTHONHASHSEED`). The
+> `_sparse()` function in both `ingest.py` and `ask.py` uses `hash(tok) % 65536`.
+> If ingest and query run in different Python processes, the same token maps to
+> different sparse indices, breaking sparse search. **Fix before v2.5.0.**
+>
+> Replace `hash(tok)` with `int.from_bytes(hashlib.md5(tok.encode()).digest()[:4], 'little') % 65536`
+> in both `ingest.py:_sparse()` and `ask.py:_sparse()`. Effort: ~10 min.
 
 ---
 
@@ -62,17 +88,27 @@ Content-Type: application/json
 
 **Implementation tasks (T-2.5.0-1):**
 
+> [!CAUTION]
+> `serve_gpu.py` runs with `workers=1` (GPU memory safety). A synchronous
+> handler will block ALL `/ask` queries for ~12s during E2B extraction.
+> The handler MUST use `BackgroundTasks` and return `202 Accepted`.
+
 | Step | Description | Effort |
 |------|-------------|--------|
 | 1a | Extract `ingest_text()` from `ingest.py` CLI into reusable function | 20 min |
 | 1b | Extract `delete_doc()` into reusable function (wraps Qdrant + Neo4j delete) | 10 min |
 | 1c | Extract `list_docs()` — queries Qdrant for doc_id summary | 10 min |
 | 1d | Add `IngestReq` Pydantic model to `serve_gpu.py` | 5 min |
-| 1e | Wire `POST /ingest` handler — calls `ingest_text()`, wraps try/except | 15 min |
-| 1f | Error handling: E2B timeout → GLiNER fallback; GLiNER loading → 503 | 10 min |
-| 1g | `if_checksum` logic: compare SHA-256 with stored Qdrant payload | 10 min |
-| 1h | Response timing dict (embed, extract, write_qdrant, write_neo4j, total) | 10 min |
-| 1i | Smoke test: ingest test doc, verify retrieval, delete, verify gone | 15 min |
+| 1e | Wire `POST /ingest` handler **with BackgroundTasks** — returns 202 + task_id | 20 min |
+| 1f | Add `GET /ingest/status/{task_id}` for polling ingest completion | 10 min |
+| 1g | Error handling: E2B timeout → GLiNER fallback; GLiNER loading → 503 | 10 min |
+| 1h | `if_checksum` logic: compare SHA-256 with stored Qdrant payload | 10 min |
+| 1i | Response timing dict (embed, extract, write_qdrant, write_neo4j, total) | 10 min |
+| 1j | **Add entity resolution cache + lock** in `ingest.py` (prevent race conditions) | 15 min |
+| 1k | **Fix `delete_doc_neo4j` edge scoping** (only delete edges from orphaned nodes) | 15 min |
+| 1l | **Cache invalidation:** flush `query_cache` entries referencing re-ingested doc | 10 min |
+| 1m | **Mirror `/ingest` endpoints in `serve_cpu.py`** for CPU fallback parity | 20 min |
+| 1n | Smoke test: ingest test doc, verify retrieval, delete, verify gone | 15 min |
 
 **Acceptance criteria:**
 - [ ] `curl POST /ingest` creates doc; `curl POST /ask` retrieves it
@@ -164,8 +200,10 @@ one based on request param.
 **Acceptance criteria:**
 - [ ] `POST /ask {"query":"...", "collection":"legal_chunks"}` queries only legal
 - [ ] `POST /ask {"query":"..."}` (no collection) queries engineering (backward compat)
+- [ ] `POST /ask {"query":"...", "collection":["eng...","legal..."]}` cross-domain federated search
 - [ ] Different collections return different results for same query
 - [ ] `GET /collections` shows all domains
+- [ ] All new endpoints mirrored in `serve_cpu.py`
 
 ---
 
@@ -207,13 +245,14 @@ before extraction.
 
 | REQ | Description | Tasks | Est. Effort |
 |-----|-------------|-------|-------------|
-| 1 | POST /ingest | 9 steps | 1h 45min |
+| pre | `_sparse()` hash fix | 1 step | 10min |
+| 1 | POST /ingest (BackgroundTasks) | 14 steps | 2h 30min |
 | 2 | DELETE /ingest | 4 steps | 30min |
 | 3 | GET /ingest + /collections | 3 steps | 25min |
-| 4 | Multi-domain collections | 6 steps | 37min |
+| 4 | Multi-domain collections | 6 steps | 45min |
 | 5 | Checksum incremental | 5 steps | 50min |
 | 6 | Documentation | 5 steps | 37min |
-| **TOTAL** | | | **~4h 44min** |
+| **TOTAL** | | | **~5h 47min** |
 
 ---
 
@@ -345,8 +384,14 @@ POST /ask
 
 ### REQ-2.6.0-3: Pluggable Chunking Strategies
 
-**What:** Replace hardcoded sentence-based late-chunking with 4 strategies,
+**What:** Replace hardcoded sentence-based chunking with 4 strategies,
 selected per domain profile.
+
+> [!WARNING]
+> **Corrected target.** The chunking logic lives in `serve_gpu.py:embed_late`
+> (line 174) and `serve_cpu.py:embed_late` (line 121), NOT in `ask.py`.
+> There is no `late_chunk()` function in `ask.py`. Both daemon files must
+> be refactored.
 
 ```python
 CHUNK_STRATEGIES = {
@@ -361,13 +406,15 @@ CHUNK_STRATEGIES = {
 
 | Step | Description | Effort |
 |------|-------------|--------|
-| 3a | Refactor `ask.late_chunk()` to accept strategy param | 10 min |
-| 3b | Implement `_chunk_sentence()` — extract current logic | 10 min |
-| 3c | Implement `_chunk_paragraph()` — split on double newline | 15 min |
-| 3d | Implement `_chunk_section()` — split on markdown headers, respect hierarchy | 20 min |
-| 3e | Implement `_chunk_fixed()` — sliding window with overlap | 15 min |
-| 3f | Strategy dispatch from profile `[chunking].strategy` | 10 min |
-| 3g | Unit test each strategy with sample texts | 15 min |
+| 3a | Refactor `serve_gpu.py:embed_late()` to accept strategy param | 10 min |
+| 3b | Refactor `serve_cpu.py:embed_late()` to accept strategy param | 10 min |
+| 3c | Implement `_chunk_sentence()` — extract current logic | 10 min |
+| 3d | Implement `_chunk_paragraph()` — split on double newline | 15 min |
+| 3e | Implement `_chunk_section()` — split on markdown headers, respect hierarchy | 20 min |
+| 3f | Implement `_chunk_fixed()` — sliding window with overlap | 15 min |
+| 3g | Strategy dispatch from profile `[chunking].strategy` | 10 min |
+| 3h | **Make `_build_profile()` chunking-strategy-aware** (not hardcoded 2-sentence window) | 15 min |
+| 3i | Unit test each strategy with sample texts | 15 min |
 
 **Acceptance criteria:**
 - [ ] Sentence: "The cat sat. The dog ran." → 2 chunks
@@ -406,15 +453,23 @@ extraction asks for statutes/cases.
 **What:** E4B answer generation includes domain-specific role and constraints.
 Medical: "Be cautious, do not diagnose." Legal: "Cite statutes, no legal advice."
 
+> [!WARNING]
+> **Prompt consolidation required.** The synthesis prompt is currently duplicated
+> in 3 files: `ask.py:synthesize()`, `serve_gpu.py:/ask` (via `rag.synthesize()`),
+> and `retrieve_json.py:_synthesize_nonstream()`. Extract into a shared
+> `prompts.py` module before making domain-aware.
+
 **Tasks (T-2.6.0-5):**
 
 | Step | Description | Effort |
 |------|-------------|--------|
-| 5a | Deprecate hardcoded prompt in `ask.synthesize()` — accept profile param | 10 min |
-| 5b | `/ask` handler passes loaded profile to `rag.synthesize()` | 5 min |
-| 5c | Medical: cautious role, limit to context, no diagnosis | 0 min (TOML) |
-| 5d | Legal: cite sources, no legal advice disclaimer | 0 min (TOML) |
-| 5e | Test: same query, different domains → different synthesis tone | 10 min |
+| 5a | **Create `prompts.py`** with `build_synthesis_prompt(query, contexts, profile)` | 15 min |
+| 5b | Refactor `ask.py:synthesize()` to use `prompts.py` | 10 min |
+| 5c | Refactor `retrieve_json.py:_synthesize_nonstream()` to use `prompts.py` | 10 min |
+| 5d | `/ask` handler passes loaded profile to prompt builder | 5 min |
+| 5e | Medical: cautious role, limit to context, no diagnosis | 0 min (TOML) |
+| 5f | Legal: cite sources, no legal advice disclaimer | 0 min (TOML) |
+| 5g | Test: same query, different domains → different synthesis tone | 10 min |
 
 **Acceptance criteria:**
 - [ ] Medical synthesis says "based on the clinical documents provided"
@@ -488,13 +543,13 @@ carry `patient_id`, `encounter_date`. Legal docs carry `jurisdiction`, `court`.
 |-----|-------------|-------|-------------|
 | 1 | Domain profile system | 10 steps | 2h 27min |
 | 2 | Domain-aware /ask routing | 5 steps | 40min |
-| 3 | Pluggable chunking | 7 steps | 1h 35min |
+| 3 | Pluggable chunking + profile-aware _build_profile | 9 steps | 2h 00min |
 | 4 | Domain-aware extraction prompt | 5 steps | 45min |
-| 5 | Domain-aware synthesis prompt | 5 steps | 35min |
+| 5 | Domain-aware synthesis prompt + consolidation | 7 steps | 50min |
 | 6 | Hybrid Neo4j entry | 5 steps | 50min |
 | 7 | Domain metadata schema | 5 steps | 40min |
 | 8 | Documentation | 7 steps | 1h 20min |
-| **TOTAL** | | | **~8h 52min** |
+| **TOTAL** | | | **~9h 32min** |
 
 ---
 
@@ -505,13 +560,19 @@ v2.4.1 ★ CURRENT
   └── Dual reranker (GPU/CPU), pool cap, modular config, fp16 fix,
       comprehensive benchmarks, all docs synced
 
-v2.5.0 — Single-Doc Ingest + Multi-Domain   (~5h)
-  └── POST/DELETE/GET /ingest, checksum incremental updates,
-      namespace-based Qdrant collections, multi-domain routing
+PRE-REQ — _sparse() hash fix                    (~10 min)
+  └── Replace hash(tok) with hashlib.md5 in ingest.py + ask.py
 
-v2.6.0 — General-Purpose RAG                (~9h)
-  └── Domain profiles (.toml), pluggable chunking,
-      domain-aware prompts, hybrid Neo4j entry,
+v2.5.0 — Single-Doc Ingest + Multi-Domain   (~6h)
+  └── POST/DELETE/GET /ingest (BackgroundTasks, non-blocking),
+      checksum incremental updates, entity resolution cache,
+      cache invalidation, namespace collections, cross-domain queries,
+      serve_cpu.py parity, delete_doc_neo4j edge-scoping fix
+
+v2.6.0 — General-Purpose RAG                (~10h)
+  └── Domain profiles (.toml), pluggable chunking (both daemons),
+      chunking-aware _build_profile, domain-aware prompts,
+      prompt consolidation (prompts.py), hybrid Neo4j entry,
       medical + legal + accounting sample profiles
 ```
 

@@ -2,7 +2,18 @@
 
 **Status:** planned, prioritized for frequent doc updates  
 **Target:** v2.5.0  
-**Created:** 2026-07-10, updated 2026-07-10
+**Created:** 2026-07-10, updated 2026-07-11
+
+> [!IMPORTANT]
+> **Review amendments (2026-07-11):** This plan has been updated to address
+> critical findings from codebase review. Key changes:
+> - `POST /ingest` uses `BackgroundTasks` (non-blocking) instead of synchronous handler
+> - Entity resolution cache with locking to prevent race conditions
+> - Cache invalidation (`query_cache`) on re-ingest
+> - `serve_cpu.py` parity required
+> - `_sparse()` hash determinism fix (pre-requisite bug fix)
+> - Fixed incorrect reference to `ask._ingest_file()` → `ingest.ingest_text()`
+> - `delete_doc_neo4j` edge-deletion scoping fix
 
 ---
 
@@ -83,32 +94,80 @@ The `/ingest` endpoint enables:
 
 ## Implementation
 
-### Phase 1 — Wire `ingest_file()` into the daemon (~1 hour)
+### Phase 0 — Pre-requisite bug fix: `_sparse()` hash determinism (~10 min)
 
-1. In `serve_gpu.py`, add `IngestReq` model and `ingest(req: IngestReq)` function.
-2. The function calls `ask._ingest_file()` directly (same code path as `ingest.py`).
+Python's `hash()` is randomized across processes (`PYTHONHASHSEED`). The
+`_sparse()` function in both `ingest.py` and `ask.py` uses `hash(tok) % 65536`.
+If ingest and query run in different Python processes, the same token maps to
+different sparse indices, making sparse search return noise.
+
+**Fix:** Replace `hash(tok)` with a deterministic hash:
+```python
+import hashlib
+def _sparse_idx(tok: str) -> int:
+    return int.from_bytes(hashlib.md5(tok.encode()).digest()[:4], 'little') % 65536
+```
+
+Apply in both `ingest.py:_sparse()` and `ask.py:_sparse()`.
+
+---
+
+### Phase 1 — Wire `ingest_text()` into the daemon (~1.5 hours)
+
+1. In `serve_gpu.py`, add `IngestReq` model.
+2. The handler calls `ingest.ingest_text()` (extracted in Phase 2) via
+   `BackgroundTasks` — returns `202 Accepted` immediately so `/ask` is never blocked.
 3. E2B extraction runs first (primary); GLiNER is the lazy fallback.
 4. Wrap in try/except — return status + error if E2B or GLiNER both fail.
 5. Add `IngestDelete`, `IngestList` endpoints.
+6. **Mirror all new endpoints in `serve_cpu.py`** for CPU fallback parity.
+
+> [!CAUTION]
+> `serve_gpu.py` runs with `workers=1` (GPU memory safety). A synchronous
+> 12-second E2B extraction call will **block all `/ask` queries**. The handler
+> MUST be non-blocking.
 
 **Key code structure:**
 ```python
+from fastapi import BackgroundTasks
+import asyncio
+
+# In-memory task tracker
+_ingest_tasks: dict[str, dict] = {}  # task_id → {status, result}
+
 class IngestReq(BaseModel):
     text: str
     doc_id: str
     doc_type: str = "Document"
     author: str = ""
     extract_graph: bool = True
+    collection: str = "engineering_chunks"  # v2.5.0 multi-domain
 
-@app.post("/ingest")
-def ingest(req: IngestReq):
-    from ingest import ingest_text   # reuse ingest.py's logic
-    result = ingest_text(
-        text=req.text, doc_id=req.doc_id,
-        doc_type=req.doc_type, author=req.author,
-        extract_graph=req.extract_graph,
-    )
-    return {"doc_id": req.doc_id, "status": "ok", **result}
+@app.post("/ingest", status_code=202)
+async def ingest(req: IngestReq, bg: BackgroundTasks):
+    task_id = f"{req.doc_id}_{int(time.time())}"
+    _ingest_tasks[task_id] = {"status": "running"}
+    bg.add_task(_run_ingest, task_id, req)
+    return {"task_id": task_id, "doc_id": req.doc_id, "status": "accepted"}
+
+def _run_ingest(task_id: str, req: IngestReq):
+    from ingest import ingest_text
+    try:
+        result = ingest_text(
+            text=req.text, doc_id=req.doc_id,
+            doc_type=req.doc_type, author=req.author,
+            extract_graph=req.extract_graph,
+            collection=req.collection,
+        )
+        # Invalidate cached answers that may reference stale data
+        _invalidate_cache_for_doc(req.doc_id)
+        _ingest_tasks[task_id] = {"status": "done", "result": result}
+    except Exception as e:
+        _ingest_tasks[task_id] = {"status": "error", "error": str(e)}
+
+@app.get("/ingest/status/{task_id}")
+def ingest_status(task_id: str):
+    return _ingest_tasks.get(task_id, {"status": "not_found"})
 ```
 
 ### Phase 2 — Refactor ingest.py to be callable (~30 min)
@@ -118,13 +177,36 @@ Currently `ingest.py` is a CLI script. Extract the core logic into:
 - `delete_doc(doc_id)` — wraps existing `delete_doc_qdrant` + `delete_doc_neo4j`
 - `list_docs()` — queries Qdrant for doc_id payload summary
 
-### Phase 3 — Error handling (~20 min)
+### Phase 3 — Error handling + safety fixes (~40 min)
 
 - E2B timeout (30s) → fall back to GLiNER
 - GLiNER first-load timeout (300s) → return HTTP 503 "GLiNER still loading"
 - Qdrant/Neo4j unavailable → return HTTP 502 with error detail
 - Empty text → HTTP 400
 - Duplicate doc_id → upsert (existing behavior, same as `bash run.sh ingest`)
+
+**Entity resolution race condition fix:**
+With API-driven ingestion, concurrent requests mentioning the same novel entity
+(e.g., "Kafka") will both query Neo4j's vector index, find no match, and create
+duplicate nodes. Fix: add a process-level resolution cache with a lock in
+`ingest.py:resolve_node_ids()`.
+
+```python
+# ingest.py — module level
+_resolution_cache: dict[str, str] = {}  # raw_name → resolved_id
+_resolution_lock = threading.Lock()
+```
+
+**`delete_doc_neo4j` edge over-deletion fix:**
+Currently deletes ALL edges touching any node where `doc_id ∈ source_docs`,
+even edges that came from other documents via shared nodes. Fix: only delete
+edges where at least one endpoint will become an orphan, or track `source_docs`
+on edges too.
+
+**Cache invalidation on re-ingest:**
+When a document is re-ingested, cached answers in `query_cache` may reference
+stale data. After successful ingest, flush cache entries whose `contexts`
+mention the re-ingested doc_id.
 
 ### Phase 4 — Tests (~30 min)
 
@@ -161,10 +243,11 @@ No change. The `/ingest` endpoint reuses resident models already loaded:
 
 E2B is a separate systemd service. GLiNER lazy-loads only if LLM extraction fails.
 
-**Tradeoff during ingest:** If `/ask` is called mid-ingest, Qdrant/Neo4j writes from
-the ingest thread may cause brief query inconsistency (a chunk appearing while its
-neighbor is still being written). Mitigation: Qdrant upserts are atomic per-point;
-Neo4j MERGE is idempotent. The impact is ≤1 retrieval result being stale for <100ms.
+**Concurrency during ingest:** With `BackgroundTasks`, ingestion runs in a
+background thread while `/ask` remains fully responsive. The E2B extraction
+call is I/O-bound (HTTP to :8082), so it releases the GIL and does not starve
+GPU inference. Qdrant upserts are atomic per-point; Neo4j MERGE is idempotent.
+The impact is ≤1 retrieval result being stale for <100ms during the write window.
 
 ## After `/ingest` exists — what changes
 

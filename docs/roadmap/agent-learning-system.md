@@ -2,7 +2,7 @@
 
 **Status:** planned (not implemented)  
 **Target:** v3.0.0  
-**Created:** 2026-07-10  
+**Created:** 2026-07-10, updated 2026-07-11
 
 ---
 

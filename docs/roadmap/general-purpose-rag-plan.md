@@ -2,7 +2,15 @@
 
 **Status:** planned
 **Target:** v2.6.0 (after /ingest endpoint + multi-domain collections)
-**Created:** 2026-07-10
+**Created:** 2026-07-10, updated 2026-07-11
+
+> [!IMPORTANT]
+> **Review amendments (2026-07-11):** This plan has been updated to address
+> findings from codebase review. Key changes:
+> - Chunking refactor target corrected: `serve_gpu.py:embed_late` + `serve_cpu.py:embed_late` (not `ask.py`)
+> - `_build_profile()` must be chunking-strategy-aware (not hardcoded 2-sentence window)
+> - Synthesis prompt consolidation: currently duplicated in 3 files (`ask.py`, `serve_gpu.py`, `retrieve_json.py`)
+> - Profile window for Neo4j entity context should adapt to chunking strategy
 
 ---
 
@@ -18,11 +26,12 @@ Every one of these must be configurable for the system to work on ANY domain:
 | 4 | Extraction prompt = "engineering document" | config.py:120-121 | Legal: "legal document", Medical: "medical record" |
 | 5 | Synthesis prompt = generic | ask.py:178-183 | No domain context for E4B |
 | 6 | `doc_type = "eng"` | ingest.py:82, 371 | Should be domain-specific |
-| 7 | Sentence-based chunking | ask.py (late_chunk) | Legal needs paragraph; Medical needs section |
+| 7 | Sentence-based chunking | **serve_gpu.py:embed_late** + **serve_cpu.py:embed_late** | Legal needs paragraph; Medical needs section |
 | 8 | Keyword-overlap Neo4j entry | ask.py:85-116 | Works for "bug-204" but not "chest pain" |
 | 9 | GLiNER edge type = `ASSOCIATED_WITH` | serve_gpu.py:238 | All domains get same edge type |
 | 10 | Profile window = 2 sentences | ingest.py:89 | Legal/medical may need larger context |
 | 11 | No domain-specific metadata | ingest.py:371 | Legal: jurisdiction, court. Medical: patient_id, date |
+| 12 | Synthesis prompt duplicated in 3 files | ask.py:177, serve_gpu.py:318, retrieve_json.py:27 | All 3 must be updated for domain-aware prompts |
 
 ---
 
@@ -173,18 +182,38 @@ def load_domain_profile(name: str | None = None) -> dict:
     ...
 ```
 
-### 2. `ask.py` → Chunking strategies
+### 2. `serve_gpu.py` + `serve_cpu.py` → Pluggable chunking strategies
 
-Replace `late_chunk()` with a pluggable strategy:
+> [!WARNING]
+> **Corrected target.** The plans previously referenced `ask.py`'s `late_chunk()`,
+> but no such function exists. The actual chunking logic is the regex
+> `re.split(r'(?<=[.!?])\s+', ...)` in `serve_gpu.py:embed_late` (line 174)
+> and `serve_cpu.py:embed_late` (line 121). Both must be refactored.
+
+Replace hardcoded sentence split with a pluggable strategy:
 
 ```python
 CHUNK_STRATEGIES = {
-    "sentence":  _late_chunk_sentence,   # current
-    "paragraph": _late_chunk_paragraph,  # split on \n\n
-    "section":   _late_chunk_section,    # split on ## headers
-    "fixed":     _late_chunk_fixed,      # fixed-size windows
+    "sentence":  _chunk_sentence,      # current regex split
+    "paragraph": _chunk_paragraph,     # split on \n\n
+    "section":   _chunk_section,       # split on ## headers
+    "fixed":     _chunk_fixed,         # fixed-size windows with overlap
 }
 ```
+
+### 2b. `ingest.py` → `_build_profile()` must be chunking-strategy-aware
+
+> [!WARNING]
+> `_build_profile()` (ingest.py:89-111) uses a hardcoded 2-sentence window
+> for Neo4j entity profiles. When medical docs use `section` chunking, a
+> 2-sentence window loses the section header (e.g., "DIAGNOSIS:") that
+> provides critical context.
+
+**Fix:** Adapt the profile extraction to the chunking strategy:
+- `sentence` strategy → current 2-sentence window (unchanged)
+- `section` strategy → use the full section containing the entity
+- `paragraph` strategy → use the full paragraph
+- `fixed` strategy → use the fixed-size window containing the entity
 
 ### 3. `ingest.py` → Profile-driven extraction
 
@@ -209,7 +238,36 @@ def ingest_text(text, doc_id, domain="engineering")
 
 Handles: collection routing, domain-specific synthesis prompt, domain label on Neo4j query.
 
-### 5. `GLiNER fallback` → Domain edge types
+### 5. Synthesis prompt consolidation + domain-aware prompts
+
+> [!WARNING]
+> The synthesis prompt is currently **duplicated in 3 files:**
+> 1. `ask.py:synthesize()` (line 177-181) — CLI client
+> 2. `serve_gpu.py:/ask` (line 317-318) — calls `rag.synthesize()` which is `ask.synthesize()`
+> 3. `retrieve_json.py:_synthesize_nonstream()` (line 27-30) — Hermes path
+>
+> All three must be updated when switching to domain-aware prompts.
+
+**Fix:** Extract prompt construction into a single function in `ask.py` (or a
+new `prompts.py` module) that accepts the domain profile. `retrieve_json.py`
+should import and reuse it instead of maintaining its own copy.
+
+```python
+# prompts.py (new)
+def build_synthesis_prompt(query: str, contexts: list, profile: dict = None) -> str:
+    """Build the synthesis prompt, domain-aware if profile is provided."""
+    ctx = "\n\n".join(f"[{i+1}] {c}" for i, c in enumerate(contexts))
+    if profile and profile.get("prompts", {}).get("synthesis"):
+        return profile["prompts"]["synthesis"].format(context=ctx, question=query)
+    # Default (engineering) prompt
+    return (
+        "Answer the question using ONLY the context. "
+        "Cite source numbers. If missing, say so.\n\n"
+        f"CONTEXT:\n{ctx}\n\nQUESTION: {query}"
+    )
+```
+
+### 5b. GLiNER fallback → Domain edge types
 
 ```python
 # serve_gpu.py:/extract_graph

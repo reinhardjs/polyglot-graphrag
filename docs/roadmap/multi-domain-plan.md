@@ -2,7 +2,15 @@
 
 **Status:** planned
 **Target:** v2.5.0 (alongside /ingest endpoint)
-**Created:** 2026-07-10
+**Created:** 2026-07-10, updated 2026-07-11
+
+> [!IMPORTANT]
+> **Review amendments (2026-07-11):** This plan has been updated to address
+> findings from codebase review. Key changes:
+> - Support `collection` as a **list** for cross-domain queries
+> - Echo `collection` in `/ingest` response body
+> - Mirror all endpoints in `serve_cpu.py`
+> - Fix `delete_doc_neo4j` edge over-deletion for shared nodes
 
 ---
 
@@ -71,6 +79,21 @@ Default: `engineering_chunks` (backward compatible).
 Daemon routes Qdrant search to the specified collection. Neo4j graph query
 remains single-graph (domain label filters optional).
 
+**Cross-domain queries:** `collection` also accepts a **list** of collection
+names for federated search across domains:
+```json
+{
+  "query": "How does Engineering ADR-014 impact our Accounting compliance?",
+  "collection": ["engineering_chunks", "accounting_chunks"],
+  "synthesize": true
+}
+```
+Implementation: call `qdrant_search()` in parallel threads (one per collection),
+merge results, then rerank the combined pool. The existing parallel retrieval
+pattern already does this for Qdrant + Neo4j.
+
+Special alias `"collection": "all"` searches every registered collection.
+
 ### `GET /collections` — list domains
 
 ```json
@@ -98,6 +121,14 @@ remains single-graph (domain label filters optional).
 ```
 
 ### `DELETE /ingest/{doc_id}?collection=legal_chunks`
+
+> [!WARNING]
+> **Edge-deletion scoping fix required.** The current `delete_doc_neo4j()`
+> deletes ALL edges touching any node where `doc_id ∈ source_docs`, even edges
+> that came from other documents via shared nodes (e.g., "Database" appears in
+> both ADR-014 and BUG-204). Fix: only delete edges where at least one endpoint
+> will become an orphan after removing `doc_id` from `source_docs`, or track
+> `source_docs` on edges themselves.
 
 ---
 
@@ -136,9 +167,11 @@ QDRANT_COLLECTION_DEFAULT = "engineering_chunks"
 ### Phase 2 — Multi-domain ingest (~1 hour, depends on /ingest endpoint)
 
 1. Add `collection` field to `IngestReq` model
-2. Create collection on first use (Qdrant auto-creates on insert, but with wrong config — needs explicit create with correct vector params)
-3. `ingest_text()` writes to specified collection + attaches domain label to Neo4j nodes
-4. Checksum-based incremental ingest works per-collection
+2. **Echo `collection` in `/ingest` response body** for client-side confirmation
+3. Create collection on first use (Qdrant auto-creates on insert, but with wrong config — needs explicit create with correct vector params)
+4. `ingest_text()` writes to specified collection + attaches domain label to Neo4j nodes
+5. Checksum-based incremental ingest works per-collection
+6. **Mirror all endpoints in `serve_cpu.py`** for CPU fallback parity
 
 ---
 

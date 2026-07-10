@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import re
 import requests
 import json
+import hashlib
 import threading
 from collections import Counter
 from qdrant_client import QdrantClient, models
@@ -45,7 +46,10 @@ def _sparse(text: str) -> models.SparseVector:
     c = Counter(toks)
     idxs, vals = [], []
     for tok, f in c.items():
-        idxs.append(hash(tok) % _SPARSE_VOCAB)
+        # Deterministic across processes (Python's built-in hash() is randomized
+        # per process via PYTHONHASHSEED, which silently breaks sparse search
+        # when ingest and query run in different processes).
+        idxs.append(int.from_bytes(hashlib.md5(tok.encode()).digest()[:4], "little") % _SPARSE_VOCAB)
         vals.append(float(f))
     return models.SparseVector(indices=idxs, values=vals)
 
