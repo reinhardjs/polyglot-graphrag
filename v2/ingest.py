@@ -332,32 +332,20 @@ def write_graph(doc_id: str, graph: dict, source_text: str, driver) -> int:
 
 # ── LLM / GLiNER extraction ───────────────────────────────────────────────────
 def extract_graph_llm(doc_id: str, text: str) -> dict:
-    """LLM-based graph extraction via Gemma E2B on :8082.
+    """LLM-based graph extraction via the configured extraction model.
 
-    PRIMARY extraction path. Gemma E2B is a small reasoning model; we ask for
-    strict JSON. If it returns empty content (reasoning loop) we fall back to
-    the GLiNER daemon.
+    PRIMARY extraction path. The extraction model (config: EXTRACTION_LLM)
+    is prompted with config.EXTRACTION_PROMPT — change it in config.py if you
+    swap the model and it needs a different prompt style.
 
-    IMPORTANT: Entities are extracted VERBATIM — exactly as they appear in the
-    source text. NO translation to English. Jina v3's cross-lingual vector space
-    handles merging "Basis Data" (ID), "Database" (EN), and "Base de Datos" (ES)
-    automatically via Neo4j's vector index. The LLM just reports what it sees.
+    Entities are extracted VERBATIM — exactly as they appear in the source text.
+    NO translation. Jina v3's cross-lingual vector space handles merging via
+    Neo4j's vector index.
     """
     from openai import OpenAI
-    client = OpenAI(base_url=C.EXTRACTION_LLM_BASE_URL, api_key=C.EXTRACTION_LLM_API_KEY)
-    prompt = (
-        "Extract a knowledge graph from the engineering document below.\n"
-        "Entities: extract names EXACTLY as they appear — do NOT translate.\n"
-        "  (e.g. 'Basis Data' stays 'Basis Data', 'Database' stays 'Database').\n"
-        "Relationships: use one of ASSOCIATED_WITH, DEPENDS_ON, IMPACTS,\n"
-        "  AUTHORED, REFERENCES, FIXES.\n"
-        "Return ONLY valid JSON, no prose, no markdown:\n"
-        '{"nodes":[{"id":"ExactEntityName","type":"Microservice|Database|API|'
-        'Metric|Developer|Framework|Component|Bug|PR|ADR"}],'
-        '"edges":[{"source":"entity_a","target":"entity_b",'
-        '"type":"ASSOCIATED_WITH|DEPENDS_ON|IMPACTS|AUTHORED|REFERENCES|FIXES"}]}\n'
-        f"Document ({doc_id}):\n{text[:8000]}"
-    )
+    client = OpenAI(base_url=C.EXTRACTION_LLM_BASE_URL,
+                    api_key=C.EXTRACTION_LLM_API_KEY)
+    prompt = C.EXTRACTION_PROMPT.format(doc_id=doc_id, text=text[:8000])
     try:
         resp = client.chat.completions.create(
             model=C.EXTRACTION_LLM_MODEL,

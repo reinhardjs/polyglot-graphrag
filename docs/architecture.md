@@ -41,7 +41,7 @@ offload, no external API calls.
 ### Code modules
 | File | Responsibility |
 |------|---------------|
-| `serve_gpu.py` | **Primary daemon.** Preloads aux models on GPU. Exposes `/ask` (one-call RAG), `/embed_query`, `/embed_late`, `/rerank`, `/extract_graph`, `/health`. |
+| `serve_gpu.py` | **Primary daemon.** Preloads aux models on GPU (identities from config). Exposes `/ask`, `/embed_query`, `/embed_late`, `/rerank`, `/extract_graph`, `/models`, `/health`. |
 | `serve_cpu.py` | **Fallback daemon.** Same API, runs models on CPU. Used if CUDA torch unavailable. |
 | `ingest.py` | Document→Qdrant+Neo4j. Late-chunk embeds, LLM extraction (E2B) or GLiNER fallback, vector-driven entity resolution (Jina v3 → Neo4j index). |
 | `ask.py` | CLI client + shared library. `parallel_retrieve()` (Qdrant+Neo4j threaded), `condense()` (rerank), `synthesize()` (E4B stream). |

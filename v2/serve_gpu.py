@@ -1,36 +1,33 @@
 """
-serve_gpu.py — GPU auxiliary-model daemon (ALL models loaded at startup).
+serve_gpu.py — GPU auxiliary-model daemon (model-agnostic, config-driven).
 
-Loads Jina v3, all-MiniLM-L6-v2, BAAI/bge-reranker-v2-m3 and urchade/gliner_multi-v2.1
-onto the GPU at process start (device="cuda", fp16) so every request is served from
-resident VRAM — no per-request model loading.
+Loads whatever models are configured in config.py onto the GPU at process
+start (device="cuda", fp16). Models are NOT hardcoded — change EMBED_MODEL_NAME,
+RERANK_MODEL_NAME, or GLINER_MODEL_NAME in config.py to swap any component.
 
 VRAM budget on RTX 3060 (12 GB), shared with the LLM endpoints:
-    Jina v3 (fp16)        ~5.6 GB
-    BGE-reranker-v2-m3     ~1.1 GB
-    GLiNER                 ~1.6 GB
-    MiniLM                 ~0.1 GB
+    Embedding model       ~3.0 GB  (config: EMBED_MODEL_NAME)
+    Reranker              ~1.0 GB  (config: RERANK_MODEL_NAME)
+    GLiNER (lazy)         ~1.6 GB  (config: GLINER_MODEL_NAME)
     -------------------------------
-    Aux subtotal           ~8.4 GB   <- this daemon
-    + Gemma E2B (:8082)    ~1.5 GB   (separate systemd service, GPU)
-    + Gemma E4B (:8084)    ~3.0 GB   (separate systemd service, GPU)
+    Aux subtotal          ~5.6 GB  <- this daemon
+    + E2B (:8082)         ~1.5 GB  (config: EXTRACTION_LLM)
+    + E4B (:8084)         ~3.0 GB  (config: SYNTHESIS_LLM)
     -------------------------------
-    Grand total            ~12.9 GB  -> borderline; close E2B if tight
+    Grand total           ~10.1 GB
 
-If you run ONLY this daemon (no E2B/E4B), ~8.4 GB fits comfortably and leaves
-room for a larger synthesis model. To load E2B+E4B too, monitor nvidia-smi and
-stop one if OOM.
-
-Endpoints (same signatures as serve_cpu.py):
-    POST /embed_late    full-doc late-style embedding (per-sentence, retrieval.passage)
-    POST /embed_query   single query embedding
-    POST /rerank        multilingual BGE rerank
-    POST /extract_graph GLiNER zero-shot NER + co-occurrence edges
-    POST /ask           ONE-CALL full RAG: embed -> Qdrant||Neo4j -> rerank -> E4B synth
+Endpoints:
+    GET  /health           daemon status + VRAM
+    GET  /models           currently loaded model identities
+    POST /embed_late       full-doc late-style embedding
+    POST /embed_query      single query embedding
+    POST /rerank           multilingual cross-encoder rerank
+    POST /extract_graph    GLiNER zero-shot NER + co-occurrence edges
+    POST /ask              ONE-CALL full RAG: embed → Qdrant||Neo4j → rerank → synth
 """
 import os
 os.environ["HF_HOME"] = "/mnt/data-970-plus/hf_cache"
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # anti-frag
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import torch
@@ -38,7 +35,9 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any
 
-app = FastAPI(title="GraphRAG GPU Daemon (all aux models on CUDA)")
+import config as C
+
+app = FastAPI(title="GraphRAG GPU Daemon (config-driven, model-agnostic)")
 
 _jina = None
 _reranker = None
@@ -48,50 +47,72 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def _load_all():
-    """Preload the always-on auxiliary models onto the GPU at startup.
+    """Preload the auxiliary models onto the GPU at startup.
 
-    GLiNER is intentionally EXCLUDED here — it is only a fallback for graph
-    extraction (E2B LLM is primary), so it is lazy-loaded on first
-    /extract_graph call to save ~1.6 GB of resident VRAM.
+    Model identities are read from config.py at startup. To swap any component,
+    change the corresponding constant in config.py and restart the daemon:
 
-    MiniLM was removed in v2.2.1 — zero-shot routing was benchmarked at 50%
-    accuracy (3/6 queries misrouted). Parallel retrieval (always run both legs)
-    is safer, costs the same wall-clock time (~0.04s), and eliminates 0.1 GB
-    of wasted VRAM.
+        EMBED_MODEL_NAME  → embedder   (re-ingest if VECTOR_DIM changes)
+        RERANK_MODEL_NAME → reranker   (restart only)
+        GLINER_MODEL_NAME → NER model  (restart only)
+
+    GLiNER is lazy-loaded on first /extract_graph call to save ~1.6 GB VRAM
+    when it's not needed (E2B LLM is the primary extractor).
     """
     global _jina, _reranker
     from sentence_transformers import SentenceTransformer, CrossEncoder
 
     print(f"[gpu-daemon] loading models on {DEVICE} ...", flush=True)
+    print(f"[gpu-daemon]   embed:  {C.EMBED_MODEL_NAME}", flush=True)
+    print(f"[gpu-daemon]   rerank: {C.RERANK_MODEL_NAME}", flush=True)
 
-    # Jina v3 — late-style embedding (per-sentence, retrieval task)
+    # Embedding model (identity from config)
     _jina = SentenceTransformer(
-        "jinaai/jina-embeddings-v3",
+        C.EMBED_MODEL_NAME,
         trust_remote_code=True,
         device=DEVICE,
     ).half()
 
-    # BGE multilingual reranker
-    _reranker = CrossEncoder("BAAI/bge-reranker-v2-m3", device=DEVICE).half()
+    # Validate embedding dimension matches config
+    dim = _jina.get_sentence_embedding_dimension()
+    if dim != C.VECTOR_DIM:
+        print(
+            f"[gpu-daemon] WARNING: EMBED_MODEL output dim={dim} "
+            f"but VECTOR_DIM={C.VECTOR_DIM} in config — UPDATE config!",
+            flush=True,
+        )
+
+    # Reranker (identity from config)
+    _reranker = CrossEncoder(C.RERANK_MODEL_NAME, device=DEVICE).half()
 
     # Warm each model with a tiny dummy pass so first real request is fast.
     _jina.encode(["warm"], task="retrieval.passage")
     _reranker.predict([("warm", "warm")])
-    print(f"[gpu-daemon] resident models loaded on {DEVICE} "
-          f"(GLiNER lazy-loaded on demand). "
-          f"Allocated: {torch.cuda.memory_allocated()/1e9:.1f} GB", flush=True)
+    print(
+        f"[gpu-daemon] resident models loaded on {DEVICE} "
+        f"(GLiNER lazy-loaded on demand). "
+        f"Allocated: {torch.cuda.memory_allocated()/1e9:.1f} GB",
+        flush=True,
+    )
 
 
 def _load_gliner():
-    """Lazy-load GLiNER on first /extract_graph call (fallback path only)."""
+    """Lazy-load GLiNER on first /extract_graph call (fallback path only).
+
+    Model identity comes from config.GLINER_MODEL_NAME.
+    """
     global _gliner
     if _gliner is None:
         from gliner import GLiNER
-        print("[gpu-daemon] lazy-loading GLiNER (fallback) ...", flush=True)
-        _gliner = GLiNER.from_pretrained("urchade/gliner_multi-v2.1").to(DEVICE).half()
+        print(f"[gpu-daemon] lazy-loading GLiNER: {C.GLINER_MODEL_NAME} ...",
+              flush=True)
+        _gliner = GLiNER.from_pretrained(C.GLINER_MODEL_NAME).to(DEVICE).half()
         _gliner.predict_entities("warm", ["Microservice", "Database"])
-        print(f"[gpu-daemon] GLiNER resident. "
-              f"Allocated: {torch.cuda.memory_allocated()/1e9:.1f} GB", flush=True)
+        print(
+            f"[gpu-daemon] GLiNER resident. "
+            f"Allocated: {torch.cuda.memory_allocated()/1e9:.1f} GB",
+            flush=True,
+        )
     return _gliner
 
 
@@ -100,12 +121,15 @@ class EmbedLateReq(BaseModel):
     text: str
     doc_id: str = "doc"
 
+
 class EmbedQueryReq(BaseModel):
     text: str
+
 
 class RerankReq(BaseModel):
     query: str
     docs: List[str]
+
 
 class ExtractReq(BaseModel):
     text: str
@@ -121,21 +145,21 @@ class AskReq(BaseModel):
 # ── Endpoints ────────────────────────────────────────────────────────────────
 @app.post("/embed_late")
 def embed_late(req: EmbedLateReq):
-    """Late-style embedding: sentence-split, embed each with retrieval.passage.
-
-    The installed SentenceTransformer release lacks native late_chunking=True,
-    so we replicate it by per-sentence embedding (clean, complete chunks). All
-    on GPU — resident, no load latency.
-    """
+    """Late-style embedding: sentence-split, embed each with retrieval.passage."""
     import re
-    sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', req.text) if s.strip()]
+    sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', req.text)
+                 if s.strip()]
     if not sentences:
         sentences = [req.text.strip()]
     vecs = _jina.encode(sentences, task="retrieval.passage",
                         convert_to_numpy=True, show_progress_bar=False)
-    return {"doc_id": req.doc_id,
-            "chunks": [{"chunk_idx": i, "vector": vecs[i].tolist(),
-                        "text": sentences[i]} for i in range(len(sentences))]}
+    return {
+        "doc_id": req.doc_id,
+        "chunks": [
+            {"chunk_idx": i, "vector": vecs[i].tolist(), "text": sentences[i]}
+            for i in range(len(sentences))
+        ],
+    }
 
 
 @app.post("/embed_query")
@@ -157,18 +181,17 @@ def rerank(req: RerankReq):
 
 @app.post("/extract_graph")
 def extract_graph(req: ExtractReq):
-    """GPU GLiNER extraction + co-occurrence heuristic edges.
+    """GPU GLiNER extraction + co-occurrence heuristic edges (fallback path).
 
     GLiNER is a zero-shot NER model loaded on CUDA. It predicts entities of our
     GLiNER_LABELS; for each sentence we create ASSOCIATED_WITH edges between
     co-occurring entities. The caller (ingest.py) resolves entity identities
-    via Jina v3 vector matching against Neo4j's vector index.
+    via vector matching against Neo4j's vector index.
     """
-    from config import GLINER_LABELS, GLINER_THRESHOLD
     import re
-    gliner = _load_gliner()   # lazy-load on first use (fallback path)
-    preds = gliner.predict_entities(req.text, GLINER_LABELS,
-                                    threshold=GLINER_THRESHOLD)
+    gliner = _load_gliner()
+    preds = gliner.predict_entities(req.text, C.GLINER_LABELS,
+                                    threshold=C.GLINER_THRESHOLD)
     nodes, edges, seen = {}, [], set()
     for sent in [s for s in re.split(r'(?<=[.!?])\s+', req.text) if s.strip()]:
         s_low = sent.lower()
@@ -182,42 +205,36 @@ def extract_graph(req: ExtractReq):
                 pair = tuple(sorted((local[a], local[b])))
                 if pair not in seen:
                     seen.add(pair)
-                    edges.append({"source": pair[0], "target": pair[1],
-                                  "type": "ASSOCIATED_WITH"})
-    return {"nodes": [{"id": k, "type": v} for k, v in nodes.items()],
-            "edges": edges}
+                    edges.append({
+                        "source": pair[0], "target": pair[1],
+                        "type": "ASSOCIATED_WITH",
+                    })
+    return {
+        "nodes": [{"id": k, "type": v} for k, v in nodes.items()],
+        "edges": edges,
+    }
 
 
 @app.post("/ask")
 def ask(req: AskReq):
-    """Full RAG answer in ONE call with semantic cache + route metadata.
-
-    Cache: identical/similar queries (>0.95 cosine) skip the full pipeline
-    and return a cached answer → <0.01s, 0 LLM tokens.
-
-    Route labels: every response includes qdrant_hits, graph_hits, path
-    (qdrant|graph|hybrid), and rerank_scores for debugging retrieval quality.
-
-    Clean output: E4B reasoning trace is stripped from the answer field.
-    """
+    """Full RAG answer in ONE call with semantic cache + route metadata."""
     import ask as rag
     import numpy as np
-    from config import COLL_CACHE, CACHE_THRESHOLD, QDRANT_URL
     from qdrant_client import QdrantClient
     from qdrant_client.models import PointStruct
 
-    # 1. Embed query in-process (resident Jina on GPU)
+    # 1. Embed query in-process (resident model on GPU)
     vec = _jina.encode([req.query], task="retrieval.query",
                        convert_to_numpy=True, show_progress_bar=False)[0].tolist()
 
-    # 2. SEMANTIC CACHE — check before running the pipeline
+    # 2. SEMANTIC CACHE
     if req.synthesize and not req.skip_cache:
         try:
-            qc = QdrantClient(url=QDRANT_URL, prefer_grpc=False)
-            if qc.collection_exists(COLL_CACHE):
+            qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
+            if qc.collection_exists(C.COLL_CACHE):
                 hits = qc.query_points(
-                    COLL_CACHE, query=vec, limit=1,
-                    score_threshold=CACHE_THRESHOLD, with_payload=True,
+                    C.COLL_CACHE, query=vec, limit=1,
+                    score_threshold=C.CACHE_THRESHOLD, with_payload=True,
                 ).points
                 if hits:
                     p = hits[0].payload
@@ -234,9 +251,9 @@ def ask(req: AskReq):
                         "cache_hit": True,
                     }
         except Exception:
-            pass  # cache miss or error → fall through to full pipeline
+            pass
 
-    # 3. Parallel retrieval: Qdrant dense+sparse  +  Neo4j k-hop subgraph
+    # 3. Parallel retrieval: Qdrant + Neo4j
     import threading
     q_res, g_res = [], []
     t1 = threading.Thread(target=lambda: q_res.extend(rag.qdrant_search(vec, req.query)))
@@ -245,15 +262,19 @@ def ask(req: AskReq):
 
     qdrant_hits = len(q_res)
     graph_hits = len(g_res)
-    path = "hybrid" if (qdrant_hits and graph_hits) else ("qdrant" if qdrant_hits else ("graph" if graph_hits else "none"))
+    path = "hybrid" if (qdrant_hits and graph_hits) else (
+        "qdrant" if qdrant_hits else ("graph" if graph_hits else "none")
+    )
 
-    # 4. Fuse + rerank in-process (resident BGE on GPU)
+    # 4. Fuse + rerank in-process
     pool = list(dict.fromkeys(q_res + g_res))
     if not pool:
-        return {"query": req.query, "source": "llm", "path": path,
-                "qdrant_hits": qdrant_hits, "graph_hits": graph_hits,
-                "n_contexts": 0, "contexts": [], "rerank_scores": [],
-                "answer": "", "cache_hit": False}
+        return {
+            "query": req.query, "source": "llm", "path": path,
+            "qdrant_hits": qdrant_hits, "graph_hits": graph_hits,
+            "n_contexts": 0, "contexts": [], "rerank_scores": [],
+            "answer": "", "cache_hit": False,
+        }
 
     scores = _reranker.predict([(req.query, d) for d in pool])
     ranked = sorted([(i, float(s)) for i, s in enumerate(scores)],
@@ -261,7 +282,7 @@ def ask(req: AskReq):
     contexts = [pool[i] for i, _ in ranked]
     rerank_scores = [s for _, s in ranked]
 
-    # 5. Synthesize with E4B (separate process on :8084)
+    # 5. Synthesize with E4B (separate process)
     answer = ""
     if req.synthesize:
         answer = rag.synthesize(req.query, contexts)
@@ -279,13 +300,13 @@ def ask(req: AskReq):
         "cache_hit": False,
     }
 
-    # 6. Store in cache for future hits
+    # 6. Store in cache
     if req.synthesize and not req.skip_cache:
         try:
-            qc = QdrantClient(url=QDRANT_URL, prefer_grpc=False)
-            if qc.collection_exists(COLL_CACHE):
+            qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
+            if qc.collection_exists(C.COLL_CACHE):
                 qc.upsert(
-                    COLL_CACHE,
+                    C.COLL_CACHE,
                     [PointStruct(
                         id=abs(hash(req.query)) % (2**63),
                         vector=vec,
@@ -302,25 +323,50 @@ def ask(req: AskReq):
                     wait=True,
                 )
         except Exception:
-            pass  # non-critical; cache store failure shouldn't block the response
+            pass
 
     return result
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "device": DEVICE,
-            "cuda_alloc_gb": round(torch.cuda.memory_allocated()/1e9, 1)}
+    return {
+        "status": "ok",
+        "device": DEVICE,
+        "cuda_alloc_gb": round(torch.cuda.memory_allocated()/1e9, 1),
+    }
+
+
+@app.get("/models")
+def models():
+    """Return currently loaded model identities (from config.py).
+
+    Use this to verify which models the daemon loaded at startup.
+    Swap any by changing config.py and restarting.
+    """
+    return {
+        "embedder": {
+            "name": C.EMBED_MODEL_NAME,
+            "dim": C.VECTOR_DIM,
+        },
+        "reranker": C.RERANK_MODEL_NAME,
+        "gliner": C.GLINER_MODEL_NAME,
+        "extraction_llm": C.EXTRACTION_LLM_MODEL,
+        "synthesis_llm": C.SYNTHESIS_LLM_MODEL,
+        "entity_resolution": {
+            "threshold": C.ENTITY_RESOLUTION_THRESHOLD,
+            "index": C.ENTITY_VECTOR_INDEX,
+        },
+    }
 
 
 @app.on_event("startup")
 def on_startup():
     _load_all()
-    # Ensure cache collection exists (semantic query cache)
+    # Ensure Qdrant cache collection exists
     try:
         from qdrant_client import QdrantClient
         from qdrant_client.models import Distance, VectorParams
-        import config as C
         qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
         if not qc.collection_exists(C.COLL_CACHE):
             qc.create_collection(
@@ -334,18 +380,13 @@ def on_startup():
     except Exception as e:
         print(f"[gpu-daemon] cache init skipped: {e}", flush=True)
 
-    # Ensure Neo4j vector index exists for entity resolution.
-    # This index powers language-agnostic entity merging: "Basis Data",
-    # "Database", and "Base de Datos" all converge via Jina v3's cross-lingual
-    # embedding space (>0.88 cosine → same entity, aliases merged).
+    # Ensure Neo4j vector index exists for entity resolution
     try:
         from neo4j import GraphDatabase
-        import config as C
         driver = GraphDatabase.driver(
             C.NEO4J_URI, auth=(C.NEO4J_USER, C.NEO4J_PASSWORD),
         )
         with driver.session() as s:
-            # Neo4j 5.x vector index syntax: CREATE IF NOT EXISTS
             s.run(
                 "CREATE VECTOR INDEX $idx IF NOT EXISTS "
                 "FOR (n:Entity) ON (n.name_vector) "
