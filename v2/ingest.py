@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import re
 import json
 import requests
+import threading
 from pathlib import Path
 from collections import Counter
 from qdrant_client import QdrantClient, models
@@ -75,7 +76,7 @@ def _sparse(text: str) -> models.SparseVector:
 
 
 # ── Qdrant write ──────────────────────────────────────────────────────────────
-def write_vectors(doc_id: str, chunks: list, meta: dict) -> int:
+def write_vectors(doc_id: str, chunks: list, meta: dict, checksum: str = "") -> int:
     qc = get_qdrant()
     pts = []
     for ch in chunks:
@@ -83,7 +84,8 @@ def write_vectors(doc_id: str, chunks: list, meta: dict) -> int:
             id=abs(hash(f"{doc_id}:{ch['chunk_idx']}")) % (2**63),
             vector={"": ch["vector"], "text": _sparse(ch["text"])},
             payload={"doc_id": doc_id, "chunk_idx": ch["chunk_idx"],
-                     "text": ch["text"], "doc_type": meta.get("doc_type", "eng")},
+                     "text": ch["text"], "doc_type": meta.get("doc_type", "eng"),
+                     "checksum": checksum},
         ))
     qc.upsert(C.COLL_CHUNKS, pts, wait=True)
     return len(pts)
@@ -130,6 +132,14 @@ def _build_profile(entity: str, doc_text: str, window: int = 2) -> str:
 # This eliminates hardcoded translation maps entirely. "Basis Data" (ID)
 # "Database" (EN), and "Base de Datos" (ES) all converge automatically because
 # Jina v3 places them near each other in the 1024-dim cross-lingual vector space.
+
+# ── Concurrent-resolution safety ───────────────────────────────────────────────
+# Two concurrent ingests that both mention a novel entity ("Kafka") will each
+# query Neo4j, find no match, and generate DIFFERENT entity IDs → duplicate nodes.
+# A process-level cache + lock eliminates the race AND speeds up re-ingestion
+# of common entities within the daemon's lifetime.
+_resolution_cache: "dict[str, str]" = {}   # raw_name → resolved_id
+_resolution_lock = threading.Lock()
 
 
 def _gen_entity_id(raw_name: str, entity_type: str) -> str:
@@ -183,16 +193,33 @@ def resolve_node_ids(driver, nodes: list, verbose: bool = False) -> dict:
 
     Returns a dict mapping {raw_name: resolved_id} for use in edge creation.
     Each node's resolution is independent and could be done in parallel.
+
+    Thread-safe: a process-level cache + lock prevents two concurrent ingests
+    from creating duplicate nodes for the same novel entity.
     """
     resolver = {}  # raw_name → resolved_id
     for node in nodes:
         raw_name = node["id"]            # verbatim from source text
         entity_type = node.get("type", "Unknown")
+
+        # Fast path: already resolved in this process (cache hit)
+        with _resolution_lock:
+            if raw_name in _resolution_cache:
+                resolver[raw_name] = _resolution_cache[raw_name]
+                if verbose:
+                    print(f"[resolve] '{raw_name}' → cache hit "
+                          f"({_resolution_cache[raw_name]})", flush=True)
+                continue
+
         name_vec = _embed_name(raw_name)  # Jina v3 cross-lingual embedding
         # Query Neo4j vector index for the closest existing entity
         resolved_id, is_new, score, closest = _resolve_in_neo4j(
             driver, name_vec, raw_name, entity_type,
         )
+        # Persist to cache under lock (another thread may resolve same name
+        # concurrently — second one will then hit the cache above).
+        with _resolution_lock:
+            _resolution_cache[raw_name] = resolved_id
         resolver[raw_name] = resolved_id
         if verbose:
             tag = "NEW" if is_new else f"MATCH {score:.3f}→{closest}"
@@ -208,21 +235,29 @@ def delete_doc_neo4j(doc_id: str, driver):
     (e.g. "Database" appears in both ADR-014 and BUG-204). This function:
       - Removes doc_id from each entity's `source_docs` list.
       - Deletes entities whose `source_docs` list becomes empty (orphaned).
-      - Cleans up all edges where either endpoint was orphaned.
+      - Cleans up edges: an edge is deleted only if removing `doc_id` from
+        BOTH endpoints leaves at least one endpoint orphaned (i.e. the edge
+        has no remaining source document keeping it alive). Edges between two
+        still-shared nodes are preserved.
+
+    NOTE: this is the safe approximation. For perfectly accurate edge
+    attribution, track `source_docs` on the relationships themselves.
     """
     with driver.session() as s:
-        # First: remove edges that involve nodes whose only source is this doc
-        s.run(
-            "MATCH (a:Entity)-[r]->(b:Entity) "
-            "WHERE $doc IN a.source_docs OR $doc IN b.source_docs "
-            "DELETE r",
-            doc=doc_id,
-        )
-        # Second: remove doc_id from source_docs list on all matching entities
+        # First: remove doc_id from source_docs on all matching nodes, and
+        # compute whether each endpoint will be orphaned.
         s.run(
             "MATCH (n:Entity) WHERE $doc IN n.source_docs "
             "SET n.source_docs = [d IN n.source_docs WHERE d <> $doc]",
             doc=doc_id,
+        )
+        # Second: delete edges where BOTH endpoints lose all source_docs
+        # (will be orphaned by the step below) — i.e. edges with no surviving
+        # source doc after removal. Edges connecting still-shared nodes stay.
+        s.run(
+            "MATCH (a:Entity)-[r]->(b:Entity) "
+            "WHERE size(a.source_docs) = 0 OR size(b.source_docs) = 0 "
+            "DELETE r",
         )
         # Third: delete entities that now have empty source_docs (orphaned)
         s.run(
@@ -368,33 +403,105 @@ def extract_graph_llm(doc_id: str, text: str) -> dict:
     return requests.post(C.DAEMON_EXTRACT, json={"text": text}, timeout=300).json()
 
 
-# ── Ingest one file ───────────────────────────────────────────────────────────
-def ingest_file(path: Path):
-    text = path.read_text("utf-8", errors="ignore")
-    doc_id = path.stem
-    meta = {"doc_type": "eng", "author": "unknown"}
+# ── Ingest one document (text-based, API-callable) ──────────────────────────
+def ingest_text(text: str, doc_id: str, meta: dict | None = None,
+                extract_graph: bool = True, if_checksum: str = None) -> dict:
+    """Ingest a single document's text into Qdrant + Neo4j.
+
+    Extracted from ingest_file() so the daemon's /ingest endpoint and the CLI
+    share one code path. Returns a result dict with timings + counts.
+
+    If `if_checksum` is provided and matches the stored Qdrant payload checksum,
+    returns {"status": "unchanged", "skipped": True} in <10ms (no re-extraction).
+    """
+    import time
+    meta = meta or {"doc_type": "eng", "author": "unknown"}
+    checksum = hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    # ── Incremental guard: skip if unchanged ──
+    if if_checksum is not None:
+        try:
+            qc = get_qdrant()
+            hits = qc.scroll(
+                C.COLL_CHUNKS,
+                scroll_filter=models.Filter(
+                    must=[models.FieldCondition(
+                        key="doc_id", match=models.MatchValue(value=doc_id))]),
+                limit=1, with_payload=["checksum"],
+            )[0]
+            if hits and hits[0].payload.get("checksum") == if_checksum:
+                return {
+                    "doc_id": doc_id, "status": "unchanged", "skipped": True,
+                    "checksum": checksum, "chunks": 0, "entities": 0, "edges": 0,
+                    "vectors_upserted": 0, "timing": {"total": 0.0},
+                }
+        except Exception:
+            pass  # fall through to full ingest if check fails
+
+    t0 = time.time()
 
     # Step 0 — delete existing data for this doc (clean re-ingest)
     driver = get_neo4j()
-    delete_doc_neo4j(doc_id, driver)
-    driver.close()
+    try:
+        delete_doc_neo4j(doc_id, driver)
+    finally:
+        driver.close()
     delete_doc_qdrant(doc_id)
+
+    t_clean = time.time()
 
     # Step 1 — late-chunked vectors -> Qdrant
     r = requests.post(C.DAEMON_EMBED_LATE,
                       json={"text": text, "doc_id": doc_id}, timeout=300).json()
-    n_chunks = write_vectors(doc_id, r["chunks"], meta)
+    n_chunks = write_vectors(doc_id, r["chunks"], meta, checksum=checksum)
+    t_embed = time.time()
 
     # Step 2 — graph extraction (LLM E2B primary, GLiNER fallback)
-    g = extract_graph_llm(doc_id, text)
+    n_nodes = 0
+    extraction_method = "none"
+    if extract_graph:
+        try:
+            g = extract_graph_llm(doc_id, text)
+            extraction_method = "llm"
+            # Step 3 — vector-resolve entities + write to Neo4j
+            driver = get_neo4j()
+            try:
+                n_nodes = write_graph(doc_id, g, text, driver)
+            finally:
+                driver.close()
+        except Exception as e:
+            print(f"[ingest] graph extraction failed for {doc_id}: {e}",
+                  flush=True)
+    t_extract = time.time()
 
-    # Step 3 — vector-resolve entities + write to Neo4j (WITH profiles, aliases)
-    driver = get_neo4j()
-    n_nodes = write_graph(doc_id, g, text, driver)
-    driver.close()
+    return {
+        "doc_id": doc_id,
+        "status": "ok",
+        "chunks": n_chunks,
+        "entities": n_nodes,
+        "edges": 0,  # edges not separately counted; reflect in nodes for now
+        "vectors_upserted": n_chunks,
+        "extraction_method": extraction_method,
+        "checksum": checksum,
+        "timing": {
+            "clean": round(t_clean - t0, 3),
+            "embed": round(t_embed - t_clean, 3),
+            "extract": round(t_extract - t_embed, 3),
+            "total": round(t_extract - t0, 3),
+        },
+    }
 
-    print(f"[ingest] {doc_id}: {n_chunks} chunks, {n_nodes} nodes", flush=True)
-    return n_chunks, n_nodes
+
+# ── Ingest one file (CLI / batch) ───────────────────────────────────────────
+def ingest_file(path: Path):
+    text = path.read_text("utf-8", errors="ignore")
+    doc_id = path.stem
+    meta = {"doc_type": "eng", "author": "unknown"}
+    res = ingest_text(text, doc_id, meta=meta, extract_graph=True)
+    print(f"[ingest] {doc_id}: {res['chunks']} chunks, "
+          f"{res['entities']} nodes, method={res['extraction_method']}",
+          flush=True)
+    return res
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

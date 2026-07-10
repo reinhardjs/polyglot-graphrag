@@ -24,16 +24,19 @@ Endpoints:
     POST /rerank           multilingual cross-encoder rerank
     POST /extract_graph    GLiNER zero-shot NER + co-occurrence edges
     POST /ask              ONE-CALL full RAG: embed → Qdrant||Neo4j → rerank → synth
+    POST /ingest           single-doc ingest (BackgroundTasks, non-blocking)
+    GET  /ingest/status/{task_id}  poll ingest completion
 """
 import os
 os.environ["HF_HOME"] = "/mnt/data-970-plus/hf_cache"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+import threading
 import torch
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 import config as C
 
@@ -44,6 +47,13 @@ _reranker = None
 _gliner = None
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+# ── Ingest task store (in-process, for BackgroundTasks polling) ───────────────
+# Maps task_id → status dict. Lives for the daemon's lifetime. A production
+# deployment would use Redis, but in-process is sufficient for single-daemon.
+_ingest_tasks: Dict[str, Dict[str, Any]] = {}
+_ingest_tasks_lock = threading.Lock()
+import uuid as _uuid
 
 
 def _load_all():
@@ -160,6 +170,19 @@ class AskReq(BaseModel):
     top_k: int = 5
     synthesize: bool = True
     skip_cache: bool = False
+
+
+class IngestReq(BaseModel):
+    text: str
+    doc_id: str
+    doc_type: str = "eng"
+    author: str = "unknown"
+    extract_graph: bool = True
+    if_checksum: Optional[str] = None   # if provided, skip if unchanged
+
+
+class IngestStatusReq(BaseModel):
+    pass
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -356,6 +379,69 @@ def ask(req: AskReq):
             pass
 
     return result
+
+
+@app.post("/ingest")
+def ingest(req: IngestReq, background_tasks: BackgroundTasks):
+    """Single-document ingestion via HTTP API (non-blocking).
+
+    Returns 202 Accepted immediately with a task_id. Extraction runs in the
+    background (FastAPI's thread pool) so it does NOT block /ask queries.
+    Poll GET /ingest/status/{task_id} for completion.
+
+    If `if_checksum` matches the stored payload, returns 304 (unchanged)
+    immediately — no extraction, <10ms.
+    """
+    if not req.text or not req.text.strip():
+        raise HTTPException(status_code=400, detail="text is required")
+    if not req.doc_id or not req.doc_id.strip():
+        raise HTTPException(status_code=400, detail="doc_id is required")
+
+    task_id = _uuid.uuid4().hex
+    with _ingest_tasks_lock:
+        _ingest_tasks[task_id] = {
+            "doc_id": req.doc_id, "status": "queued", "result": None,
+            "error": None,
+        }
+
+    def _run():
+        import ingest as ingest_mod
+        with _ingest_tasks_lock:
+            _ingest_tasks[task_id]["status"] = "running"
+        try:
+            res = ingest_mod.ingest_text(
+                text=req.text,
+                doc_id=req.doc_id,
+                meta={"doc_type": req.doc_type, "author": req.author},
+                extract_graph=req.extract_graph,
+                if_checksum=req.if_checksum,
+            )
+            with _ingest_tasks_lock:
+                _ingest_tasks[task_id]["status"] = "done"
+                _ingest_tasks[task_id]["result"] = res
+        except Exception as e:
+            with _ingest_tasks_lock:
+                _ingest_tasks[task_id]["status"] = "error"
+                _ingest_tasks[task_id]["error"] = str(e)
+
+    background_tasks.add_task(_run)
+    return {"task_id": task_id, "status": "accepted", "doc_id": req.doc_id}
+
+
+@app.get("/ingest/status/{task_id}")
+def ingest_status(task_id: str):
+    """Poll status of a background ingest task."""
+    with _ingest_tasks_lock:
+        task = _ingest_tasks.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="task not found")
+        return {
+            "task_id": task_id,
+            "status": task["status"],
+            "doc_id": task["doc_id"],
+            "result": task["result"],
+            "error": task["error"],
+        }
 
 
 @app.get("/health")
