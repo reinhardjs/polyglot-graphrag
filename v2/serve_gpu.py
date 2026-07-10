@@ -26,6 +26,7 @@ Endpoints:
     POST /ask              ONE-CALL full RAG: embed → Qdrant||Neo4j → rerank → synth
     POST /ingest           single-doc ingest (BackgroundTasks, non-blocking)
     GET  /ingest/status/{task_id}  poll ingest completion
+    DELETE /ingest/{doc_id}        remove a document (Qdrant + Neo4j)
 """
 import os
 os.environ["HF_HOME"] = "/mnt/data-970-plus/hf_cache"
@@ -442,6 +443,55 @@ def ingest_status(task_id: str):
             "result": task["result"],
             "error": task["error"],
         }
+
+
+@app.delete("/ingest/{doc_id}")
+def delete_ingest(doc_id: str):
+    """Remove a document from Qdrant + Neo4j in one call.
+
+    Uses the same delete-before-reingest logic as batch ingest. Returns counts
+    of deleted vectors / cleaned nodes. 404 if the document does not exist.
+    """
+    import ingest as ingest_mod
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+    # ── Check existence (Qdrant payload) ──
+    qc = ingest_mod.get_qdrant()
+    existing = qc.scroll(
+        C.COLL_CHUNKS,
+        scroll_filter=Filter(
+            must=[FieldCondition(key="doc_id",
+                                 match=MatchValue(value=doc_id))]),
+        limit=1, with_payload=False,
+    )[0]
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"doc_id '{doc_id}' not found")
+
+    vectors_deleted = len(existing)
+
+    # ── Neo4j: count + clean edges + orphaned nodes for this doc ──
+    driver = ingest_mod.get_neo4j()
+    nodes_cleaned = 0
+    try:
+        with driver.session() as s:
+            r = s.run(
+                "MATCH (n:Entity) WHERE $doc IN n.source_docs "
+                "RETURN count(n) AS c", doc=doc_id,
+            ).single()
+            nodes_cleaned = r["c"] if r else 0
+        ingest_mod.delete_doc_neo4j(doc_id, driver)
+    finally:
+        driver.close()
+
+    # ── Qdrant: delete all points for doc_id ──
+    ingest_mod.delete_doc_qdrant(doc_id)
+
+    return {
+        "doc_id": doc_id,
+        "status": "deleted",
+        "vectors_deleted": vectors_deleted,
+        "nodes_cleaned": nodes_cleaned,
+    }
 
 
 @app.get("/health")
