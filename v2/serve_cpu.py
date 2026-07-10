@@ -38,11 +38,8 @@ def _load_jina():
         if C.EMBED_TRUST_REMOTE:
             load_kw["trust_remote_code"] = True
         _jina = SentenceTransformer(C.EMBED_MODEL_NAME, **load_kw)
-        if C.EMBED_USE_HALF:
-            try:
-                _jina = _jina.half()
-            except Exception:
-                pass
+        # NOTE: NEVER call .half() on CPU — fp16 on x86 destroys perf.
+        # EMBED_USE_HALF is for GPU only; CPU runs fp32.
         # Warm
         ekw = {}
         if C.EMBED_TASK_PASSAGE:
@@ -53,18 +50,15 @@ def _load_jina():
 
 
 def _load_reranker():
-    """Lazy-load the reranker (identity from config)."""
+    """Lazy-load the CPU-optimized reranker (RERANK_MODEL_NAME_CPU from config)."""
     global _reranker
     if _reranker is None:
         from sentence_transformers import CrossEncoder
-        print(f"[cpu-daemon] loading reranker: {C.RERANK_MODEL_NAME} ...",
+        print(f"[cpu-daemon] loading reranker: {C.RERANK_MODEL_NAME_CPU} ...",
               flush=True)
-        _reranker = CrossEncoder(C.RERANK_MODEL_NAME)
-        if C.RERANK_USE_HALF:
-            try:
-                _reranker = _reranker.half()
-            except Exception:
-                pass
+        _reranker = CrossEncoder(C.RERANK_MODEL_NAME_CPU)
+        # NOTE: NEVER call .half() on CPU — RERANK_USE_HALF is for GPU only.
+        # fp16 on x86 destroys cross-encoder perf (every matmul upcasts).
         _reranker.predict([("warm", "warm")])
         print(f"[cpu-daemon] reranker loaded", flush=True)
     return _reranker
@@ -201,8 +195,10 @@ def ask(req: AskReq):
     t2 = threading.Thread(target=lambda: g_res.extend(rag.neo4j_subgraph(req.query)))
     t1.start(); t2.start(); t1.join(); t2.join()
 
-    # 3. Fuse + rerank (CPU)
+    # 3. Fuse + cap + rerank (CPU-optimized)
     pool = list(dict.fromkeys(q_res + g_res))
+    if C.RERANK_CPU_POOL_CAP and len(pool) > C.RERANK_CPU_POOL_CAP:
+        pool = pool[:C.RERANK_CPU_POOL_CAP]
     if not pool:
         return {"query": req.query, "n_contexts": 0, "contexts": [], "answer": ""}
     reranker = _load_reranker()
@@ -236,8 +232,8 @@ def models():
             "task_query": C.EMBED_TASK_QUERY,
         },
         "reranker": {
-            "name": C.RERANK_MODEL_NAME,
-            "half": C.RERANK_USE_HALF,
+            "name": C.RERANK_MODEL_NAME_CPU,
+            "pool_cap": C.RERANK_CPU_POOL_CAP,
         },
         "gliner": C.GLINER_MODEL_NAME,
         "extraction": {

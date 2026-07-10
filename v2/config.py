@@ -93,8 +93,16 @@ EMBED_MAX_LENGTH      = 32768   # max input tokens (None = model default)
 EMBED_MATRYOSHKA_DIM  = None    # for models supporting MRL (Jina v4: 128-2048)
 
 # ── Reranker ───────────────────────────────────────────────────────────────────
+# GPU daemon (serve_gpu.py): full model, no pool cap. CUDA tensor cores handle
+# the full 568M params on 27+ docs at ~61ms — no compromise needed.
 RERANK_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
 RERANK_USE_HALF    = True    # fp16 conversion
+
+# CPU fallback (serve_cpu.py): lighter model + capped pool. BGE-base at 278M
+# params is 2.7× faster than v2-m3 on CPU. Capping the fused pool to 10 docs
+# keeps rerank under 500ms so the i5 doesn't freeze.
+RERANK_MODEL_NAME_CPU = "BAAI/bge-reranker-v2-m3"   # same as GPU, capped pool delivers speed
+RERANK_CPU_POOL_CAP   = 10  # only rerank top-N from fused Qdrant+Neo4j pool
 
 # ── GLiNER (NER fallback) ──────────────────────────────────────────────────────
 GLINER_MODEL_NAME = "urchade/gliner_multi-v2.1"
