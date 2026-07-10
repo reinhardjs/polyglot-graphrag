@@ -43,9 +43,16 @@ rag-system/
 │   ├── README.md                # Project README
 │   └── sample_data/             # 5 engineering docs
 ├── docs/
-│   ├── architecture.md          # Architecture decisions + VRAM budget
-│   ├── hermes-integration.md    # Hermes plugin docs
-│   └── development.md           # This file
+│   ├── architecture.md             # Architecture decisions + VRAM budget
+│   ├── full-architecture.md        # Expanded architecture with data flows
+│   ├── full-benchmark-history.md   # All benchmarks, pool cap sweep, model alternatives
+│   ├── cpu-vs-gpu-benchmark.md     # serve_gpu vs serve_cpu detailed comparison
+│   ├── hermes-integration.md       # Hermes plugin docs
+│   ├── ingest-endpoint-plan.md     # /ingest endpoint plan + frequent-update strategy
+│   └── development.md              # This file
+├── v2/
+│   ├── MODEL_SWITCHING.md          # Ready-made config snippets for 5 model families
+│   └── ...
 ├── logs/                        # Runtime logs (gitignored)
 ├── CHANGELOG.md                 # Version history
 └── docker-compose.yml           # Qdrant + Neo4j

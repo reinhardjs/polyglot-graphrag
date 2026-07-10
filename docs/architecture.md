@@ -102,19 +102,19 @@ CUDA context + overhead  | 0.5       |                          |
 ```
 > GLiNER not in this total — only loaded if `/extract_graph` is called (ingest fallback), adding ~1.6 GB.
 
-## Performance (RTX 3060, all models on GPU)
+## Performance (RTX 3060, all models on GPU, v2.4.1)
 
-| Stage | Cold | Cache hit |
-|-------|------|-----------|
-| embed (Jina, GPU) | 0.09s | — |
-| qdrant search | 0.04s | — |
-| neo4j subgraph | 0.01s | — |
-| rerank (BGE, GPU) | 0.12s | — |
-| **retrieval total** | **0.29s** | — |
-| synthesis (E4B) | 6.35s | 0s |
-| **full pipeline** | **6.64s** | **0.13s** |
+| Stage | GPU (serve_gpu.py) | CPU (serve_cpu.py, standalone) |
+|-------|-------------------|-------------------------------|
+| embed (Jina v3) | 0.056s | 0.776s |
+| Qdrant search | 0.039s | 0.039s |
+| Neo4j subgraph | 0.006s | 0.006s |
+| rerank (BGE v2-m3) | 0.061s (27 docs) | 1.376s (15 docs, capped) |
+| **retrieval total** | **0.162s** | **2.197s** |
+| synthesis (E4B) | 3.7–8.6s | same (same E4B endpoint) |
+| **full pipeline** | **3.9–8.8s** | **5.9–11.4s** |
 
-96% of cold latency is E4B generation. Cache hit is 50× faster than cold.
+Cache hit (synthesize=true): <0.01s — 50× faster than cold.
 
 ## Key design decisions
 
@@ -140,8 +140,13 @@ CUDA context + overhead  | 0.5       |                          |
 
 11. **Vector-driven entity resolution** — replaced hardcoded CANON_MAP with Jina v3's cross-lingual embeddings stored in Neo4j's native vector index (5.x). Entities are extracted VERBATIM by E2B (no forced translation). Each entity name is embedded, and `db.index.vector.queryNodes()` finds the closest existing entity. Above ENTITY_RESOLUTION_THRESHOLD (0.88 cosine) → reuse existing node + append alias. Below → new canonical entity. "Basis Data" (ID), "Database" (EN), and "Base de Datos" (ES) converge automatically. Aliases preserved for audit trail. `source_docs[]` list tracks multi-document provenance safely.
 
+12. **Dual-architecture reranking** — same BGE v2-m3 model on both GPU and CPU daemons. GPU path: full 27-doc pool at 61ms (CUDA tensor cores). CPU path: pool capped to 15 docs at 1.4s (config: `RERANK_CPU_POOL_CAP`). Same model, same quality — cap delivers speed without model downgrade. Pool cap value proven via 5→27 doc sweep (cap=15 hits 4.5/5 overlap with full reference).
+
+13. **Fully modular config** — every model-specific behavior is a config flag, not hardcoded. `EMBED_TRUST_REMOTE`, `EMBED_USE_HALF`, `EMBED_TASK_PASSAGE`, `EMBED_TASK_QUERY`, `RERANK_USE_HALF`, `EXTRACTION_READS_REASONING`. Swap any component by editing config.py — no code changes. `GET /models` endpoint returns current identity + flags for verification.
+
 ## Known gaps
 
 - Edge types are almost all `ASSOCIATED_WITH` (E2B JSON tends to omit relationship semantics — GLiNER fallback co-occurrence is the safety net).
 - Entity resolution threshold (0.88) is a tunable constant — higher reduces false merges, lower connects more variants.
 - No multi-turn conversation support (each query is stateless).
+- **No incremental ingest** — currently batch-only (ingest.py rebuilds all). `/ingest` endpoint planned (see `docs/ingest-endpoint-plan.md`) for single-doc updates. Frequent engineering doc changes need this + optional file-watcher.

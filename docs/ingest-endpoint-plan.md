@@ -1,16 +1,22 @@
-# Plan: `/ingest` Endpoint — Unified RAG Daemon
+# Plan: `/ingest` Endpoint — Incremental Knowledge Base Updates
 
-**Status:** planned (not implemented)  
-**Target:** v2.3.0  
-**Created:** 2026-07-10  
+**Status:** planned, prioritized for frequent doc updates  
+**Target:** v2.5.0  
+**Created:** 2026-07-10, updated 2026-07-10
 
 ---
 
-## Goal
+## Why this matters now
 
-Add a `POST /ingest` endpoint to `serve_gpu.py` so the daemon handles the full
-system — both read (`/ask`) and write (`/ingest`) paths — from a single process.
-Eliminates the need for `ingest.py` + `run.sh` batch workflow in day-to-day use.
+Engineering docs change frequently — bugs get updated, ADRs get amended, PRs merge.
+Current flow: `bash run.sh ingest sample_data` rebuilds everything (batch, 5 docs = ~72s).
+For 50+ docs with hourly changes, this is unsustainable.
+
+The `/ingest` endpoint enables:
+- **Single-doc ingest** — only the changed document is re-extracted and re-embedded
+- **Single-doc delete** — remove a doc from Qdrant + Neo4j in one call
+- **CI/CD pipeline friendly** — `curl -X POST :8000/ingest` from any build step
+- **File-watcher potential** — daemon or cron watches a directory, auto-ingests changes
 
 ## API contract
 
@@ -183,3 +189,71 @@ Neo4j MERGE is idempotent. The impact is ≤1 retrieval result being stale for <
 - `ingest.py` already imports `qdrant_client`, `neo4j`, `requests` (E2B) — all present in rag-env.
 - No new packages needed.
 - E2B must be running (:8082). If E2B is down, GLiNER fallback covers extraction (no LLM nodes, heuristic edges only).
+
+## Frequent Update Strategy
+
+### Problem
+
+Engineering docs change frequently. Re-running full batch ingest for every
+change is wasteful — E2B extraction is expensive (~12s/doc), and re-embedding
+unchanged text is pointless.
+
+### Strategy: checksum-based incremental ingest
+
+```
+                     ┌──────────────────┐
+                     │  File watcher    │  (cron, inotify, CI webhook)
+                     │  detects change  │
+                     └────────┬─────────┘
+                              │
+                     ┌────────▼─────────┐
+                     │  Compute SHA-256 │
+                     │  of doc content  │
+                     └────────┬─────────┘
+                              │
+              ┌───────────────▼───────────────┐
+              │  Compare with stored checksum │
+              │  (Qdrant payload.checksum)    │
+              └───────────────┬───────────────┘
+                              │
+                   ┌──────────▼──────────┐
+                   │  Same checksum?     │
+                   └──────┬──────┬───────┘
+                     YES  │      │  NO
+                          │      │
+                   ┌──────▼─┐  ┌─▼──────────────────┐
+                   │  SKIP  │  │  POST /ingest      │
+                   │  (0s)  │  │  (re-extract +     │
+                   └────────┘  │   re-embed + write)│
+                               └────────────────────┘
+```
+
+1. **Store checksum with each doc** — `ingest.py` already writes to Qdrant with `payload.doc_id`. Add `payload.checksum = sha256(text)`.
+
+2. **`GET /ingest/{doc_id}/checksum`** — returns stored checksum. File-watcher compares before deciding to POST.
+
+3. **`POST /ingest` with `if_changed: true`** — daemon compares checksum before extraction. If unchanged, returns `{"status": "unchanged", "skipped": true}` in <10ms.
+
+4. **Batch revalidate** — `POST /ingest/revalidate` sends a list of `{doc_id: checksum}` pairs. Daemon compares all, returns list of only the changed ones. Caller then ingests only those.
+
+### Integration with CI/CD
+
+```bash
+# In CI pipeline, after markdown docs are updated:
+for f in docs/engineering/*.md; do
+  doc_id=$(basename "$f" .md)
+  checksum=$(sha256sum "$f" | cut -d' ' -f1)
+  curl -s -X POST http://rag:8000/ingest \
+    -H "Content-Type: application/json" \
+    -d "{\"text\":\"$(cat $f)\",\"doc_id\":\"$doc_id\",\"if_checksum\":\"$checksum\"}"
+done
+```
+
+### File-watcher cron script
+
+A Hermes cron job or a simple bash script that:
+1. Watches `/mnt/data-970-plus/rag-system/v2/sample_data/` (or a configurable dir)
+2. On file change → compute checksum → compare with stored → POST /ingest if changed
+3. Runs every 5 minutes or on inotify trigger
+
+This keeps the knowledge base in sync with the engineering docs without manual intervention.
