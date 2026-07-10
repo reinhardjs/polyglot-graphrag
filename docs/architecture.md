@@ -151,3 +151,4 @@ Cache hit (synthesize=true): <0.01s — 50× faster than cold.
 - No multi-turn conversation support (each query is stateless).
 - **No incremental ingest** — currently batch-only (ingest.py rebuilds all). `/ingest` endpoint planned (see `docs/ingest-endpoint-plan.md`) for single-doc updates. Frequent engineering doc changes need this + optional file-watcher.
 - **Single-domain only** — Qdrant collection is hardcoded to `engineering_chunks`. Multi-domain support (legal, hospitality, accounting, etc.) is planned via namespace-based collections and Neo4j domain labels (see `docs/multi-domain-plan.md`).
+- **Domain-agnostic gaps** — 11 hardcoded assumptions prevent drop-in use for medical diagnosis, legal research, accounting, etc. (entity types in prompts, chunking strategy, metadata schema, edge types). Domain profile system (.toml per domain) planned (see `docs/general-purpose-rag-plan.md`).
