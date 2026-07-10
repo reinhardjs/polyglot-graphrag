@@ -1,0 +1,172 @@
+# System Context
+
+Single reference document for the GraphRAG Engineering Knowledge Base.
+
+---
+
+## 1. What It Does
+
+Ingests engineering documents (ADRs, Jira tickets, PRs, wikis) into a dual-store
+system — Qdrant (vector) + Neo4j (graph) — then answers multi-hop questions
+by routing through hybrid search or graph traversal, reranking the context,
+and synthesizing a final answer with Gemma 4 12B.
+
+All data on `/mnt/data-970-plus` (458 GB NVMe).
+
+---
+
+## 2. Architecture Overview
+
+```
+INGESTION                              RETRIEVAL
+─────────                              ─────────
+Raw doc ──→ Sentence split             User query
+            │                              │
+            ├──→ Jina v3 ──→ Qdrant        ├──→ Jina v3 embed
+            │    (1024-d vectors)          │    (query vector)
+            │                              │
+            └──→ Regex ──→ Neo4j           ├──→ Semantic cache? → return
+                 (entities + rels)         │       │ no
+                                           │       ↓
+                                           ├──→ MiniLM router
+                                           │     /        \
+                                           │  vector     graph
+                                           │  search   traversal
+                                           │     \        /
+                                           │    bge-reranker
+                                           │         │
+                                           └──→ Gemma 4 12B → answer
+```
+
+---
+
+## 3. All Components
+
+| # | Component | Model | Role | Size | Device |
+|---|-----------|-------|------|------|--------|
+| 1 | Embedding | `jinaai/jina-embeddings-v3` | Convert sentences → vectors | 5.4 GB | CPU |
+| 2 | Routing | `all-MiniLM-L6-v2` | Classify query intent (graph vs vector) | 881 MB | CPU |
+| 3 | Reranker | `BAAI/bge-reranker-base` | Score + condense retrieved passages | 3.2 GB | CPU |
+| 4 | LLM | `Gemma 4 12B QAT Q4_0` | Generate final answer from context | 6.5 GB | GPU |
+| 5 | Extraction | Regex (deterministic) | Parse entities + relationships from docs | — | CPU |
+| 6 | Vector DB | Qdrant (Docker) | Store + search sentence vectors | — | `:6333` |
+| 7 | Graph DB | Neo4j (Docker) | Store + traverse entity nodes | — | `:7687` |
+
+---
+
+## 4. The LLM Limitation (Why Extraction Uses Regex)
+
+**The problem:** Gemma 4 12B is a reasoning model. When asked to produce JSON:
+
+1. It starts thinking in `reasoning_content` (its chain-of-thought)
+2. It never finishes thinking before hitting the token cap
+3. `content` (the final answer) comes back empty
+4. The `enable_thinking: False` parameter is NOT honored by this llama-server
+   build
+5. Result: Gemma cannot produce any structured output
+
+**Impact on Neo4j graph extraction:** The ingestion pipeline (`ingest.py`
+→ `llm_extract()`) tries to call Gemma first. It always fails. The regex
+fallback (`_extract_rulebased()`) runs every time, producing ~37 entities
+from 4 sample docs.
+
+**Impact on KV profiles:** Same issue. KV profiles are extracted as
+sentence-windows from the source doc (`_doc_profile()`), not LLM-generated.
+
+**Impact on answer generation:** This works fine. Gemma takes condensed
+context and produces a natural-language answer. It doesn't need to output
+JSON — just readable text.
+
+---
+
+## 5. Future Improvement: Swap the LLM for Extraction
+
+To get LLM-based graph extraction (which would capture entities the regex
+misses), swap Gemma for a **non-reasoning instruct model** that produces
+clean JSON.
+
+**Models already on disk that would work:**
+
+| Model | File | Size | Systemd Service |
+|-------|------|------|-----------------|
+| Granite 4.1 8B | `granite-4.1-8b-Q4_K_M.gguf` | ~4.5 GB | Use gemma-4-12b.service (edit model path) |
+| Gemma 4 E4B 4B | `gemma-4-E4B-it-Q4_K_M.gguf` | ~2.5 GB | `gemma-4-e4b.service` |
+| Gemma 4 E4B QAT | `gemma-4-E4B-it-QAT-Q4_0.gguf` | ~2.5 GB | `gemma-4-e4b.service` |
+| Gemma 4 E2B QAT | `gemma-4-E2B-it-QAT-Q4_0.gguf` | ~1.5 GB | `gemma-4-e2b.service` |
+
+**Steps to enable LLM extraction:**
+
+```bash
+# 1. Stop current Gemma
+sudo systemctl stop gemma-4-12b.service
+
+# 2. Edit service to point at new model
+sudo sed -i 's|gemma-4-12B-it-QAT-Q4_0.gguf|granite-4.1-8b-Q4_K_M.gguf|g' \
+  /etc/systemd/system/gemma-4-12b.service
+
+# 3. Start the new model
+sudo systemctl daemon-reload
+sudo systemctl start gemma-4-12b.service
+
+# 4. Re-ingest (now uses LLM for extraction)
+bash run.sh ingest-folder /mnt/data-970-plus/rag-system/data
+```
+
+**Code path:** `ingest.py` → `llm_extract()` → calls model via OpenAI SDK.
+If model returns valid JSON with `"entities"` key, it uses that. Otherwise
+falls back to regex. The prompt template (`_EXTRACT_PROMPT`) and profile
+prompt (`_PROFILE_PROMPT`) are already in place.
+
+---
+
+## 6. Current Data State
+
+| Store | Count |
+|-------|-------|
+| Qdrant chunks | 51 (13+10+9+19) |
+| Neo4j entities | 37 (10+9+9+9) |
+| Neo4j relationships | ~13 |
+
+---
+
+## 7. Running Services
+
+| Service | Port | Status | VRAM |
+|---------|------|--------|------|
+| Gemma 4 12B | `:8083` | Running | 9,855 MiB |
+| Qdrant | `:6333` | Docker | — |
+| Neo4j | `:7687` | Docker | — |
+
+**Start/Stop commands:**
+
+```bash
+sudo systemctl start gemma-4-12b.service
+docker compose up -d                    # Qdrant + Neo4j
+docker compose down                     # Stop DBs
+```
+
+---
+
+## 8. CLI Commands
+
+| Command | Purpose |
+|---------|---------|
+| `bash run.sh ingest <file> [--type ADR] [--author alice]` | Ingest one document |
+| `bash run.sh ingest-folder <dir>` | Ingest all docs in folder |
+| `bash run.sh ask "<question>"` | Answer one question |
+| `bash run.sh serve` | Interactive REPL (models load once) |
+
+---
+
+## 9. Known Gaps
+
+| Gap | Detail | Workaround |
+|-----|--------|------------|
+| No LLM extraction | Gemma is reasoning model → regex fallback | Swap to Granite 8B (on disk) |
+| Graph path misses content | Some queries route to graph, neighbor KV profiles lack answer | Tune router intents or add vector fallback |
+| No native Jina late_chunking | Per-sentence embed, not global-context | Use Jina API with `JINA_API_KEY` |
+| Cold start per query | ~20s loading 3 models | Use `serve` REPL |
+
+---
+
+*Generated: July 2026*

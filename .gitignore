@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Environments
+rag-env/
+venv/
+env/
+
+# HuggingFace cache (large, ephemeral)
+hf_cache/
+
+# Runtime logs
+logs/
+
+# Qdrant data
+qdrant_storage/
+qdrant_data/
+
+# Neo4j data
+neo4j_data/
+neo4j_logs/
+
+# PID files
+*.pid
+/tmp/rag_*.pid
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (Neo4j password, API keys, etc.)
+.env
+*.secret
+
+# Temporary files
+/tmp/*
+!/.gitkeep
+
+# Benchmark outputs
+*.bench
