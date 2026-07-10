@@ -5,14 +5,18 @@ Production-grade, 100% LOCAL. ALL models run on GPU (RTX 3060, 12 GB):
   E2B extraction (:8082, systemd)   ≈ 1.5 GB
   E4B synthesis  (:8084, systemd)   ≈ 3.0 GB
   Auxiliary models (:8000, serve_gpu.py FastAPI daemon, fp16 preloaded at startup):
-    Jina v3, MiniLM, BGE reranker-v2-m3 ≈ 4.1 GB (GLiNER lazy-loaded on demand)
+    Jina v3, BGE reranker-v2-m3 ≈ 4.0 GB (GLiNER lazy-loaded on demand)
   ────────────────────────────────────────────────────────────────────
-  Total GPU                            ≈ 10.7 GB  (1.5 GB headroom)
+  Total GPU                      ≈ 10.6 GB  (1.4 GB headroom)
+
+Entity resolution is vector-driven via Jina v3's cross-lingual embeddings
+stored in Neo4j. No hardcoded CANON_MAP — "Basis Data", "Database", and
+"Base de Datos" all converge to the same entity automatically.
 
 serve_cpu.py is a CPU-only fallback for machines without CUDA torch.
 serve_gpu.py is the primary daemon (loaded at startup, GPU-resident).
 
-The daemon now exposes a unified /ask endpoint that runs the full pipeline
+The daemon exposes a unified /ask endpoint that runs the full pipeline
 server-side (embed → Qdrant||Neo4j → rerank → E4B synthesis) in ONE HTTP call.
 """
 import os
@@ -36,7 +40,7 @@ NEO4J_USER     = "neo4j"
 NEO4J_PASSWORD = "ragpassword123"
 
 # ── GPU Auxiliary Daemon (FastAPI) ──────────────────────────────────────────
-# serve_gpu.py preloads Jina v3, MiniLM, BGE reranker on GPU at startup.
+# serve_gpu.py preloads Jina v3 and BGE reranker on GPU at startup.
 # GLiNER is lazy-loaded only on first /extract_graph call (ingest fallback).
 # Override with RAG_DAEMON_URL env var for remote agents.
 DAEMON_URL = os.environ.get("RAG_DAEMON_URL", "http://127.0.0.1:8000")
@@ -79,24 +83,10 @@ GLINER_LABELS = [
 ]
 GLINER_THRESHOLD = 0.4
 
-# ── Multilingual canonicalisation (Indonesian -> canonical English) ───────────
-CANON_MAP = {
-    "basis data": "Database",
-    "pangkalan data": "Database",
-    "jaringan": "Network",
-    "pengembang": "Developer",
-    "pembuat": "Developer",
-    "kerangka kerja": "Framework",
-    "layanan mikro": "Microservice",
-    "layanan": "Service",
-    "api": "API",
-    "metrik": "Metric",
-    "komponen": "Component",
-    "basisdata": "Database",
-    "servis": "Service",
-    "cerita": "Bug",
-    "gangguan": "Bug",
-    "kesalahan": "Bug",
-    "permintaan tarik": "PR",
-    "catatan desain": "ADR",
-}
+# ── Entity Resolution (vector-driven, language-agnostic) ─────────────────────
+# Replaces the hardcoded CANON_MAP. Entities extracted in their native language
+# (e.g. "Basis Data", "Database", "Base de Datos") are matched via Jina v3's
+# cross-lingual embeddings stored in Neo4j's vector index. The LLM is instructed
+# to extract verbatim — no translation required. Zero hardcoded translations.
+ENTITY_RESOLUTION_THRESHOLD = 0.88   # cosine similarity for entity merger
+ENTITY_VECTOR_INDEX = "entity_vector_idx"

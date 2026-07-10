@@ -73,7 +73,7 @@ All produce correct, sourced answers via `rag_query`:
 | who reviewed PR-482? | carol [1] |
 | what PR implemented ADR-014? | PR-482, reviewed by carol [1,3] |
 | how does checkout relate to billing per our ADRs? | billing depends on checkout; ADR-014 event-driven migration |
-| basis data apa yang digunakan ADR-021? | PostgreSQL [1,3] (multilingual, ID→EN via CANON_MAP) |
+| basis data apa yang digunakan ADR-021? | PostgreSQL [1,3] (multilingual, ID→EN via Jina v3 vector resolution) |
 
 ## Troubleshooting
 

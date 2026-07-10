@@ -161,7 +161,8 @@ def extract_graph(req: ExtractReq):
 
     GLiNER is a zero-shot NER model loaded on CUDA. It predicts entities of our
     GLiNER_LABELS; for each sentence we create ASSOCIATED_WITH edges between
-    co-occurring entities. The caller (ingest.py) canonicalises ID->EN.
+    co-occurring entities. The caller (ingest.py) resolves entity identities
+    via Jina v3 vector matching against Neo4j's vector index.
     """
     from config import GLINER_LABELS, GLINER_THRESHOLD
     import re
@@ -332,6 +333,32 @@ def on_startup():
                   flush=True)
     except Exception as e:
         print(f"[gpu-daemon] cache init skipped: {e}", flush=True)
+
+    # Ensure Neo4j vector index exists for entity resolution.
+    # This index powers language-agnostic entity merging: "Basis Data",
+    # "Database", and "Base de Datos" all converge via Jina v3's cross-lingual
+    # embedding space (>0.88 cosine → same entity, aliases merged).
+    try:
+        from neo4j import GraphDatabase
+        import config as C
+        driver = GraphDatabase.driver(
+            C.NEO4J_URI, auth=(C.NEO4J_USER, C.NEO4J_PASSWORD),
+        )
+        with driver.session() as s:
+            # Neo4j 5.x vector index syntax: CREATE IF NOT EXISTS
+            s.run(
+                "CREATE VECTOR INDEX $idx IF NOT EXISTS "
+                "FOR (n:Entity) ON (n.name_vector) "
+                "OPTIONS {indexConfig: {"
+                "  `vector.dimensions`: $dim,"
+                "  `vector.similarity_function`: 'cosine'"
+                "}}",
+                idx=C.ENTITY_VECTOR_INDEX, dim=C.VECTOR_DIM,
+            )
+            print(f"[gpu-daemon] Neo4j vector index '{C.ENTITY_VECTOR_INDEX}' "
+                  f"ready (dim={C.VECTOR_DIM}, cosine)", flush=True)
+    except Exception as e:
+        print(f"[gpu-daemon] Neo4j vector index init skipped: {e}", flush=True)
 
 
 if __name__ == "__main__":

@@ -154,8 +154,8 @@ def extract_graph(req: ExtractReq):
     from a small prompt (our GLINER_LABELS). It runs fully on CPU — no GPU
     memory, no LLM. For each sentence we collect predicted entities, then create
     an ASSOCIATED_WITH edge between every pair of entities sharing a sentence
-    (co-occurrence heuristic). The caller (ingest.py) canonicalises Indonesian
-    surface forms to English before writing to Neo4j.
+    (co-occurrence heuristic). The caller (ingest.py) resolves entities via
+    Jina v3 vector matching against Neo4j's vector index.
     """
     model = _load_gliner()
     from config import GLINER_LABELS, GLINER_THRESHOLD

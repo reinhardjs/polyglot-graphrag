@@ -33,10 +33,10 @@ Prerequisite: `rag-env` must have CUDA torch:
 
 | File | Purpose |
 |------|---------|
-| `config.py` | Ports, DB creds, GLiNER labels, CANON_MAP, token budgets, URLs |
+| `config.py` | Ports, DB creds, GLiNER labels, entity resolution threshold, token budgets, URLs |
 | `serve_gpu.py` | **Primary daemon.** Preloads Jina/BGE on GPU at startup. Exposes `/ask` (one-call RAG), `/embed_late`, `/embed_query`, `/rerank`, `/extract_graph`. |
 | `serve_cpu.py` | **CPU fallback.** Same API as `serve_gpu.py` but runs models on CPU (no CUDA torch). |
-| `ingest.py` | Late-embed → Qdrant, LLM extract (E2B :8082) → canonicalize → Neo4j. |
+| `ingest.py` | Late-embed → Qdrant, LLM extract (E2B :8082, verbatim) → vector-resolve (Jina v3 → Neo4j vector index) → Neo4j. |
 | `ask.py` | CLI client: embed → Qdrant‖Neo4j → rerank → E4B synthesis. Thin; all model work delegated to daemon/LLMs. |
 | `retrieve_json.py` | Headless retrieval: returns contexts as JSON. Used by Hermes rag plugin. |
 | `run.sh` | Orchestrator: serve/ingest/ask/retrieve/health/stop. |
@@ -144,7 +144,7 @@ hermes
 - `/ask` endpoint: retrieval-only ~0.29s, full synth ~6.6s, cache hit ~0.13s (50× speedup)
 - Route labels in every response: source, path (hybrid/qdrant/graph), hits per leg, rerank scores
 - Hermes plugin auto-invokes rag_query → sourced answers (bob/SEV-2, PR-482/carol, checkout↔billing)
-- Multilingual: Indonesian doc (adr-021) ingested; CANON_MAP maps ID→EN
+- Multilingual: Indonesian doc (adr-021) ingested; vector-driven entity resolution merges ID↔EN automatically (Jina v3 cross-lingual, >0.88 cosine in Neo4j) — no hardcoded translation map
 - Semantic cache stores/retrieves via Qdrant query_cache (>0.95 cosine)
 - Clean E4B output: answer field is reasoning-free, chain-of-thought debug-only
 - Delete-before-reingest: re-running ingest on a doc cleans stale data

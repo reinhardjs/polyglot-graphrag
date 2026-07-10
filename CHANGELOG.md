@@ -5,6 +5,33 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.3.0] — 2026-07-10 (Vector-Driven Entity Resolution)
+
+### Added
+- **Vector-driven entity resolution** — Neo4j native vector index (`entity_vector_idx`) for language-agnostic entity merging. Replaces all hardcoded CANON_MAP translations.
+- `ENTITY_RESOLUTION_THRESHOLD = 0.88` in config.py — cosine similarity cutoff for merging entities (tunable).
+- `ENTITY_VECTOR_INDEX = "entity_vector_idx"` in config.py — Neo4j vector index name.
+- Neo4j vector index auto-created at daemon startup (`CREATE VECTOR INDEX IF NOT EXISTS`).
+- `_embed_name()`, `_resolve_in_neo4j()`, `resolve_node_ids()` in ingest.py — pipeline for vector-based identity resolution.
+- Entity nodes now store `name_vector` (1024-dim Jina v3 embedding), `aliases[]` (audit trail of all merged names), and `source_docs[]` (multi-document provenance).
+- Verbatim extraction: E2B prompt instructs LLM to extract entity names exactly as they appear — no forced English translation.
+
+### Changed
+- `delete_doc_neo4j()` now safely removes entities from shared nodes (`source_docs` list) rather than DETACH DELETE everything. Orphans (entities with empty source_docs) are cleaned up.
+- `write_graph()` now uses 3-phase pipeline: resolve nodes via vector matching → write with aliases → create edges with resolved IDs.
+- Edge types are now dynamic (extracted from LLM output) rather than always `ASSOCIATED_WITH`.
+
+### Removed
+- **CANON_MAP** — hardcoded 18-entry Indonesian→English translation table deleted from config.py.
+- `canonicalize()` function from ingest.py — replaced by `resolve_node_ids()`.
+
+### Performance
+- Vector resolution adds ~0.05s per entity at ingest time (one `/embed_query` call + one vector index lookup per entity).
+- Query path (/ask) unaffected — resolves entities at ingest time, not query time.
+- Cross-lingual convergence validated: "Basis Data" (ID), "checkout database", "Checkout microservice" all auto-merged with correct canonical entities (≥0.88 cosine via Jina v3).
+
+---
+
 ## [2.2.0] — 2026-07-10 (Semantic Cache + Observability)
 
 ### Added
@@ -122,3 +149,5 @@ This project follows [Semantic Versioning](https://semver.org/).
 | Jul 10 | **v2.2.0**: add route labels (qdrant_hits, graph_hits, path, rerank_scores) |
 | Jul 10 | **v2.2.0**: clean E4B output (separate reasoning from answer) |
 | Jul 10 | Update docs/ + CHANGELOG, git commit v2.2.0 |
+| Jul 10 | **v2.2.1**: remove MiniLM zero-shot routing — 50% accuracy, parallel retrieval is better |
+| Jul 10 | **v2.3.0**: vector-driven entity resolution — CANON_MAP removed, Neo4j vector index, verbatim E2B extraction, aliases + source_docs, cross-lingual Jina v3 merging |

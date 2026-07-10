@@ -10,11 +10,11 @@ offload, no external API calls.
 ┌─────────────────────────────────────────────────────────────────┐
 │                        RTX 3060 (12 GB)                         │
 ├──────────┬──────────┬──────────────────────────────────────────┤
-│ E2B :8082│ E4B :8084│  serve_gpu.py :8000 (Jina+MiniLM+BGE     │
-│ ~1.5 GB  │ ~3.0 GB  │  + GLiNER lazy) ~4.1 GB shared           │
+│ E2B :8082│ E4B :8084│  serve_gpu.py :8000 (Jina+BGE          │
+│ ~1.5 GB  │ ~3.0 GB  │  + GLiNER lazy) ~4.0 GB shared           │
 │ extract  │ synth    │  embed / rerank / extract_graph / ask     │
 ├──────────┴──────────┴──────────────────────────────────────────┤
-│               TOTAL: ~10.7 GB / 12 GB                           │
+│               TOTAL: ~10.6 GB / 12 GB                           │
 └─────────────────────────────────────────────────────────────────┘
          ▲                        ▲
     systemd services         FastAPI daemon
@@ -35,7 +35,6 @@ offload, no external API calls.
 | Gemma 4 E2B QAT Q4_0 | systemd gemma-4-e2b | :8082 | ~1.5 GB | Entity/edge extraction (JSON, primary) |
 | Gemma 4 E4B QAT Q4_0 | systemd gemma-4-e4b | :8084 | ~3.0 GB | Answer synthesis |
 | jina-embeddings-v3 fp16 | serve_gpu.py | :8000 | ~3.0 GB | Query & doc embedding (late-chunking) |
-| all-MiniLM-L6-v2 fp16 | serve_gpu.py | :8000 | ~0.1 GB | Routing (unused currently, available) |
 | bge-reranker-v2-m3 fp16 | serve_gpu.py | :8000 | ~1.0 GB | Cross-encoder reranking |
 | gliner_multi-v2.1 fp16 | serve_gpu.py | :8000 | ~1.6 GB | NER graph extractor (lazy, fallback) |
 
@@ -44,9 +43,9 @@ offload, no external API calls.
 |------|---------------|
 | `serve_gpu.py` | **Primary daemon.** Preloads aux models on GPU. Exposes `/ask` (one-call RAG), `/embed_query`, `/embed_late`, `/rerank`, `/extract_graph`, `/health`. |
 | `serve_cpu.py` | **Fallback daemon.** Same API, runs models on CPU. Used if CUDA torch unavailable. |
-| `ingest.py` | Document→Qdrant+Neo4j. Late-chunk embeds, LLM extraction (E2B) or GLiNER fallback, canonicalise, write. |
+| `ingest.py` | Document→Qdrant+Neo4j. Late-chunk embeds, LLM extraction (E2B) or GLiNER fallback, vector-driven entity resolution (Jina v3 → Neo4j index). |
 | `ask.py` | CLI client + shared library. `parallel_retrieve()` (Qdrant+Neo4j threaded), `condense()` (rerank), `synthesize()` (E4B stream). |
-| `config.py` | All constants: ports, credentials, token limits, CANON_MAP. No YAML parsing. |
+| `config.py` | All constants: ports, credentials, token limits, entity resolution threshold, vector index config. No YAML parsing. |
 | `run.sh` | Orchestrator: `serve`, `ingest`, `ask`, `retrieve`, `health`, `stop`. |
 | `bench_rag.py` | Per-stage latency benchmark (3 queries × 3 iterations). |
 | `retrieve_json.py` | Headless retrieval → JSON. Used by Hermes plugin (legacy; now prefers /ask). |
@@ -55,7 +54,7 @@ offload, no external API calls.
 | Store | Collection/DB | Contents |
 |-------|--------------|----------|
 | Qdrant | `engineering_chunks` | Document chunks: dense 1024-d vectors, hash-based sparse vectors, metadata |
-| Neo4j | `neo4j` | Entity graph: nodes (id, name, type, profile, source_doc), edges (ASSOCIATED_WITH) |
+| Neo4j | `neo4j` | Entity graph: nodes (id, name, type, name_vector, aliases[], source_docs[], profile), edges (ASSOCIATED_WITH, etc.) |
 
 ## Data flow
 
@@ -63,11 +62,12 @@ offload, no external API calls.
 ```
 doc.md
   ├─[1] late-chunk Jina embed → Qdrant (dense + sparse vectors)
-  └─[2] LLM extract (E2B :8082 → JSON nodes+edges)
+  └─[2] LLM extract (E2B :8082 → JSON nodes+edges, VERBATIM names)
         │  └─ fallback: GLiNER daemon :8000/extract_graph
-        ├─ canonicalise (CANON_MAP: ID→EN)
+        ├─ vector-resolve: embed each name via Jina v3 → query Neo4j
+        │  entity_vector_idx (>0.88 cosine → merge aliases, else new)
         ├─ build profiles (source-text context windows)
-        └─ write to Neo4j (MERGE nodes + edges)
+        └─ write to Neo4j (MERGE nodes + edges, shared source_docs)
 ```
 
 ### Query (`/ask` or `ask.py`)
@@ -138,8 +138,10 @@ CUDA context + overhead  | 0.5       |                          |
 
 10. **No zero-shot routing (MiniLM removed)** — benchmarked at 50% accuracy on real queries. Parallel retrieval (always run both legs) is safer (wrong route loses context), costs the same wall-clock time (~0.04s since legs run concurrently), and frees 0.1 GB VRAM.
 
+11. **Vector-driven entity resolution** — replaced hardcoded CANON_MAP with Jina v3's cross-lingual embeddings stored in Neo4j's native vector index (5.x). Entities are extracted VERBATIM by E2B (no forced translation). Each entity name is embedded, and `db.index.vector.queryNodes()` finds the closest existing entity. Above ENTITY_RESOLUTION_THRESHOLD (0.88 cosine) → reuse existing node + append alias. Below → new canonical entity. "Basis Data" (ID), "Database" (EN), and "Base de Datos" (ES) converge automatically. Aliases preserved for audit trail. `source_docs[]` list tracks multi-document provenance safely.
+
 ## Known gaps
 
 - Edge types are almost all `ASSOCIATED_WITH` (E2B JSON tends to omit relationship semantics — GLiNER fallback co-occurrence is the safety net).
-- Canonicalisation is exact-match only; multi-word entity merging not implemented.
+- Entity resolution threshold (0.88) is a tunable constant — higher reduces false merges, lower connects more variants.
 - No multi-turn conversation support (each query is stateless).
