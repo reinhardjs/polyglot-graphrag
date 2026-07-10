@@ -27,6 +27,8 @@ Endpoints:
     POST /ingest           single-doc ingest (BackgroundTasks, non-blocking)
     GET  /ingest/status/{task_id}  poll ingest completion
     DELETE /ingest/{doc_id}        remove a document (Qdrant + Neo4j)
+    GET  /ingest                    list ingested documents
+    GET  /collections               list Qdrant collections + point counts
 """
 import os
 os.environ["HF_HOME"] = "/mnt/data-970-plus/hf_cache"
@@ -492,6 +494,64 @@ def delete_ingest(doc_id: str):
         "vectors_deleted": vectors_deleted,
         "nodes_cleaned": nodes_cleaned,
     }
+
+
+@app.get("/ingest")
+def list_ingest():
+    """List all ingested documents with their metadata + checksum."""
+    import ingest as ingest_mod
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+    qc = ingest_mod.get_qdrant()
+    docs = {}
+    # Scroll all points, group by doc_id
+    offset = None
+    while True:
+        pts, offset = qc.scroll(
+            C.COLL_CHUNKS,
+            scroll_filter=None,
+            limit=256,
+            with_payload=["doc_id", "doc_type", "checksum", "chunk_idx"],
+            offset=offset,
+        )
+        for p in pts:
+            pl = p.payload or {}
+            did = pl.get("doc_id", "unknown")
+            if did not in docs:
+                docs[did] = {
+                    "doc_id": did,
+                    "doc_type": pl.get("doc_type", ""),
+                    "chunks": 0,
+                    "checksum": pl.get("checksum", ""),
+                }
+            docs[did]["chunks"] += 1
+        if offset is None:
+            break
+
+    return {"documents": list(docs.values())}
+
+
+@app.get("/collections")
+def list_collections():
+    """List all Qdrant collections with point counts."""
+    import ingest as ingest_mod
+    qc = ingest_mod.get_qdrant()
+    cols = {}
+    try:
+        names = qc.get_collections().collections
+        for c in names:
+            name = c.name
+            try:
+                info = qc.get_collection(name)
+                cols[name] = {
+                    "points": info.points_count or 0,
+                    "vectors": info.config.params.vectors,
+                }
+            except Exception:
+                cols[name] = {"points": -1}
+    except Exception as e:
+        cols["_error"] = str(e)
+    return {"collections": cols}
 
 
 @app.get("/health")
