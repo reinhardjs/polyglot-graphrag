@@ -226,6 +226,7 @@ cd v2
 | [docs/domains/README.md](docs/domains/README.md) | TOML profile schema + how to add a domain |
 | [docs/guides/development.md](docs/guides/development.md) | Environment, workflows, testing |
 | [docs/roadmap/version-requirements.md](docs/roadmap/version-requirements.md) | Master specification (v2.5.0 + v2.6.0) |
+| [docs/comparison-greycat.md](docs/comparison-greycat.md) | How we compare to GreyCat's unified engine |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
 
 Legacy v1 docs (`ARCHITECTURE.md`, `SYSTEM_CONTEXT.md`, `EXTERNAL_ACCESS.md`)
