@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License: MIT">
   <img src="https://img.shields.io/badge/GPU-RTX%203060%2012GB-orange.svg" alt="RTX 3060 12GB">
-  <img src="https://img.shields.io/badge/tests-33%20passed-brightgreen.svg" alt="Tests: 33 passed">
+  <img src="https://img.shields.io/badge/tests-76%20passed-brightgreen.svg" alt="Tests: 76 passed">
 </p>
 
 <p align="center">
@@ -126,21 +126,58 @@ bash run.sh ask "who reported BUG-204?"
 Or via pure HTTP — no CLI needed:
 
 ```bash
-# Ingest a doc into a domain
+# ── Basic ask ──────────────────────────────────────────────────────────
+# Retrieval-only (no LLM, ~0.17 s)
+curl -s -X POST http://127.0.0.1:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"query":"who reported BUG-204?","synthesize":false}'
+
+# Full answer with synthesis + citation traceability
+curl -s -X POST http://127.0.0.1:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"query":"why did checkout stop calling the payment gateway?","domain":"engineering"}'
+
+# ── Domain-agnostic (switch domain, no code change) ────────────────────
+# Ask a medical question against the medical profile
+curl -s -X POST http://127.0.0.1:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"query":"what are the symptoms of gastritis?","domain":"medical","synthesize":true}'
+
+# ── Neuro-Symbolic (v2.7.0) ────────────────────────────────────────────
+# CRAG mode — adaptive routing + corrective retrieval (self-correcting)
+curl -s -X POST http://127.0.0.1:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"query":"who reported BUG-204?","domain":"engineering","crag":true}'
+# Response includes: crag_route (graph|hybrid), crag_grade (CORRECT|INCORRECT),
+# crag_corrected (true if corrective pass fired), crag_trace (full FSM path)
+# Standard /ask fields (path, sources, contexts, answer) still present.
+
+# Query modulation — see domain aliases expanded before embedding
+curl -s -X POST http://127.0.0.1:8000/embed_query \
+  -H "Content-Type: application/json" \
+  -d '{"text":"patient has N/V","domain":"medical"}'
+# Response: {"vector": [...], "text_used": "patient has N/V (nausea)"}
+# The modulator expanded "N/V" → "nausea" before embedding.
+
+# ── Evaluate quality ──────────────────────────────────────────────────
+# Run the evaluation harness against golden datasets (live, via daemon)
+cd v2
+python evaluate_pipeline.py sample_data/golden/engineering.json --live --domain engineering
+# Output: {"faithfulness": 0.87, "answer_relevancy": 0.71,
+#          "context_precision": 1.0, "context_recall": 0.57, ...}
+
+# Evaluate in CRAG mode to compare
+python evaluate_pipeline.py sample_data/golden/engineering.json --live --domain engineering --crag
+
+# ── Ingest into any domain ─────────────────────────────────────────────
 curl -s -X POST http://127.0.0.1:8000/ingest \
   -H "Content-Type: application/json" \
   -d '{"text":"...","doc_id":"enc-1","domain":"medical",
        "metadata":{"patient_id":"P-42","title":"Encounter note"}}'
 
-# Query with synthesis
-curl -s -X POST http://127.0.0.1:8000/ask \
-  -H "Content-Type: application/json" \
-  -d '{"query":"what treats hypertension?","domain":"medical","synthesize":true}'
-
-# Retrieval-only (no LLM, ~0.17 s)
-curl -s -X POST http://127.0.0.1:8000/ask \
-  -H "Content-Type: application/json" \
-  -d '{"query":"who reported BUG-204?","synthesize":false}'
+# ── Run tests ──────────────────────────────────────────────────────────
+bash run_tests.sh unit    # fast, no daemon needed (51 tests)
+bash run_tests.sh all     # full suite (76 tests) + eval smoke
 ```
 
 **Prerequisites:** Python 3.11+ (`rag-env` with CUDA torch), Docker, RTX 3060
@@ -156,7 +193,7 @@ replacement for CUDA-less machines (identical API, fp32 models).
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/ask` | One-call RAG. Accepts `domain` or `collection` (str, list, or `"all"`), `synthesize`, `skip_cache`. Returns `contexts_numbered`, `contexts_meta`, `sources`, `answer`. |
+| `POST` | `/ask` | One-call RAG. Accepts `domain`, `collection`, `synthesize`, `skip_cache`, `crag` (v2.7.0). Returns `contexts_numbered`, `contexts_meta`, `sources`, `answer`. CRAG mode adds `crag_route`, `crag_grade`, `crag_corrected`, `crag_trace`. |
 | `POST` | `/ingest` | Non-blocking single-doc ingest. Accepts `domain`, `metadata`, `collection`, `if_checksum`. Returns `task_id`. |
 | `GET` | `/ingest/status/{task_id}` | Poll a running ingest task. |
 | `DELETE` | `/ingest/{doc_id}?collection=` | Remove a document from Qdrant + Neo4j. |
