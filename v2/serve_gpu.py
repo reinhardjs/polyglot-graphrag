@@ -38,7 +38,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import threading
 import torch
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Response
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 
@@ -498,7 +498,7 @@ def ask(req: AskReq):
 
 
 @app.post("/ingest")
-def ingest(req: IngestReq, background_tasks: BackgroundTasks):
+def ingest(req: IngestReq, background_tasks: BackgroundTasks, response: Response):
     """Single-document ingestion via HTTP API (non-blocking).
 
     Returns 202 Accepted immediately with a task_id. Extraction runs in the
@@ -513,6 +513,42 @@ def ingest(req: IngestReq, background_tasks: BackgroundTasks):
     if not req.doc_id or not req.doc_id.strip():
         raise HTTPException(status_code=400, detail="doc_id is required")
 
+    # Derive collection from domain profile when not explicitly given.
+    target_collection = req.collection
+    if target_collection is None and req.domain:
+        prof = C.load_domain_profile(req.domain)
+        target_collection = prof["domain"]["collection"]
+    target_collection = target_collection or C.COLL_CHUNKS
+
+    # ── Synchronous incremental guard: skip if unchanged ──
+    # Returns 304 immediately (no background task, <10ms) when the caller's
+    # checksum matches the stored Qdrant payload. This keeps the API contract
+    # from the spec: same doc → 304, zero extraction cost.
+    if req.if_checksum is not None:
+        try:
+            import json as _json
+            import ingest as ingest_mod
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            qc = ingest_mod.get_qdrant()
+            hits = qc.scroll(
+                target_collection,
+                scroll_filter=Filter(
+                    must=[FieldCondition(
+                        key="doc_id", match=MatchValue(value=req.doc_id))]),
+                limit=1, with_payload=["checksum"],
+            )[0]
+            if hits and hits[0].payload.get("checksum") == req.if_checksum:
+                return Response(
+                    content=_json.dumps({
+                        "doc_id": req.doc_id, "status": "unchanged",
+                        "skipped": True, "checksum": req.if_checksum,
+                    }),
+                    status_code=304,
+                    media_type="application/json",
+                )
+        except Exception:
+            pass  # fall through to full ingest if the check fails
+
     task_id = _uuid.uuid4().hex
     with _ingest_tasks_lock:
         _ingest_tasks[task_id] = {
@@ -523,12 +559,6 @@ def ingest(req: IngestReq, background_tasks: BackgroundTasks):
     def _run():
         import ingest as ingest_mod
         import config as C
-        # Derive collection from domain profile when not explicitly given
-        # (mirrors /ask routing).
-        target_collection = req.collection
-        if target_collection is None and req.domain:
-            prof = C.load_domain_profile(req.domain)
-            target_collection = prof["domain"]["collection"]
         with _ingest_tasks_lock:
             _ingest_tasks[task_id]["status"] = "running"
         try:
@@ -538,8 +568,8 @@ def ingest(req: IngestReq, background_tasks: BackgroundTasks):
                 meta=({"doc_type": req.doc_type, "author": req.author}
                       | (req.metadata or {})),
                 extract_graph=req.extract_graph,
-                if_checksum=req.if_checksum,
-                collection=target_collection or C.COLL_CHUNKS,
+                if_checksum=None,  # already handled synchronously above
+                collection=target_collection,
                 domain=req.domain,
                 metadata=req.metadata,
             )
@@ -552,6 +582,7 @@ def ingest(req: IngestReq, background_tasks: BackgroundTasks):
                 _ingest_tasks[task_id]["error"] = str(e)
 
     background_tasks.add_task(_run)
+    response.status_code = 202
     return {"task_id": task_id, "status": "accepted", "doc_id": req.doc_id}
 
 

@@ -15,7 +15,7 @@ os.environ["OMP_NUM_THREADS"] = "8"
 
 import uuid
 import threading
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Response
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import numpy as np
@@ -313,13 +313,14 @@ def ask(req: AskReq):
 
 
 # ── Ingest endpoints (parity with serve_gpu.py) ──────────────────────────────
-def _run_ingest(task_id: str, req: "IngestReq"):
+def _run_ingest(task_id: str, req: "IngestReq", target_collection: str = None):
     import ingest as ingest_mod
     # Derive collection from domain profile when not explicitly given.
-    target_collection = req.collection
-    if target_collection is None and req.domain:
-        prof = C.load_domain_profile(req.domain)
-        target_collection = prof["domain"]["collection"]
+    if target_collection is None:
+        target_collection = req.collection
+        if target_collection is None and req.domain:
+            prof = C.load_domain_profile(req.domain)
+            target_collection = prof["domain"]["collection"]
     try:
         with _ingest_tasks_lock:
             _ingest_tasks[task_id]["status"] = "running"
@@ -327,7 +328,7 @@ def _run_ingest(task_id: str, req: "IngestReq"):
             text=req.text, doc_id=req.doc_id,
             meta=({"doc_type": req.doc_type, "author": req.author}
                   | (req.metadata or {})),
-            extract_graph=req.extract_graph, if_checksum=req.if_checksum,
+            extract_graph=req.extract_graph, if_checksum=None,  # handled synchronously
             collection=target_collection or C.COLL_CHUNKS,
             domain=req.domain, metadata=req.metadata,
         )
@@ -339,19 +340,58 @@ def _run_ingest(task_id: str, req: "IngestReq"):
 
 
 @app.post("/ingest")
-def ingest(req: IngestReq, background_tasks: BackgroundTasks):
-    """Single-doc ingest (non-blocking). Returns 202 + task_id."""
+def ingest(req: IngestReq, background_tasks: BackgroundTasks, response: Response):
+    """Single-doc ingest (non-blocking). Returns 202 + task_id.
+
+    If `if_checksum` matches the stored payload, returns 304 (unchanged)
+    immediately — no background task, <10ms.
+    """
     if not req.text or not req.text.strip():
         raise HTTPException(status_code=400, detail="text is required")
     if not req.doc_id or not req.doc_id.strip():
         raise HTTPException(status_code=400, detail="doc_id is required")
+
+    # Derive collection from domain profile when not explicitly given.
+    target_collection = req.collection
+    if target_collection is None and req.domain:
+        prof = C.load_domain_profile(req.domain)
+        target_collection = prof["domain"]["collection"]
+    target_collection = target_collection or C.COLL_CHUNKS
+
+    # ── Synchronous incremental guard: skip if unchanged ──
+    if req.if_checksum is not None:
+        try:
+            import json as _json
+            import ingest as ingest_mod
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            qc = ingest_mod.get_qdrant()
+            hits = qc.scroll(
+                target_collection,
+                scroll_filter=Filter(
+                    must=[FieldCondition(
+                        key="doc_id", match=MatchValue(value=req.doc_id))]),
+                limit=1, with_payload=["checksum"],
+            )[0]
+            if hits and hits[0].payload.get("checksum") == req.if_checksum:
+                return Response(
+                    content=_json.dumps({
+                        "doc_id": req.doc_id, "status": "unchanged",
+                        "skipped": True, "checksum": req.if_checksum,
+                    }),
+                    status_code=304,
+                    media_type="application/json",
+                )
+        except Exception:
+            pass  # fall through to full ingest if the check fails
+
     task_id = uuid.uuid4().hex
     with _ingest_tasks_lock:
         _ingest_tasks[task_id] = {
             "status": "accepted", "doc_id": req.doc_id,
             "result": None, "error": None,
         }
-    background_tasks.add_task(_run_ingest, task_id, req)
+    background_tasks.add_task(_run_ingest, task_id, req, target_collection)
+    response.status_code = 202
     return {"task_id": task_id, "status": "accepted", "doc_id": req.doc_id}
 
 

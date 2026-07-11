@@ -22,7 +22,7 @@ def _ingest_wait(doc_id, domain=None, text=None, collection=None, timeout=40):
     if collection:
         body["collection"] = collection
     r = requests.post(f"{BASE}/ingest", json=body)
-    assert r.status_code == 200, r.text
+    assert r.status_code in (200, 202), r.text
     task_id = r.json()["task_id"]
     deadline = time.time() + timeout
     while time.time() < deadline:
