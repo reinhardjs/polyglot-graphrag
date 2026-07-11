@@ -1,0 +1,59 @@
+# Legal domain profile — statutes, cases, citations, jurisdictions.
+
+[domain]
+name = "legal"
+collection = "legal_chunks"
+neo4j_label = "Legal"
+description = "Legal knowledge base — statutes, cases, regulations, citations"
+
+[chunking]
+strategy = "section"
+chunk_size = 512
+overlap = 64
+section_header_prefix = "##"
+
+[graph_schema]
+entity_types = [
+    "Statute", "Case", "Regulation", "Court",
+    "Party", "Citation", "Clause", "Jurisdiction", "Agency",
+]
+edge_types = [
+    "CITES", "OVERRULES", "AMENDS", "INTERPRETS",
+    "APPLIES_TO", "GOVERNS", "REFERENCES", "SUPERSEDES",
+    "ASSOCIATED_WITH",
+]
+
+[extraction]
+prompt = """
+Extract a legal knowledge graph from the document below.
+Entities: extract names EXACTLY as they appear — do NOT normalize.
+Relationships: use one of CITES, OVERRULES, AMENDS, INTERPRETS,
+  APPLIES_TO, GOVERNS, REFERENCES, SUPERSEDES, ASSOCIATED_WITH.
+Return ONLY valid JSON, no prose, no markdown:
+{"nodes":[{"id":"ExactEntityName","type":"Statute|Case|Regulation|Court|Party|Citation|Clause|Jurisdiction|Agency"}],"edges":[{"source":"entity_a","target":"entity_b","type":"CITES|OVERRULES|AMENDS|INTERPRETS|APPLIES_TO|GOVERNS|REFERENCES|SUPERSEDES|ASSOCIATED_WITH"}]}
+Document ({doc_id}):
+{text}
+"""
+
+[synthesis]
+role = "legal research assistant"
+prompt = """
+You are a legal research assistant. Use ONLY the statutes, cases, and regulations
+provided. Do NOT give legal advice — summarize what the cited sources state and
+always cite the specific statute, case, or regulation. If the context lacks the
+answer, say so plainly. Be precise and concise.
+
+Context:
+{context}
+
+Question: {query}
+
+Answer (cite the statutes, cases, and regulations; no legal advice):
+"""
+
+[metadata_schema]
+fields = ["jurisdiction", "court", "citation", "document_type", "effective_date"]
+
+[neo4j_entry]
+strategy = "hybrid"
+max_k_hops = 2

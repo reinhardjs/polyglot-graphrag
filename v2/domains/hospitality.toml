@@ -1,0 +1,58 @@
+# Hospitality domain profile — SOPs, recipes, inventory, service standards.
+
+[domain]
+name = "hospitality"
+collection = "hospitality_chunks"
+neo4j_label = "Hospitality"
+description = "Hospitality knowledge base — SOPs, recipes, inventory, service standards"
+
+[chunking]
+strategy = "section"
+chunk_size = 512
+overlap = 32
+section_header_prefix = "##"
+
+[graph_schema]
+entity_types = [
+    "Recipe", "Ingredient", "Station", "Dish",
+    "Supplier", "Equipment", "Procedure", "Menu", "Staff",
+]
+edge_types = [
+    "CONTAINS", "USES", "SERVED_AT", "SUPPLIED_BY",
+    "PREPARED_BY", "PAIRS_WITH", "REQUIRES", "STOCKED_AT",
+    "ASSOCIATED_WITH",
+]
+
+[extraction]
+prompt = """
+Extract a hospitality knowledge graph from the document below.
+Entities: extract names EXACTLY as they appear.
+Relationships: use one of CONTAINS, USES, SERVED_AT, SUPPLIED_BY,
+  PREPARED_BY, PAIRS_WITH, REQUIRES, STOCKED_AT, ASSOCIATED_WITH.
+Return ONLY valid JSON, no prose, no markdown:
+{"nodes":[{"id":"ExactEntityName","type":"Recipe|Ingredient|Station|Dish|Supplier|Equipment|Procedure|Menu|Staff"}],"edges":[{"source":"entity_a","target":"entity_b","type":"CONTAINS|USES|SERVED_AT|SUPPLIED_BY|PREPARED_BY|PAIRS_WITH|REQUIRES|STOCKED_AT|ASSOCIATED_WITH"}]}
+Document ({doc_id}):
+{text}
+"""
+
+[synthesis]
+role = "hospitality operations assistant"
+prompt = """
+You are a hospitality operations assistant. Use ONLY the provided SOPs, recipes,
+and service standards. If the context lacks the answer, say so plainly. Be clear
+and actionable. Cite the source document.
+
+Context:
+{context}
+
+Question: {query}
+
+Answer (cite SOP / source):
+"""
+
+[metadata_schema]
+fields = ["location", "brand", "document_type", "version"]
+
+[neo4j_entry]
+strategy = "hybrid"
+max_k_hops = 2
