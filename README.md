@@ -70,6 +70,7 @@ All from a single RTX 3060 (12 GB): extraction (E2B, ~1.5 GB), synthesis (E4B,
 | **Semantic cache** | Similar queries (>0.95 cosine) return cached answers in ~0.07 s |
 | **Incremental ingest** | `POST /ingest` is non-blocking (task_id + polling); checksum-based skip on re-ingest; `DELETE` for edits |
 | **CPU fallback** | `serve_cpu.py` mirrors the full GPU API for CUDA-less machines (fp32 enforced) |
+| **Neuro-Symbolic (v2.7.0)** | Phase 1 query modulation (alias expansion before embed) · Phase 2 subgraph pruning (Top-N centrality) · Phase 3 CRAG (adaptive routing + corrective fallback) · Phase 4 evaluation harness (faithfulness / relevancy / precision / recall) |
 
 ---
 
@@ -209,8 +210,14 @@ Full schema and field reference in
 ```bash
 cd v2
 /mnt/data-970-plus/rag-env/bin/python -m pytest tests/ -q
-# 33 passed — chunking, extraction/synthesis prompts, metadata validation,
-# condense dedup, neo4j entry strategies (unit) + cross-domain routing (e2e)
+# 75 passed — all phases (unit) + cross-domain routing / CRAG (e2e, auto-skip w/o daemon)
+
+# Or use the one-shot runner:
+bash run_tests.sh unit   # fast, no daemon (51 tests)
+bash run_tests.sh e2e    # live daemon tests
+bash run_tests.sh eval   # Phase 4 eval smoke on golden datasets
+bash run_tests.sh phase N  # one phase (1|2|3|4)
+bash run_tests.sh all    # full suite (75) + eval smoke
 ```
 
 ---
@@ -225,7 +232,7 @@ cd v2
 | [docs/architecture/hermes-integration.md](docs/architecture/hermes-integration.md) | Hermes `rag_query` plugin setup |
 | [docs/domains/README.md](docs/domains/README.md) | TOML profile schema + how to add a domain |
 | [docs/guides/development.md](docs/guides/development.md) | Environment, workflows, testing |
-| [docs/roadmap/neuro-symbolic-plan.md](docs/roadmap/neuro-symbolic-plan.md) | Neuro-Symbolic GraphRAG upgrade (Phase 1 shipped) |
+| [docs/roadmap/neuro-symbolic-plan.md](docs/roadmap/neuro-symbolic-plan.md) | Neuro-Symbolic GraphRAG upgrade (all 4 phases shipped) |
 | [docs/roadmap/agent-learning-system.md](docs/roadmap/agent-learning-system.md) | v3.0.0 self-improving loop (planned) |
 | [docs/comparison-greycat.md](docs/comparison-greycat.md) | How we compare to GreyCat's unified engine |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |

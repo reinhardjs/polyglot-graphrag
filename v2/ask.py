@@ -220,12 +220,36 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
     if scored:
         entry = scored[0][1]["id"]
         with driver.session() as s:
+            # Fetch neighbourhood nodes AND the relationships among them so we
+            # can rank by structural centrality (Phase 2 pruning).
             rec = s.run(
                 "MATCH (n:Entity {id:$e})-[*1..%d]-(m:Entity) "
                 "RETURN DISTINCT m.id AS id, m.profile AS prof, "
                 "m.source_doc AS source_doc" % hops,
                 e=entry,
             ).data()
+            edge_rows = s.run(
+                "MATCH (n:Entity {id:$e})-[*1..%d]-(m:Entity) "
+                "WITH collect(DISTINCT m) + n AS ns "
+                "UNWIND ns AS a UNWIND ns AS b "
+                "MATCH (a)-[r]-(b) WHERE a.id < b.id "
+                "RETURN DISTINCT a.id AS src, b.id AS dst" % hops,
+                e=entry,
+            ).data()
+        edges = [(r["src"], r["dst"]) for r in edge_rows
+                 if r.get("src") and r.get("dst")]
+
+        # Phase 2: prune the neighbourhood to the Top-N most central nodes.
+        strategy = getattr(C, "GRAPH_PRUNE_STRATEGY", "degree")
+        top_n = getattr(C, "GRAPH_PRUNE_TOP_N", 10)
+        if strategy != "none" and rec:
+            try:
+                import graph_prune as GP
+                rec = GP.prune_records(entry, rec, edges,
+                                       strategy=strategy, top_n=top_n)
+            except Exception:
+                pass  # never let pruning break retrieval
+
         # Include the entry node's own profile first (with its source_doc)
         e0 = scored[0][1]
         if e0.get("prof"):

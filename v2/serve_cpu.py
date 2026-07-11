@@ -126,6 +126,7 @@ class AskReq(BaseModel):
     skip_cache: bool = False
     collection: Optional[str | List[str]] = None
     domain: Optional[str] = None
+    crag: bool = False                   # Phase 3: Corrective RAG + adaptive routing
 
 
 class IngestReq(BaseModel):
@@ -240,6 +241,26 @@ def ask(req: AskReq):
 
     # 0. Domain profile (v2.6.0)
     profile = C.load_domain_profile(req.domain) if req.domain else None
+
+    # 0b. CRAG mode (Phase 3): adaptive routing + corrective retrieval.
+    if req.crag:
+        import crag_pipeline as CR
+        result = CR.run_crag(req.query, domain=req.domain,
+                             synthesize=req.synthesize)
+        contexts = result.get("contexts", [])
+        return {
+            "query": req.query,
+            "source": "crag",
+            "path": result.get("route"),
+            "crag_grade": result.get("grade"),
+            "crag_corrected": result.get("corrected"),
+            "crag_rewritten_query": result.get("rewritten_query"),
+            "crag_trace": result.get("path"),
+            "n_contexts": len(contexts),
+            "contexts": contexts,
+            "contexts_numbered": [f"[{i+1}] {c}" for i, c in enumerate(contexts)],
+            "answer": result.get("answer") or "",
+        }
 
     # 1. Embed query (CPU, lazy-load on first call)
     from query_modulator import QueryModulator

@@ -153,6 +153,11 @@ VECTOR_DIM = 1024          # jina-embeddings-v3 output dim
 RERANK_TOP_K = 5           # keep top-5 contexts after rerank
 QDRANT_SEARCH_TOP_K = 10   # vector candidates from Qdrant
 GRAPH_HOPS = 2             # k-hop subgraph from Neo4j
+GRAPH_PRUNE_TOP_N = 10     # Phase 2: cap subgraph to Top-N nodes (context window guard)
+GRAPH_PRUNE_STRATEGY = "degree"  # "degree" | "pagerank" | "none" — neighbor ranking
+
+# ── CRAG (Phase 3): Corrective RAG & adaptive routing ────────────────────────
+CRAG_USE_LLM_ROUTER = False  # True → confirm route + rewrite with E4B (slower, smarter)
 
 # ── GLiNER target labels (graph extraction schema) ────────────────────────────
 GLINER_LABELS = [

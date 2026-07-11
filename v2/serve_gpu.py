@@ -173,6 +173,7 @@ class AskReq(BaseModel):
     skip_cache: bool = False
     collection: Optional[str | List[str]] = None   # Qdrant collection(s); None→default
     domain: Optional[str] = None                     # v2.6.0 profile (engineering/medical/legal/...)
+    crag: bool = False                               # Phase 3: Corrective RAG + adaptive routing
 
 
 class IngestReq(BaseModel):
@@ -369,6 +370,27 @@ def ask(req: AskReq):
                     }
         except Exception:
             pass
+
+    # 2b. CRAG mode (Phase 3): adaptive routing + corrective retrieval.
+    if req.crag:
+        import crag_pipeline as CR
+        result = CR.run_crag(req.query, domain=req.domain,
+                             synthesize=req.synthesize)
+        # shape into the standard /ask response contract
+        contexts = result.get("contexts", [])
+        return {
+            "query": req.query,
+            "source": "crag",
+            "path": result.get("route"),
+            "crag_grade": result.get("grade"),
+            "crag_corrected": result.get("corrected"),
+            "crag_rewritten_query": result.get("rewritten_query"),
+            "crag_trace": result.get("path"),
+            "n_contexts": len(contexts),
+            "contexts": contexts,
+            "contexts_numbered": [f"[{i+1}] {c}" for i, c in enumerate(contexts)],
+            "answer": result.get("answer") or "",
+        }
 
     # 3. Parallel retrieval: Qdrant + Neo4j
     import threading

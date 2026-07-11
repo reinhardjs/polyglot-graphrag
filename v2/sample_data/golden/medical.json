@@ -1,0 +1,20 @@
+[
+  {
+    "question": "What are the symptoms associated with Joyce's cold?",
+    "ground_truth": "Joyce presented with cold symptoms including nausea.",
+    "answer": "",
+    "contexts": []
+  },
+  {
+    "question": "What treatment was given for mild gastritis?",
+    "ground_truth": "Mild gastritis was managed with a treatment plan addressing nausea and gastric irritation.",
+    "answer": "",
+    "contexts": []
+  },
+  {
+    "question": "Which patient was diagnosed with ADHD?",
+    "ground_truth": "The patient record notes an ADHD diagnosis.",
+    "answer": "",
+    "contexts": []
+  }
+]

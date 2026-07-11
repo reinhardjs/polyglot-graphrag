@@ -5,6 +5,51 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.7.0] — 2026-07-11 (Neuro-Symbolic GraphRAG)
+
+Neuro-symbolic upgrade: symbolic guards around neural retrieval/synthesis.
+All 4 phases shipped. Domain-agnostic throughout. See
+`docs/roadmap/neuro-symbolic-plan.md`.
+
+### Added
+- **Phase 1 — Query modulation** — `v2/query_modulator.py`. Expands domain
+  aliases (from `:Entity.aliases` + name→type in Neo4j) before embedding so
+  Jina v3 grounds slang/abbreviations. Wired into `/ask` + `/embed_query` in
+  both daemons (`/embed_query` returns `text_used`). Per-domain alias cache with
+  `refresh()`. Verified: `"patient has N/V"` → `"patient has N/V (nausea)"`.
+- **Phase 2 — Subgraph pruning** — `v2/graph_prune.py`. Caps the k-hop Neo4j
+  neighbourhood to the Top-N most central nodes (context-window guard).
+  Strategies: `degree` (default, no deps), `pagerank` (networkx), `none`.
+  `ask.neo4j_subgraph()` now fetches neighbourhood edges and prunes via
+  `config.GRAPH_PRUNE_TOP_N`/`GRAPH_PRUNE_STRATEGY`. Entry node always kept.
+- **Phase 3 — CRAG + adaptive routing** — `v2/crag_pipeline.py`, a dependency-
+  free FSM: Router (factual→graph / analytical→hybrid), Evaluator
+  (CORRECT/AMBIGUOUS/INCORRECT), corrective Fallback (query rewrite + wider
+  retrieval). `/ask` gains `crag: true` returning `crag_grade`, `crag_corrected`,
+  `crag_rewritten_query`, `crag_trace`. `CragDeps` makes it unit-testable.
+  Optional E4B router/rewrite via `config.CRAG_USE_LLM_ROUTER` (default off).
+- **Phase 4 — Evaluation harness** — `v2/evaluate_pipeline.py`. Faithfulness,
+  AnswerRelevancy, ContextPrecision, ContextRecall over golden JSON. Two
+  backends: real `ragas` (local E4B+Jina, opt-in via `EVAL_USE_RAGAS=1`) and a
+  built-in `local` backend (Jina cosine + lexical, zero heavy deps, default).
+  `--live` generates answers via `/ask` (`--domain`, `--crag`). Golden templates
+  in `v2/sample_data/golden/{engineering,medical}.json`.
+- **Test runner** — `v2/run_tests.sh` (`unit`/`e2e`/`eval`/`phase N`/`all`).
+- **Tests** — +33: graph_prune (8), crag_pipeline (12), evaluate_pipeline (9),
+  e2e neuro-symbolic (5, auto-skip w/o daemon), query_modulator (6 from Phase 1).
+  Full suite: **75 passing**.
+
+### Config
+- `GRAPH_PRUNE_TOP_N=10`, `GRAPH_PRUNE_STRATEGY="degree"`, `CRAG_USE_LLM_ROUTER=False`.
+
+### Notes
+- Original plan assumed a `:Alias-[:RESOLVES_TO]->:Concept` schema; the real
+  graph is plain `:Entity` nodes. All phases were adapted to the real schema
+  (alias map is global; domain routing stays at Qdrant collection level).
+- `ragas` is optional and not added to core requirements (it pulls in langchain).
+
+---
+
 ## [2.6.0] — 2026-07-11 (Domain Profile System + General-Purpose RAG)
 
 ### Added

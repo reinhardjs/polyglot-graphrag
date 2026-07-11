@@ -1,0 +1,26 @@
+[
+  {
+    "question": "Who reported BUG-204 and what is its severity?",
+    "ground_truth": "BUG-204 was reported by Alice and is a high severity bug.",
+    "answer": "",
+    "contexts": []
+  },
+  {
+    "question": "Why did the checkout service stop calling the payment gateway synchronously?",
+    "ground_truth": "Per ADR-014 and PR-482, checkout was decoupled from the gateway so the storefront stays available; calls became asynchronous.",
+    "answer": "",
+    "contexts": []
+  },
+  {
+    "question": "What does the payments-consumer microservice depend on?",
+    "ground_truth": "The payments-consumer depends on the payment gateway and processes PaymentSettled events from the billing component.",
+    "answer": "",
+    "contexts": []
+  },
+  {
+    "question": "What is ADR-014 about?",
+    "ground_truth": "ADR-014 documents the decision to make checkout resilient by removing the synchronous dependency on the payment gateway.",
+    "answer": "",
+    "contexts": []
+  }
+]

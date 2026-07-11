@@ -1,6 +1,6 @@
 # Neuro-Symbolic GraphRAG Upgrade Plan
 
-**Status:** in progress — Phase 1 shipped (2026-07-11)
+**Status:** COMPLETE — all 4 phases shipped (2026-07-11)
 **Target:** v2.7.0
 **Created:** 2026-07-11
 
@@ -51,63 +51,106 @@ retrieval (collection level).
 
 ---
 
-## Phase 2 — Subgraph Pruning (Context Window Protection) — NEXT
+## Phase 2 — Subgraph Pruning (Context Window Protection) ✅ SHIPPED
 
 **Goal:** prevent Neo4j "neighborhood explosion" from overflowing the LLM
 context window.
 
-**Action:** update `ask.neo4j_subgraph()` to prune the k-hop neighborhood to the
-Top-N most structurally/causally relevant nodes. Options: degree-centrality,
-PageRank (via Neo4j GDS or in-memory Python), or path-weighting.
+**Deliverable:** `v2/graph_prune.py`
+- `rank_node_ids(entry_id, node_ids, edges, strategy, top_n)` — ranks
+  neighbourhood nodes by centrality; entry node always kept first.
+- `prune_records(entry_id, records, edges, strategy, top_n)` — prunes node
+  record dicts to the Top-N.
+- Strategies: `degree` (default, no deps), `pagerank` (networkx, falls back to
+  degree), `none` (legacy).
 
-**Deliverable:** `neo4j_subgraph()` returns Top 10 ranked nodes/relationships
-for the active domain instead of the full neighborhood.
+**Wiring:** `ask.neo4j_subgraph()` now fetches the k-hop neighbourhood **plus its
+relationships**, builds the edge list, and prunes to `config.GRAPH_PRUNE_TOP_N`
+(default 10) via `config.GRAPH_PRUNE_STRATEGY`. Pruning is wrapped in try/except
+so it can never break retrieval.
 
-**Schema note:** edges today are mostly `ASSOCIATED_WITH` (typed edges are rare).
-Pruning must work on the existing `ASSOCIATED_WITH`/`AFFECTS` edge set, not
-assume rich edge types.
+**Config:** `GRAPH_PRUNE_TOP_N=10`, `GRAPH_PRUNE_STRATEGY="degree"`.
 
-**Acceptance:** a high-degree hub node (e.g. a common component) no longer floods
-the context; retrieval latency + context size bounded.
+**Schema note:** works on the existing `ASSOCIATED_WITH`/`AFFECTS` edges — no
+assumption of rich typed edges.
 
----
-
-## Phase 3 — Corrective RAG (CRAG) & Adaptive Routing
-
-**Goal:** route queries to save compute + evaluate context quality.
-
-**Action:** `v2/crag_pipeline.py` — a state machine (LangGraph optional; a plain
-Python FSM is fine and keeps deps light):
-1. **Router** — lightweight classifier: strict factual lookup → Neo4j only;
-   complex analysis → Qdrant + Neo4j hybrid.
-2. **Evaluator** — score retrieved context (CORRECT / INCORRECT / AMBIGUOUS).
-3. **Fallback** — on INCORRECT, rewrite query + secondary search.
-
-**Deliverable:** `crag_pipeline.py` demonstrating the FSM, wired as an optional
-`/ask` mode (`crag: true`).
-
-**Schema note:** router can reuse the existing `path` field (`hybrid`/`qdrant`/
-`graph`) already returned by `/ask`.
+**Tests:** `tests/test_graph_prune.py` (8 unit tests). Verified: entry node always
+first, central nodes beat isolated leaves, `none` disables pruning.
 
 ---
 
-## Phase 4 — Evaluation Harness (Ragas)
+## Phase 3 — Corrective RAG (CRAG) & Adaptive Routing ✅ SHIPPED
+
+**Goal:** route queries to save compute + evaluate context quality with a
+corrective fallback.
+
+**Deliverable:** `v2/crag_pipeline.py` — a dependency-free Python state machine:
+1. **Router** (`route()`) — ID/short-factual → `graph`; analytical → `hybrid`.
+   Optional E4B confirmation via `config.CRAG_USE_LLM_ROUTER`.
+2. **Evaluator** (`evaluate_context()`) — grades context CORRECT / AMBIGUOUS /
+   INCORRECT by lexical overlap.
+3. **Fallback** (`rewrite_query()` + 2nd pass) — on weak grades, rewrite (E4B or
+   heuristic) and run a wider hybrid retrieval, then synthesize.
+
+`CragDeps` injects embed/retrieve/condense/synth so the FSM is unit-testable
+without daemons. Degrades gracefully to pure heuristics if E4B is down.
+
+**Wiring:** `/ask` in both daemons accepts `crag: true` → delegates to
+`run_crag()` and returns `source:"crag"`, `path` (route), `crag_grade`,
+`crag_corrected`, `crag_rewritten_query`, `crag_trace`.
+
+**Verified live:** factual `who reported BUG-204?` → graph route, 0 hits →
+INCORRECT → rewrite → recovered 5 contexts. Analytical query → hybrid, CORRECT
+first pass.
+
+**Tests:** `tests/test_crag_pipeline.py` (12 unit) + `tests/test_e2e_neuro_symbolic.py`
+(live routing/trace assertions).
+
+---
+
+## Phase 4 — Evaluation Harness (Ragas) ✅ SHIPPED
 
 **Goal:** rigorous, domain-segmented accuracy measurement.
 
-**Action:** `v2/evaluate_pipeline.py` using `ragas` (`pip install ragas datasets`).
-Accepts a domain-specific golden JSON (queries, ground-truth, generated answers)
-and computes `Faithfulness`, `AnswerRelevancy`, `ContextPrecision`,
-`ContextRecall`.
+**Deliverable:** `v2/evaluate_pipeline.py` — computes Faithfulness,
+AnswerRelevancy, ContextPrecision, ContextRecall over a golden JSON dataset.
+Two backends, auto-selected:
+- **ragas** — real ragas framework wired to the LOCAL E4B LLM + Jina embeddings
+  (used when `ragas`+`datasets` installed AND `EVAL_USE_RAGAS=1`).
+- **local** — built-in metric implementations using the local Jina embed daemon
+  (cosine) + lexical coverage. Zero cloud, zero heavy deps. Default.
 
-**Deliverable:** `evaluate_pipeline.py` + a `sample_data/golden/{domain}.json`
-template per domain.
+`--live` fills answer+contexts by calling the running daemon `/ask` (supports
+`--domain` and `--crag`).
+
+**Golden templates:** `v2/sample_data/golden/{engineering,medical}.json`.
+
+**Verified live:** engineering set → faithfulness 0.90, context_precision 1.0,
+answer_relevancy 0.75, context_recall 0.57 (local backend).
+
+**Tests:** `tests/test_evaluate_pipeline.py` (9 unit tests for metric math).
+
+**Note:** ragas is intentionally optional (it pulls in langchain). Install with
+`pip install ragas datasets langchain-openai` and set `EVAL_USE_RAGAS=1` to use
+the ragas backend; otherwise the local backend runs with no extra deps.
 
 ---
 
-## Open questions
+## Test runner
 
-- Should Phase 2 pruning also write back pruned "importance" scores to Neo4j as
-  node properties (enables caching)? Defer until Phase 2 lands.
-- Phase 3 router: train a tiny classifier or use an LLM-as-judge prompt? Start
-  with an E4B prompt (already available on `:8084`) to avoid new deps.
+`v2/run_tests.sh` — one entry point for everything:
+- `bash run_tests.sh unit` — fast, no daemon (51 tests)
+- `bash run_tests.sh e2e` — live daemon tests
+- `bash run_tests.sh eval` — Phase 4 eval smoke on golden datasets
+- `bash run_tests.sh phase N` — one phase (1|2|3|4)
+- `bash run_tests.sh all` — full pytest suite (75 tests) + eval smoke
+
+---
+
+## Open questions (resolved)
+
+- **Phase 2 write-back of importance scores:** deferred — degree/pagerank is
+  computed per-query in-memory; cheap enough (<1k nodes) that caching isn't
+  worth the write complexity yet.
+- **Phase 3 router (classifier vs LLM):** shipped heuristic-first with an
+  optional E4B confirmation flag (`CRAG_USE_LLM_ROUTER`, default off for speed).
