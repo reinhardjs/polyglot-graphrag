@@ -20,6 +20,9 @@ docs/
 ├── guides/                Development & operations
 │   └── development.md         Environment setup, prerequisites, workflows
 │
+├── domains/               Domain profile reference (v2.6.0)
+│   └── README.md             TOML profile schema + how to add a domain
+│
 └── roadmap/               Planning & future versions
     ├── version-requirements.md     ★ Master spec: v2.5.0 + v2.6.0 detailed requirements
     ├── ingest-endpoint-plan.md     /ingest endpoint + frequent-update strategy
@@ -44,6 +47,9 @@ docs/
 ### Guides
 - [Development](guides/development.md) — prerequisites, environment, common workflows
 
+### Domain Profiles
+- [Domain Profiles](domains/README.md) — TOML schema, available domains, how to add one
+
 ### Roadmap
 - [**Version Requirements**](roadmap/version-requirements.md) — master spec (start here)
 - [Ingest Endpoint Plan](roadmap/ingest-endpoint-plan.md) — `/ingest` API + incremental updates
@@ -55,5 +61,4 @@ docs/
 
 ## Current Version
 
-**v2.5.0** — single-doc ingest API (`POST /ingest` non-blocking) + multi-domain collections.
-All models on GPU (RTX 3060, 12 GB); CPU fallback at full endpoint parity. See [version-requirements.md](roadmap/version-requirements.md) for the full roadmap.
+**v2.6.0** — domain profile system: pluggable chunking (sentence/paragraph/section/fixed), domain-aware extraction + synthesis prompts, hybrid Neo4j entry strategy (keyword/vector/hybrid), domain metadata schema, and citation traceability (every `/ask` response carries `contexts_numbered`, `contexts_meta`, and a `sources` bibliography mapping `[n]` → source doc). Multi-domain collections + per-domain Neo4j labels. All models on GPU (RTX 3060, 12 GB); CPU fallback at full endpoint parity. See [version-requirements.md](roadmap/version-requirements.md) for the full roadmap.

@@ -32,14 +32,18 @@ rag-system/
 │   ├── ingest.py, ask.py, config.py, router.py, retrieve.py
 │   └── ...                      # (superseded, kept for reference)
 ├── v2/                          # CURRENT baseline — all-GPU
-│   ├── config.py                # All constants
+│   ├── config.py                # All constants + load_domain_profile()
 │   ├── serve_gpu.py             # Primary GPU daemon (:8000)
 │   ├── serve_cpu.py             # CPU fallback daemon
 │   ├── ingest.py                # Doc ingestion
 │   ├── ask.py                   # CLI client + shared library
+│   ├── chunking.py              # Pluggable chunkers (REQ-3)
+│   ├── prompts.py               # Shared synthesis-prompt builder (REQ-5)
 │   ├── retrieve_json.py         # Headless retrieval bridge
 │   ├── bench_rag.py             # Latency benchmark
 │   ├── run.sh                   # Orchestrator
+│   ├── domains/                 # Domain profiles (*.toml) — see docs/domains/README.md
+│   ├── tests/                   # Unit + e2e tests (pytest)
 │   ├── README.md                # Project README
 │   └── sample_data/             # 5 engineering docs
 ├── docs/
@@ -90,7 +94,31 @@ bash run.sh stop           # stop daemon + LLMs
 
 ## Testing
 
-### Smoke tests
+## Testing
+
+The codebase ships a pytest suite under `v2/tests/`:
+
+```bash
+cd /mnt/data-970-plus/rag-system/v2
+
+# Unit tests (no daemon / GPU needed — pure logic)
+/mnt/data-970-plus/rag-env/bin/python -m pytest tests/test_chunking.py tests/test_prompts.py \
+    tests/test_metadata.py tests/test_condense.py tests/test_extraction_prompt.py -q
+
+# End-to-end tests (require rag-gpu-daemon :8000 live)
+/mnt/data-970-plus/rag-env/bin/python -m pytest tests/test_e2e_chunking.py -q
+
+# Everything
+/mnt/data-970-plus/rag-env/bin/python -m pytest tests/ -q
+```
+
+Unit tests cover: chunking strategies, synthesis-prompt domain branching,
+metadata validation, dict-record condensation, extraction-prompt selection +
+GLiNER domain labels, and Neo4j entry strategies (keyword/vector/hybrid with
+mocked Neo4j + embed). E2E tests hit the live `/ask` + `/ingest` endpoints and
+verify domain routing + chunking strategy end-to-end.
+
+### Smoke tests (live API)
 ```bash
 # Direct API (full synth, caches on first run)
 curl -s -X POST http://127.0.0.1:8000/ask \
@@ -113,28 +141,44 @@ curl -s -X POST http://127.0.0.1:8000/ask \
 curl -s "http://localhost:6333/collections/query_cache" | python -c "import sys,json; d=json.load(sys.stdin); print(f'points: {d[\"result\"][\"points_count\"]}')"
 ```
 
-### Ingest API (v2.5.0)
+### Ingest API (v2.6.0)
+
+`domain` selects a profile (chunking, prompts, collection, entry strategy, metadata schema). Omit it for engineering defaults.
+
 ```bash
 # Single-doc ingest (non-blocking → returns task_id)
 curl -s -X POST http://127.0.0.1:8000/ingest -H "Content-Type: application/json" \
   -d '{"text":"...doc text...","doc_id":"my-doc","doc_type":"Incident","collection":"engineering_chunks"}'
 # → {"task_id":"...","status":"accepted","doc_id":"my-doc"}
 
+# Domain ingest with metadata (routes to medical_chunks, section chunking,
+# medical extraction prompt; metadata stored in payload + surfaced by GET /ingest)
+curl -s -X POST http://127.0.0.1:8000/ingest -H "Content-Type: application/json" \
+  -d '{"text":"...","doc_id":"enc-1","domain":"medical",
+       "metadata":{"patient_id":"P-42","title":"Encounter note","visit_date":"2026-07-11"}}'
+
 # Poll ingest status
 curl -s http://127.0.0.1:8000/ingest/status/<task_id>
-# → {"status":"done","result":{"chunks":4,"entities":8,"timing":{...}}}
+# → {"status":"done","result":{"chunks":4,"entities":8,"extraction_method":"llm","timing":{...}}}
 
-# List docs in a collection
-curl -s "http://127.0.0.1:8000/ingest?collection=engineering_chunks"
+# List docs in a collection (includes per-doc metadata)
+curl -s "http://127.0.0.1:8000/ingest?collection=medical_chunks"
+
+# List all loaded domain profiles
+curl -s http://127.0.0.1:8000/profiles
 
 # List all Qdrant collections
 curl -s http://127.0.0.1:8000/collections
 
 # Delete a doc (Qdrant + Neo4j)
-curl -s -X DELETE "http://127.0.0.1:8000/ingest/my-doc?collection=engineering_chunks"
+curl -s -X DELETE "http://127.0.0.1:8000/ingest/my-doc?collection=medical_chunks"
 # → {"status":"deleted","vectors_deleted":4,"nodes_cleaned":8}
 
-# Multi-domain query (cross-domain / "all")
+# Domain query (hybrid entry, clinical-tone synthesis)
+curl -s -X POST http://127.0.0.1:8000/ask -H "Content-Type: application/json" \
+  -d '{"query":"...","domain":"medical","synthesize":false}'
+
+# Cross-domain query (multiple collections)
 curl -s -X POST http://127.0.0.1:8000/ask -H "Content-Type: application/json" \
   -d '{"query":"...","collection":["engineering_chunks","legal_chunks"],"synthesize":false}'
 ```

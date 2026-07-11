@@ -1,13 +1,19 @@
 # GraphRAG v2 — Version Requirements
 
 **Created:** 2026-07-10, updated 2026-07-11
-**Current:** v2.5.0 ✅ SHIPPED (single-doc ingest API + multi-domain collections)
-**Next:** v2.6.0 (general-purpose domain profiles)
+**Current:** v2.6.0 ✅ SHIPPED (domain profile system: chunking, extraction/synthesis prompts, hybrid entry, metadata schema, citation traceability)
+**Next:** v3.0.0 (agent learning system — see agent-learning-system.md)
 
 > [!NOTE]
 > **v2.5.0 shipped 2026-07-11.** All requirements below are implemented,
 > smoke-tested, and committed (`4d68638` → `449aebc`). serve_cpu.py has full
 > endpoint parity. All P0 review findings resolved. See CHANGELOG.md [2.5.0].
+
+> [!NOTE]
+> **v2.6.0 shipped 2026-07-11.** REQ-2.6.0-1 through REQ-2.6.0-8 implemented,
+> unit + e2e tested (33 pytest tests), and committed (`9afc35e` → `7b545bf`).
+> Domain profiles in `v2/domains/*.toml`; canonical schema in
+> `docs/domains/README.md`. serve_cpu.py retains full endpoint parity.
 
 > [!IMPORTANT]
 > **Review amendments (2026-07-11):** All requirements updated with findings
@@ -263,6 +269,11 @@ before extraction.
 
 ## v2.6.0 — Domain Profile System + General-Purpose RAG
 
+> [!NOTE]
+> **SHIPPED 2026-07-11.** All REQ-2.6.0-1 … REQ-2.6.0-8 are implemented and
+> tested. Profiles in `v2/domains/*.toml`; canonical schema + field reference in
+> `docs/domains/README.md`. Commit range `9afc35e` → `7b545bf`.
+
 **Goal:** Eliminate ALL domain-specific hardcoded assumptions. A `.toml` profile
 file per domain controls chunking, prompts, graph schema, metadata, and entry
 strategy. The same codebase ingests and queries engineering bugs, medical records,
@@ -283,7 +294,7 @@ accounting.toml, hospitality.toml are new.
 
 ```toml
 [domain]
-name = "medical"                           # human-readable
+name = "medical"                           # domain KEY — must match filename (medical.toml)
 collection = "medical_chunks"              # Qdrant collection name
 neo4j_label = "Medical"                    # :Entity:Medical label in Neo4j
 description = "Medical knowledge base — symptoms, diagnoses, medications"

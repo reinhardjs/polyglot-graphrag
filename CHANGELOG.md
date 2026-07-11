@@ -5,6 +5,37 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.6.0] — 2026-07-11 (Domain Profile System + General-Purpose RAG)
+
+### Added
+- **Domain profile system** — `v2/domains/*.toml` (engineering, medical, legal, accounting, hospitality). One TOML per domain controls chunking, prompts, graph schema, metadata, and entry strategy. No code changes to add a domain. `config.load_domain_profile(domain)` reads them.
+- **REQ-3 Pluggable chunking** — `v2/chunking.py` with 4 strategies (`sentence`/`paragraph`/`section`/`fixed`), dispatched from the profile via `embed_late`. Both daemons + `ingest.py` use it; `_build_profile` window scales with chunk size.
+- **REQ-4 Domain-aware extraction prompt** — `extract_graph_llm()` uses `profile[extraction][prompt]` (falls back to `config.EXTRACTION_PROMPT`). GLiNER fallback receives `profile[graph_schema][entity_types]` as domain labels. (Safe token substitution — prompts contain literal `{...}` JSON that breaks `str.format`.)
+- **REQ-5 Domain-aware synthesis prompt** — `v2/prompts.py:build_synthesis_prompt()` is the single source of truth for the E4B prompt, consumed by both `ask.synthesize()` and `retrieve_json._synthesize_nonstream()`. Domain-aware via `profile[synthesis]`; `--domain` flag added to `retrieve_json.py`.
+- **REQ-6 Hybrid Neo4j entry strategy** — `neo4j_subgraph(entry_strategy=...)`: `keyword` (fast token overlap; auto vector fallback on zero overlap), `vector` (cosine), `hybrid` (both in parallel; keyword when overlap≥2 else vector). Selected per profile.
+- **REQ-7 Domain metadata schema** — `ingest_text(metadata=...)` validates against `profile[metadata_schema][fields]` (unknown keys WARN, not dropped). Full meta stored under Qdrant payload `metadata`; surfaced in `GET /ingest` and the `/ask` `contexts_meta`/`sources` blocks.
+- **Citation traceability** — every `/ask` response carries `contexts_numbered`, `contexts_meta`, and `sources` (bibliography mapping `[n]` → `doc_id`). Zero extra DB round-trip.
+- **`GET /profiles`** — lists all domain profiles (name, collection, label, description, chunking, entry strategy). Both daemons.
+- **Tests** — `v2/tests/` pytest suite: chunking (10), extraction prompt (4), synthesis prompt (5), metadata (5), condense (2), neo4j entry (4), e2e chunking (3) = 33 tests passing.
+
+### Fixed
+- `write_graph()` missing `chunk_size` param (NameError on every domain ingest).
+- `ask.condense()` `unhashable type: 'dict'` — now normalises dict records, dedupes by `(doc_id, text)`, reranks on text (headless `retrieve_json` path).
+- Same `.format()` JSON-brace bug as extraction now also fixed in `config.EXTRACTION_PROMPT`.
+
+### Endpoints (serve_gpu.py :8000 / serve_cpu.py fallback)
+```
+POST   /ask                     domain | collection: str | list | "all"
+POST   /ingest                  domain, metadata, collection
+GET    /ingest?collection=      list docs per domain (incl. metadata)
+GET    /ingest/status/{task_id}
+DELETE /ingest/{doc_id}?collection=
+GET    /collections
+GET    /profiles                list domain profiles
+```
+
+---
+
 ## [2.5.0] — 2026-07-11 (Single-Doc Ingest API + Multi-Domain Collections)
 
 ### Added

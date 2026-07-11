@@ -43,9 +43,11 @@ offload, no external API calls.
 |------|---------------|
 | `serve_gpu.py` | **Primary daemon.** Preloads aux models on GPU (identities from config). Exposes `/ask`, `/embed_query`, `/embed_late`, `/rerank`, `/extract_graph`, `/models`, `/health`. |
 | `serve_cpu.py` | **Fallback daemon.** Same API, runs models on CPU. Used if CUDA torch unavailable. |
-| `ingest.py` | Document→Qdrant+Neo4j. Late-chunk embeds, LLM extraction (E2B) or GLiNER fallback, vector-driven entity resolution (Jina v3 → Neo4j index). |
-| `ask.py` | CLI client + shared library. `parallel_retrieve()` (Qdrant+Neo4j threaded), `condense()` (rerank), `synthesize()` (E4B stream). |
-| `config.py` | All constants: ports, credentials, token limits, entity resolution threshold, vector index config. No YAML parsing. |
+| `ingest.py` | Document→Qdrant+Neo4j. Late-chunk embeds (strategy from profile), LLM extraction (E2B) or GLiNER fallback (domain entity types), vector-driven entity resolution (Jina v3 → Neo4j index). |
+| `ask.py` | CLI client + shared library. `parallel_retrieve()` (Qdrant+Neo4j threaded, configurable entry strategy), `condense()` (rerank, dict-record aware), `synthesize()` (E4B stream, uses prompts.py). |
+| `chunking.py` | **Pluggable chunkers (v2.6.0 REQ-3).** `sentence`/`paragraph`/`section`/`fixed` strategies as pure functions — directly unit-testable, no GPU. |
+| `prompts.py` | **Shared synthesis-prompt builder (v2.6.0 REQ-5).** Single source of truth for the E4B prompt; domain-aware via profile `[synthesis]`. |
+| `config.py` | All constants: ports, credentials, token limits, entity resolution threshold, vector index config, `load_domain_profile()`. No YAML parsing. |
 | `run.sh` | Orchestrator: `serve`, `ingest`, `ask`, `retrieve`, `health`, `stop`. |
 | `bench_rag.py` | Per-stage latency benchmark (3 queries × 3 iterations). |
 | `retrieve_json.py` | Headless retrieval → JSON. Used by Hermes plugin (legacy; now prefers /ask). |
@@ -53,8 +55,8 @@ offload, no external API calls.
 ### Data stores
 | Store | Collection/DB | Contents |
 |-------|--------------|----------|
-| Qdrant | `engineering_chunks` | Document chunks: dense 1024-d vectors, hash-based sparse vectors, metadata |
-| Neo4j | `neo4j` | Entity graph: nodes (id, name, type, name_vector, aliases[], source_docs[], profile), edges (ASSOCIATED_WITH, etc.) |
+| Qdrant | `engineering_chunks`, `medical_chunks`, `legal_chunks`, `accounting_chunks`, `hospitality_chunks` (one per domain) | Document chunks: dense 1024-d vectors, hash-based sparse vectors, payload `{doc_id, chunk_idx, text, doc_type, checksum, metadata}` |
+| Neo4j | `neo4j` | Entity graph: nodes (id, name, type, name_vector, aliases[], source_docs[], profile, `:Entity:<Domain>` label), edges (ASSOCIATED_WITH, domain-specific types) |
 
 ## Data flow
 
@@ -78,7 +80,8 @@ user query
   │     └─ hit → return cached answer (<0.01s)
   ├─[3] PARALLEL:
   │     Thread-A: Qdrant hybrid (dense + hash-based sparse, RRF fusion)
-  │     Thread-B: Neo4j k-hop (keyword-overlap entry → 2-hop traversal)
+  │     Thread-B: Neo4j k-hop (entry node selected by profile strategy:
+│              keyword overlap / vector cosine / hybrid — v2.6.0 REQ-6)
   ├─[4] fuse + dedupe → rerank (BGE, in-process on GPU)
   ├─[5] synthesize (E4B :8084, streamed)  [if synthesize=true]
   │     └─ reasoning trace (stdout only) → clean answer (API field)
@@ -102,7 +105,7 @@ CUDA context + overhead  | 0.5       |                          |
 ```
 > GLiNER not in this total — only loaded if `/extract_graph` is called (ingest fallback), adding ~1.6 GB.
 
-## Performance (RTX 3060, all models on GPU, v2.5.0)
+## Performance (RTX 3060, all models on GPU, v2.6.0)
 
 | Stage | GPU (serve_gpu.py) | CPU (serve_cpu.py, standalone) |
 |-------|-------------------|-------------------------------|
@@ -122,7 +125,7 @@ Cache hit (synthesize=true): <0.01s — 50× faster than cold.
 
 2. **Neo4j node profiles** — each Entity stores a 1-3 sentence context window from the source document. This makes the graph leg of retrieval useful (nodes carry actual text, not just labels).
 
-3. **Keyword-overlap entry selection** — finding the Neo4j entry node by word overlap is fast (~1ms) and effective for 95% of queries (entity IDs like `bug-204`, `pr-482`, `adr-014` match naturally). Vector-similarity fallback only triggers when overlap finds zero candidates.
+3. **Configurable entry selection (v2.6.0 REQ-6)** — the Neo4j entry node is chosen per domain profile: `keyword` (word-overlap, ~1ms, effective for 95% of queries with technical IDs like `bug-204`), `vector` (embed query + candidate names, cosine — needed for natural-language queries like "chest pain treatment"), or `hybrid` (both in parallel; keyword when overlap≥2 else vector). The keyword path auto-falls back to vector when overlap finds zero candidates, so NL queries never silently return nothing.
 
 4. **One-call `/ask` API** — a single HTTP POST runs the full pipeline. Embed + rerank run IN-PROCESS on the resident GPU models (no HTTP self-loop). Only E4B synthesis is a cross-process call.
 
@@ -144,11 +147,16 @@ Cache hit (synthesize=true): <0.01s — 50× faster than cold.
 
 13. **Fully modular config** — every model-specific behavior is a config flag, not hardcoded. `EMBED_TRUST_REMOTE`, `EMBED_USE_HALF`, `EMBED_TASK_PASSAGE`, `EMBED_TASK_QUERY`, `RERANK_USE_HALF`, `EXTRACTION_READS_REASONING`. Swap any component by editing config.py — no code changes. `GET /models` endpoint returns current identity + flags for verification.
 
+14. **Citation traceability (v2.6.0)** — every `/ask` response (synthesize on or off) carries `contexts_numbered` (`[1]`, `[2]`, …), `contexts_meta` (per-block `doc_id`/`doc_type`/`chunk_idx`), and a `sources` bibliography mapping `[n]` → `doc_id`. The `doc_id` was already fetched on every query and discarded; retaining it is zero-cost (no extra DB round-trip). Graph-only hits resolve to their source via each entity's `source_doc`. The `doc_id` is a technical slug (e.g. `bug-204-checkout-cascade`); human-readable titles/authors come from the domain `metadata` schema (REQ-7) and surface in `GET /ingest` + the Qdrant payload.
+
 ## Known gaps
 
-- Edge types are almost all `ASSOCIATED_WITH` (E2B JSON tends to omit relationship semantics — GLiNER fallback co-occurrence is the safety net).
+- Edge types are almost all `ASSOCIATED_WITH` (E2B JSON tends to omit relationship semantics — GLiNER fallback co-occurrence is the safety net). Domain profiles can declare richer edge types (see `legal.toml`).
 - Entity resolution threshold (0.88) is a tunable constant — higher reduces false merges, lower connects more variants.
 - No multi-turn conversation support (each query is stateless).
-- **No incremental ingest** — currently batch-only (ingest.py rebuilds all). `/ingest` endpoint planned (see `docs/ingest-endpoint-plan.md`) for single-doc updates. Frequent engineering doc changes need this + optional file-watcher.
-- **Single-domain only** — Qdrant collection is hardcoded to `engineering_chunks`. Multi-domain support (legal, hospitality, accounting, etc.) is planned via namespace-based collections and Neo4j domain labels (see `docs/multi-domain-plan.md`).
-- **Domain-agnostic gaps** — 11 hardcoded assumptions prevent drop-in use for medical diagnosis, legal research, accounting, etc. (entity types in prompts, chunking strategy, metadata schema, edge types). Domain profile system (.toml per domain) planned (see `docs/general-purpose-rag-plan.md`).
+
+### Resolved in v2.5.0 / v2.6.0
+
+- ~~**No incremental ingest**~~ — DONE. `POST /ingest` (non-blocking, task_id + status polling) ships single-doc updates + optional `if_checksum` incremental guard + `DELETE /ingest/{doc_id}` (v2.5.0).
+- ~~**Single-domain only**~~ — DONE. Namespace collections (`engineering_chunks`, `medical_chunks`, …) + Neo4j `:Entity:<Domain>` labels give per-domain isolation and cross-domain queries via `collection: [...]` (v2.6.0 REQ-1/2).
+- ~~**Domain-agnostic gaps (11 hardcoded assumptions)**~~ — DONE. Domain profile system (`v2/domains/*.toml`) drives chunking (REQ-3), extraction prompt (REQ-4), synthesis prompt (REQ-5), Neo4j entry strategy (REQ-6), and metadata schema (REQ-7). See `docs/domains/README.md`.

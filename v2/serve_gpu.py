@@ -682,6 +682,34 @@ def list_collections():
     return {"collections": cols}
 
 
+@app.get("/profiles")
+def list_profiles():
+    """List all loaded domain profiles (name, collection, label, description).
+
+    v2.6.0 REQ-8 — surfaces the TOML profiles from v2/domains/ so callers can
+    discover available domains without reading files.
+    """
+    import config as cfg
+    import glob as _glob
+    import os as _os
+    out = []
+    ddir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "domains")
+    for path in sorted(_glob.glob(_os.path.join(ddir, "*.toml"))):
+        try:
+            p = cfg.load_domain_profile(_os.path.splitext(_os.path.basename(path))[0])
+            out.append({
+                "domain": p["domain"]["name"],
+                "collection": p["domain"]["collection"],
+                "neo4j_label": p["domain"]["neo4j_label"],
+                "description": p["domain"].get("description", ""),
+                "chunking": p.get("chunking", {}).get("strategy", "sentence"),
+                "entry_strategy": p.get("neo4j_entry", {}).get("strategy", "keyword"),
+            })
+        except Exception as e:
+            out.append({"file": _os.path.basename(path), "error": str(e)})
+    return {"profiles": out}
+
+
 @app.get("/health")
 def health():
     return {
