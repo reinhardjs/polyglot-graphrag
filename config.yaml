@@ -3,11 +3,12 @@ paths:
   data_dir: /mnt/data-970-plus/rag-system/data
   logs_dir: /mnt/data-970-plus/rag-system/logs
 
-# LLM (generation + entity/relationship extraction) via local Gemma 4 12B QAT
+# LLM (answer synthesis) — config-driven in v2/config.py (SYNTHESIS_LLM_*).
+# Legacy v1 reference: Gemma 4 E4B QAT Q4_0 on :8084 (was 12B on :8083).
 llm:
-  api_base: http://localhost:8083/v1
+  api_base: http://localhost:8084/v1
   api_key: not-needed
-  model: gemma-4-12B-it-QAT-Q4_0.gguf
+  model: gemma-4-E4B-it-QAT-Q4_0.gguf
   temperature: 0.1
   max_tokens: 1024
   # Reasoning models emit reasoning_content; we read `content` for the answer.

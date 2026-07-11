@@ -1,4 +1,11 @@
-# GraphRAG Engineering Knowledge Base — Architecture Document
+# GraphRAG Engineering Knowledge Base — Architecture Document (LEGACY v1)
+
+> [!WARNING]
+> **Legacy v1 document — superseded by `v2/`.** Live architecture docs:
+> `docs/architecture/`. In v2 the synthesis LLM is **Gemma 4 E4B QAT Q4_0 on
+> `:8084`** (not 12B on :8083) and extraction is **Gemma 4 E2B QAT Q4_0 on
+> `:8082`** (LLM-based, not regex). Both are config-driven in `v2/config.py`.
+> Kept for historical rationale.
 
 ## Overview
 
@@ -8,14 +15,14 @@ Qdrant with knowledge-graph traversal on Neo4j, using a zero-shot router to
 select the retrieval path and a cross-encoder reranker to condense context
 before final LLM synthesis.
 
-**Key design constraint:** Gemma 4 12B is a reasoning model — it cannot produce
-reliable JSON output. Therefore graph extraction during ingestion is 100%
-regex-based (deterministic). Gemma is used ONLY for answer generation during
-retrieval.
+**Key design constraint:** Gemma 4 is a reasoning model — it cannot produce
+reliable JSON output. Therefore graph extraction during ingestion is done via
+LLM (Gemma 4 E2B on :8082, with GLiNER regex fallback). Gemma is used ONLY for
+answer generation during retrieval (Gemma 4 E4B on :8084).
 
 All data lives on the 458 GB NVMe at `/mnt/data-970-plus`. CPU-based embedding/
-routing/reranking models coexist with a single GPU-hosted Gemma instance on
-`:8083`.
+reranking models coexist with two GPU-hosted Gemma instances on `:8082` (E2B)
+and `:8084` (E4B).
 
 ---
 
@@ -23,8 +30,9 @@ routing/reranking models coexist with a single GPU-hosted Gemma instance on
 
 ```
 GPU:  NVIDIA RTX 3060 (12 GB VRAM)
-      Gemma 4 12B QAT Q4_0  →  9,855 / 12,288 MiB  (80%)
-      262K context (-c 262144)
+      Gemma 4 E4B QAT Q4_0  →  ~3.0 GB  (:8084 synthesis)
+      Gemma 4 E2B QAT Q4_0  →  ~1.5 GB  (:8082 extraction)
+      128K–256K context
 
 CPU:  Jina v3 embeddings    →  1,024-d vectors, ~1.7s load
       all-MiniLM-L6-v2      →  384-d routing, ~12s load
@@ -34,7 +42,8 @@ Disk: /mnt/data-970-plus    →  458 GB NVMe (333 GB free)
 ```
 
 **Model roles:**
-- **Gemma 4 12B** (`:8083`, GPU) → answer generation ONLY
+- **Gemma 4 E2B** (`:8082`, GPU) → graph extraction (LLM primary, GLiNER fallback)
+- **Gemma 4 E4B** (`:8084`, GPU) → answer generation ONLY
 - **Jina v3** (CPU) → chunk + query embedding
 - **MiniLM** (CPU) → zero-shot routing
 - **bge-reranker** (CPU) → context condensation
@@ -51,10 +60,10 @@ Disk: /mnt/data-970-plus    →  458 GB NVMe (333 GB free)
 | Embedding (chunks)     | `jinaai/jina-embeddings-v3` (1024-d)| Encode doc sentences + queries | CPU |
 | Routing                | `all-MiniLM-L6-v2`                  | Classify intent (graph vs vector) | CPU |
 | Reranking              | `BAAI/bge-reranker-base`            | Score + condense retrieved context | CPU |
-| LLM (generation)       | Gemma 4 12B QAT Q4_0                | Answer synthesis from condensed context | `:8083` (GPU) |
+| LLM (generation)       | Gemma 4 E4B QAT Q4_0 (config-driven via `SYNTHESIS_LLM_MODEL`) | Answer synthesis from condensed context | `:8084` (GPU) |
 | Graph extraction       | Regex (deterministic)               | Extract entities + relationships from docs | CPU, instant |
 | KV profiles            | Sentence-window from source doc      | Dense 1-3 sentence summaries per entity | CPU, instant |
-| LLM Client             | OpenAI Python SDK                    | Talk to Gemma on `:8083` | — |
+| LLM Client             | OpenAI Python SDK                    | Talk to Gemma (E4B) on `:8084` | — |
 | Python Env             | Conda, `/mnt/data-970-plus/rag-env`  | Python 3.11 | — |
 
 ---
@@ -121,10 +130,10 @@ Raw document (MD/TXT)
 sentence embedded independently with `task='retrieval.passage'`. Clean, complete
 chunks, but without global-context pooling.
 
-**To enable LLM-based extraction:** Swap Gemma for a non-reasoning model
-(e.g. Granite 8B) on `:8083`. The `llm_extract()` and `llm_profile()` functions
-in `ingest.py` already contain the prompt structure — they just need a model
-that returns JSON in `content`.
+**Extraction model is already LLM-based in v2** (Gemma 4 E2B on `:8082`, with
+GLiNER regex fallback). To change it, edit `EXTRACTION_LLM_MODEL` in `v2/config.py`
+or the `gemma-4-e2b.service` model path (e.g. point at Granite 8B for clean-JSON
+extraction), then restart the service and re-ingest. No code changes needed.
 
 ---
 
@@ -159,7 +168,7 @@ User query
     │       • Score (query, passage) pairs
     │       • Keep top 50%, minimum 3
     │
-    └──→ [6] Synthesis (Gemma 4 12B on :8083)
+    └──→ [6] Synthesis (Gemma 4 E4B on :8084)
             • Concatenate condensed context
             • Generate answer with source citations
             • Store query + answer in semantic cache
@@ -201,14 +210,15 @@ User query
 - **Relationships:** Typed edges (IMPACTS, DEPENDS_ON, AUTHORED, REFERENCES, FIXES)
 - **Traversal:** 2-hop k-core (degree ≥ 1) from keyword-matched entry node
 
-### 6.6 LLM (Gemma 4 12B) — Answer generation only
+### 6.6 LLM (Gemma 4 E4B) — Answer generation only
 - **Purpose:** Final answer synthesis from condensed context. NOT used for
-  graph extraction or KV profiling.
-- **Model:** `lmstudio-community/gemma-4-12B-it-QAT-GGUF` (Q4_0, 6.5 GB weights)
-- **Context:** 262,144 tokens (`-c 262144`)
-- **Port:** `:8083` (llama-server, OpenAI-compatible API)
-- **Systemd:** `gemma-4-12b.service` (Type=simple, Restart=no)
-- **VRAM:** 9,855 MiB / 12,288 MiB
+  graph extraction (that uses Gemma 4 E2B + GLiNER).
+- **Model:** `gemma-4-E4B-it-QAT-Q4_0.gguf` (config-driven via `SYNTHESIS_LLM_MODEL`
+  in `v2/config.py`; swap to any OpenAI-compatible model without code changes)
+- **Context:** 256K tokens
+- **Port:** `:8084` (llama-server, OpenAI-compatible API)
+- **Systemd:** `gemma-4-e4b.service` (Type=simple, Restart=no)
+- **VRAM:** ~3.0 GB
 
 **Reasoning model behavior:**
 - Emits chain-of-thought in `reasoning_content`
@@ -239,7 +249,7 @@ Patterns matched:
 |---------------------------|----------------------------------------------|
 | Jina native late_chunking | Sentence-split + per-sentence embed           |
 | Ornith 9B for extraction  | Regex (Gemma is reasoning model → can't emit JSON) |
-| GPT-5 / OpenAI cloud      | Local Gemma 4 12B on :8083                   |
+| GPT-5 / OpenAI cloud      | Local Gemma 4 E4B on :8084 (config-driven)    |
 | LLM-generated KV profiles | Doc sentence-window extraction               |
 | k-core depth 2 (k=2)      | k-core degree ≥ 1 (lowered for recall)       |
 | Discard bottom 80%        | Keep top 50%, min 3 (higher recall)          |
@@ -252,10 +262,10 @@ Patterns matched:
 # Start databases
 cd /mnt/data-970-plus/rag-system && docker compose up -d
 
-# Start Gemma (for answer generation)
-sudo systemctl start gemma-4-12b.service
+# Start Gemma (E2B extraction :8082 + E4B synthesis :8084)
+sudo systemctl start gemma-4-e2b.service gemma-4-e4b.service
 
-# Ingest (does NOT need Gemma — uses regex)
+# Ingest (uses E2B LLM extraction; GLiNER fallback)
 bash run.sh ingest /path/to/doc.md --type ADR --author alice
 bash run.sh ingest-folder /mnt/data-970-plus/rag-system/data
 
@@ -285,7 +295,7 @@ bash run.sh serve   # interactive REPL (models load once)
 | Hybrid search (dense + sparse) | ✓ | RRF fusion working |
 | MiniLM zero-shot routing | ✓ | Graph vs vector path selection |
 | bge-reranker condensation | ✓ | Top 50%, min 3 |
-| Gemma synthesis on :8083 | ✓ | Sourced answers from condensed context |
+| Gemma synthesis on :8084 | ✓ | Sourced answers from condensed context |
 | Semantic cache | ✓ | 0-token cache hits confirmed |
 | Regex graph extraction | ✓ | 37 entities, 13 relationships reliably |
 | 2-hop fallback to vector | ✓ | Auto-falls when graph <2 results |

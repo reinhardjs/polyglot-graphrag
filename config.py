@@ -1,7 +1,11 @@
 """
-config.py — Environment config + dual-model OpenAI clients + DB init.
+config.py — LEGACY v1 config (superseded by v2/config.py).
 
-VRAM STRATEGY: Sequential execution. Only ONE model runs at a time:
+DEAD FILE: nothing in the live v2 system imports this. The v2 daemons use
+v2/config.py where synthesis is Gemma 4 E4B on :8084 and extraction is
+Gemma 4 E2B on :8082 (both config-driven). Kept for historical reference.
+
+VRAM STRATEGY (v1, retired): Sequential execution. Only ONE model runs at a time:
   - Ornith 9B (port 8081) for ingestion (graph extraction, KV profiling)
   - Gemma 4 12B (port 8083) for retrieval (final answer generation)
   - Embedding / routing / reranking models run on CPU (no VRAM impact)

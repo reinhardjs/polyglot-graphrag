@@ -1,4 +1,11 @@
-# External Access via Tailscale
+# External Access via Tailscale (LEGACY v1)
+
+> [!WARNING]
+> **Legacy v1 document.** The live RAG API is now `v2/serve_gpu.py` on `:8000`
+> (`POST /ask`). The Gemma endpoints changed: **synthesis is Gemma 4 E4B on
+> `:8084`** and **extraction is Gemma 4 E2B on `:8082`** (was Gemma 4 12B on
+> `:8083`). `api_server.py` / `retrieve.py` no longer exist. For current docs
+> see `docs/`. Kept for historical rationale.
 
 How external agents (Hermes, Claude Code, Pi, custom scripts) can query
 the RAG system from another machine on the same Tailscale network.
@@ -20,7 +27,7 @@ External machines reach the RAG system at `http://<tailscale-ip>:<port>`.
 
 | Service      | Port | Protocol | Purpose |
 |-------------|------|----------|---------|
-| Gemma API   | 8083 | HTTP     | OpenAI-compatible chat (answer generation) |
+| Gemma API (E4B) | 8084 | HTTP | OpenAI-compatible chat (answer synthesis, direct) |
 | Qdrant      | 6333 | HTTP     | Vector search (read chunks) |
 | Qdrant gRPC | 6334 | gRPC     | Vector search (high perf) |
 | Neo4j Bolt  | 7687 | Bolt     | Graph queries |
@@ -42,10 +49,10 @@ set up a lightweight query server on the RAG machine.
 Quick answer without vector/graph retrieval — Gemma uses its own knowledge.
 
 ```bash
-curl http://100.86.53.21:8083/v1/chat/completions \
+curl http://100.86.53.21:8084/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemma-4-12B-it-QAT-Q4_0.gguf",
+    "model": "gemma-4-E4B-it-QAT-Q4_0.gguf",
     "messages": [{"role": "user", "content": "what is BUG-204 about?"}],
     "max_tokens": 512
   }'
@@ -179,9 +186,9 @@ pointed at the Tailscale IP:
 
 ```python
 from openai import OpenAI
-client = OpenAI(base_url="http://100.86.53.21:8083/v1", api_key="not-needed")
+client = OpenAI(base_url="http://100.86.53.21:8084/v1", api_key="not-needed")
 resp = client.chat.completions.create(
-    model="gemma-4-12B-it-QAT-Q4_0.gguf",
+    model="gemma-4-E4B-it-QAT-Q4_0.gguf",
     messages=[{"role": "user", "content": "what is ADR-014 about?"}],
 )
 print(resp.choices[0].message.content)
@@ -210,8 +217,8 @@ the `/ask` endpoint instead for context-augmented answers.
 ```
 [Unit]
 Description=GraphRAG External Query API
-After=gemma-4-12b.service network.target
-Wants=gemma-4-12b.service
+After=gemma-4-e4b.service network.target
+Wants=gemma-4-e4b.service
 
 [Service]
 Type=simple
@@ -246,10 +253,10 @@ curl http://100.86.53.21:9090/ask \
   -H "Content-Type: application/json" \
   -d '{"query": "what is ADR-014 about?"}'
 
-# Test direct Gemma
-curl http://100.86.53.21:8083/v1/chat/completions \
+# Test direct Gemma (E4B synthesis, no RAG)
+curl http://100.86.53.21:8084/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"gemma-4-12B-it-QAT-Q4_0.gguf","messages":[{"role":"user","content":"hello"}],"max_tokens":32}'
+  -d '{"model":"gemma-4-E4B-it-QAT-Q4_0.gguf","messages":[{"role":"user","content":"hello"}],"max_tokens":32}'
 ```
 
 ---

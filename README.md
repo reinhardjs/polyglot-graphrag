@@ -1,9 +1,20 @@
-# GraphRAG Engineering Knowledge Base
+# GraphRAG Engineering Knowledge Base (LEGACY v1 design)
+
+> [!WARNING]
+> **This is the legacy v1 document.** The system was restructured into `v2/`
+> (dual-daemon, config-driven). The live docs are `docs/README.md` and
+> `v2/README.md`. Key differences from v1:
+> - **Synthesis LLM is now `Gemma 4 E4B QAT Q4_0` on `:8084`** (was Gemma 4 12B on `:8083`).
+> - **Extraction LLM is `Gemma 4 E2B QAT Q4_0` on `:8082`** (LLM-based, E2B primary / GLiNER fallback).
+> - Graph extraction is LLM-based (E2B), not regex.
+> - Both model names are config-driven (`v2/config.py`: `SYNTHESIS_LLM_MODEL`,
+>   `EXTRACTION_LLM_MODEL`) — swap without code changes.
+> This file is kept for historical rationale only.
 
 Local-first GraphRAG system for engineering documents. Ingests ADRs, Jira
 tickets, PRs, and wikis into Qdrant (vector) + Neo4j (graph), then answers
 multi-hop questions via zero-shot routing, hybrid search, cross-encoder
-reranking, and Gemma 4 12B synthesis.
+reranking, and Gemma 4 E4B synthesis (`:8084`, config-driven).
 
 **All data on:** `/mnt/data-970-plus` (458 GB NVMe)
 
@@ -16,8 +27,8 @@ reranking, and Gemma 4 12B synthesis.
 cd /mnt/data-970-plus/rag-system
 docker compose up -d
 
-# 2. Make sure Gemma is running on :8083
-sudo systemctl start gemma-4-12b.service
+# 2. Make sure the LLM services are running (:8082 extraction, :8084 synthesis)
+sudo systemctl start gemma-4-e2b.service gemma-4-e4b.service
 
 # 3. Ingest sample docs
 bash run.sh ingest-folder /mnt/data-970-plus/rag-system/data
@@ -63,7 +74,7 @@ Raw doc ──→ Sentence split                        User query
                                                       │    \         /
                                                       │     reranker
                                                       │         │
-                                                      └──→ Gemma 4 12B → answer
+                                                      └──→ Gemma 4 E4B (:8084) → answer
 ```
 
 **Key insight:** Gemma 4 is a reasoning model and cannot produce clean JSON
@@ -79,7 +90,7 @@ Gemma is only used for final answer generation during retrieval.
 | Embedding | Chunk docs + query | `jinaai/jina-embeddings-v3` (1024-d) | CPU, 5.4 GB |
 | Routing | Pick graph vs vector path | `all-MiniLM-L6-v2` (384-d) | CPU, 881 MB |
 | Reranker | Condense retrieved context | `BAAI/bge-reranker-base` | CPU, 3.2 GB |
-| LLM | Answer generation only | `Gemma 4 12B QAT Q4_0` | GPU `:8083`, 9.9 GB |
+| LLM | Answer generation only | `Gemma 4 E4B QAT Q4_0` (config-driven; swap via `SYNTHESIS_LLM_MODEL`) | GPU `:8084`, ~3.0 GB |
 | Graph extraction | Regex-based (not LLM) | ADR/BUG/PR patterns + known components | CPU, instant |
 
 ---

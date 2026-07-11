@@ -1,9 +1,14 @@
 """
-retrieve.py — Retrieval pipeline (read mode).
+retrieve.py — LEGACY v1 retrieval pipeline (superseded by v2/ask.py).
 
-VRAM STRATEGY:
-    Gemma 4 12B (port 8083) is used ONLY at the very end for answer synthesis.
-    All embedding / routing / reranking models run on CPU (no VRAM impact).
+DEAD FILE: not imported by the live v2 system (which uses v2/ask.py +
+v2/serve_gpu.py). Kept for historical reference. In v2 the synthesis LLM is
+Gemma 4 E4B on :8084 and extraction is Gemma 4 E2B on :8082 (both
+config-driven in v2/config.py).
+
+VRAM STRATEGY (v1, retired):
+    Gemma 4 12B (port 8083) was used ONLY at the very end for answer synthesis.
+    All embedding / routing / reranking models ran on CPU (no VRAM impact).
 
 Flow:
     1. Embed query (Jina v3, CPU) → check semantic cache → return if hit
@@ -11,7 +16,7 @@ Flow:
     3a. Path A: Qdrant hybrid search (dense + sparse), top 10
     3b. Path B: Neo4j 2-hop k-core traversal, retrieve KV profiles
     4. Cross-encoder rerank (bge-reranker, CPU) → keep top 50% (min 3)
-    5. Synthesis: pass condensed context to Gemma 4 on :8083
+    5. Synthesis: pass condensed context to Gemma 4 (now E4B on :8084)
 """
 from __future__ import annotations
 import os
