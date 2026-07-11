@@ -70,6 +70,13 @@ EXTRACTION_LLM_BASE_URL = "http://localhost:8082/v1"
 EXTRACTION_LLM_API_KEY  = "not-needed"
 EXTRACTION_LLM_MODEL    = "gemma-4-E2B-it-QAT-Q4_0.gguf"
 
+# Extraction context — how much document text to feed the LLM at once.
+# The E2B model supports 128K context, so 32K chars (~8K tokens) is safe
+# for even long post-mortems. The remaining ~120K tokens are overhead for
+# the JSON output and concurrent slots via unified KV pool.
+EXTRACTION_CHAR_LIMIT = int(os.environ.get("EXTRACTION_CHAR_LIMIT", "32000"))
+EXTRACTION_MAX_TOKENS = int(os.environ.get("EXTRACTION_MAX_TOKENS", "4096"))
+
 # Synthesis: larger reasoning model for answer generation from context.
 SYNTHESIS_LLM_BASE_URL = "http://localhost:8084/v1"
 SYNTHESIS_LLM_API_KEY  = "not-needed"

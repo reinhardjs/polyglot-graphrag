@@ -441,12 +441,12 @@ def extract_graph_llm(doc_id: str, text: str, chunk_size: int = 512,
                     api_key=C.EXTRACTION_LLM_API_KEY)
     prompt = (prompt_tmpl
               .replace("{doc_id}", doc_id)
-              .replace("{text}", text[:8000]))
+              .replace("{text}", text[:C.EXTRACTION_CHAR_LIMIT]))
     try:
         resp = client.chat.completions.create(
             model=C.EXTRACTION_LLM_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=2048, temperature=0.0,
+            max_tokens=C.EXTRACTION_MAX_TOKENS, temperature=0.0,
         )
         content = resp.choices[0].message.content or ""
         m = re.search(r"\{.*\}", content, re.DOTALL)
