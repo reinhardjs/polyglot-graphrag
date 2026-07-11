@@ -248,10 +248,15 @@ def ask(req: AskReq):
         result = CR.run_crag(req.query, domain=req.domain,
                              synthesize=req.synthesize)
         contexts = result.get("contexts", [])
+        source = result.get("route")
+        actual_path = source
+        if result.get("corrected"):
+            actual_path = "hybrid"
         return {
             "query": req.query,
             "source": "crag",
-            "path": result.get("route"),
+            "path": actual_path,
+            "crag_route": source,
             "crag_grade": result.get("grade"),
             "crag_corrected": result.get("corrected"),
             "crag_rewritten_query": result.get("rewritten_query"),
@@ -259,6 +264,8 @@ def ask(req: AskReq):
             "n_contexts": len(contexts),
             "contexts": contexts,
             "contexts_numbered": [f"[{i+1}] {c}" for i, c in enumerate(contexts)],
+            "sources": {},
+            "contexts_meta": [],
             "answer": result.get("answer") or "",
         }
 

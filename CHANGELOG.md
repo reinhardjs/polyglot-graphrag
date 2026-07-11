@@ -36,8 +36,8 @@ All 4 phases shipped. Domain-agnostic throughout. See
   in `v2/sample_data/golden/{engineering,medical}.json`.
 - **Test runner** — `v2/run_tests.sh` (`unit`/`e2e`/`eval`/`phase N`/`all`).
 - **Tests** — +33: graph_prune (8), crag_pipeline (12), evaluate_pipeline (9),
-  e2e neuro-symbolic (5, auto-skip w/o daemon), query_modulator (6 from Phase 1).
-  Full suite: **75 passing**.
+  e2e neuro-symbolic (6, auto-skip w/o daemon), query_modulator (6 from Phase 1).
+  Full suite: **76 passing**.
 
 ### Config
 - `GRAPH_PRUNE_TOP_N=10`, `GRAPH_PRUNE_STRATEGY="degree"`, `CRAG_USE_LLM_ROUTER=False`.

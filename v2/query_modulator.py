@@ -94,7 +94,7 @@ def build_alias_map(domain: Optional[str] = None,
             a = str(a).strip()
             if a:
                 amap[a.lower()] = name
-        # name itself is resolvable to its type (helps ambiguous short forms)
+        # include name itself in the map (self-reference; type expansion deferred)
         if etype:
             amap.setdefault(name.lower(), name)
     return amap

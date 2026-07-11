@@ -378,10 +378,16 @@ def ask(req: AskReq):
                              synthesize=req.synthesize)
         # shape into the standard /ask response contract
         contexts = result.get("contexts", [])
+        source = result.get("route")  # the route decision (graph|hybrid)
+        # Reflect retrieval reality in path (consistent with non-crag semantics).
+        actual_path = source  # default; would be "hybrid" if corrective pass widened
+        if result.get("corrected"):
+            actual_path = "hybrid"  # corrective pass always widens to hybrid
         return {
             "query": req.query,
             "source": "crag",
-            "path": result.get("route"),
+            "path": actual_path,
+            "crag_route": source,
             "crag_grade": result.get("grade"),
             "crag_corrected": result.get("corrected"),
             "crag_rewritten_query": result.get("rewritten_query"),
@@ -389,6 +395,8 @@ def ask(req: AskReq):
             "n_contexts": len(contexts),
             "contexts": contexts,
             "contexts_numbered": [f"[{i+1}] {c}" for i, c in enumerate(contexts)],
+            "sources": {},
+            "contexts_meta": [],
             "answer": result.get("answer") or "",
         }
 

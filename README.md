@@ -210,14 +210,14 @@ Full schema and field reference in
 ```bash
 cd v2
 /mnt/data-970-plus/rag-env/bin/python -m pytest tests/ -q
-# 75 passed — all phases (unit) + cross-domain routing / CRAG (e2e, auto-skip w/o daemon)
+# 76 passed — all phases (unit) + cross-domain routing / CRAG (e2e, auto-skip w/o daemon)
 
 # Or use the one-shot runner:
 bash run_tests.sh unit   # fast, no daemon (51 tests)
 bash run_tests.sh e2e    # live daemon tests
 bash run_tests.sh eval   # Phase 4 eval smoke on golden datasets
 bash run_tests.sh phase N  # one phase (1|2|3|4)
-bash run_tests.sh all    # full suite (75) + eval smoke
+bash run_tests.sh all    # full suite (76) + eval smoke
 ```
 
 ---

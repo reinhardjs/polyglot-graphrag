@@ -33,7 +33,7 @@ def test_crag_factual_routes_to_graph():
     assert r.status_code == 200
     d = r.json()
     assert d["source"] == "crag"
-    assert d["path"] == "graph"        # ID lookup → graph route
+    assert d["crag_route"] == "graph"        # ID lookup → graph route
     assert "crag_trace" in d
     assert d["crag_trace"][0] == "route:graph"
 
@@ -44,7 +44,7 @@ def test_crag_analytical_routes_to_hybrid():
         "domain": "engineering", "crag": True, "synthesize": False}, timeout=120)
     assert r.status_code == 200
     d = r.json()
-    assert d["path"] == "hybrid"
+    assert d["crag_route"] == "hybrid"
     assert d["crag_grade"] in ("CORRECT", "AMBIGUOUS", "INCORRECT")
 
 
@@ -55,6 +55,19 @@ def test_crag_trace_has_evaluate_step():
     assert r.status_code == 200
     trace = r.json()["crag_trace"]
     assert any(s.startswith("evaluate:") for s in trace)
+
+
+def test_crag_response_has_sources_and_contexts_meta():
+    r = requests.post(f"{BASE}/ask", json={
+        "query": "who reported BUG-204?", "domain": "engineering",
+        "crag": True, "synthesize": False}, timeout=120)
+    assert r.status_code == 200
+    d = r.json()
+    # Shape consistency with standard /ask (v2.6.0 contract)
+    assert "sources" in d, "CRAG response missing 'sources'"
+    assert "contexts_meta" in d, "CRAG response missing 'contexts_meta'"
+    assert isinstance(d["sources"], dict)
+    assert isinstance(d["contexts_meta"], list)
 
 
 # ── Phase 2: pruning keeps graph results bounded ──────────────────────────────
