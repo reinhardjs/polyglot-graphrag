@@ -266,7 +266,9 @@ def ask(req: AskReq):
         answer = rag.synthesize(req.query, contexts, profile)
 
     return {"query": req.query, "n_contexts": len(contexts),
-            "contexts": contexts, "answer": answer}
+            "contexts": contexts,
+            "contexts_numbered": [f"[{i+1}] {c}" for i, c in enumerate(contexts)],
+            "answer": answer}
 
 
 # ── Ingest endpoints (parity with serve_gpu.py) ──────────────────────────────

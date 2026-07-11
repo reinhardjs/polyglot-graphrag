@@ -343,6 +343,9 @@ def ask(req: AskReq):
                         "graph_hits": p.get("graph_hits", 0),
                         "n_contexts": len(p.get("contexts", [])),
                         "contexts": p.get("contexts", []),
+                        "contexts_numbered": p.get("contexts_numbered",
+                                                  [f"[{i+1}] {c}" for i, c in
+                                                   enumerate(p.get("contexts", []))]),
                         "rerank_scores": p.get("rerank_scores", []),
                         "answer": p.get("answer", ""),
                         "cache_hit": True,
@@ -394,6 +397,11 @@ def ask(req: AskReq):
     if req.synthesize:
         answer = rag.synthesize(req.query, contexts, profile)
 
+    # Numbered contexts (citation-ready) — present whether or not synthesis
+    # runs, so synthesize:false consumers (Hermes rag_query, etc.) get [1]/[2]
+    # markers that match what E4B would cite.
+    contexts_numbered = [f"[{i+1}] {c}" for i, c in enumerate(contexts)]
+
     result = {
         "query": req.query,
         "source": "llm",
@@ -402,6 +410,7 @@ def ask(req: AskReq):
         "graph_hits": graph_hits,
         "n_contexts": len(contexts),
         "contexts": contexts,
+        "contexts_numbered": contexts_numbered,
         "rerank_scores": rerank_scores,
         "answer": answer,
         "cache_hit": False,
@@ -423,6 +432,7 @@ def ask(req: AskReq):
                             "qdrant_hits": qdrant_hits,
                             "graph_hits": graph_hits,
                             "contexts": contexts,
+                            "contexts_numbered": contexts_numbered,
                             "rerank_scores": rerank_scores,
                             "answer": answer,
                         },
