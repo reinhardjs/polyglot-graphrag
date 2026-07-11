@@ -162,6 +162,7 @@ class RerankReq(BaseModel):
 
 class ExtractReq(BaseModel):
     text: str
+    labels: Optional[List[str]] = None   # v2.6.0: domain GLiNER entity labels
 
 
 class AskReq(BaseModel):
@@ -247,10 +248,14 @@ def extract_graph(req: ExtractReq):
     GLiNER_LABELS; for each sentence we create ASSOCIATED_WITH edges between
     co-occurring entities. The caller (ingest.py) resolves entity identities
     via vector matching against Neo4j's vector index.
+
+    `labels` (v2.6.0): override the entity label set with the domain profile's
+    graph_schema.entity_types for domain-specific extraction.
     """
     import re
     gliner = _load_gliner()
-    preds = gliner.predict_entities(req.text, C.GLINER_LABELS,
+    labels = req.labels or C.GLINER_LABELS
+    preds = gliner.predict_entities(req.text, labels,
                                     threshold=C.GLINER_THRESHOLD)
     nodes, edges, seen = {}, [], set()
     for sent in [s for s in re.split(r'(?<=[.!?])\s+', req.text) if s.strip()]:

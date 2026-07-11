@@ -297,7 +297,8 @@ def delete_doc_qdrant(doc_id: str, collection: str = C.COLL_CHUNKS):
     )
 
 
-def write_graph(doc_id: str, graph: dict, source_text: str, driver) -> int:
+def write_graph(doc_id: str, graph: dict, source_text: str, driver,
+                chunk_size: int = 512) -> int:
     """Write entity nodes + edges into Neo4j using VECTOR-DRIVEN resolution.
 
     Phase A — Node Resolution:
@@ -393,17 +394,25 @@ def extract_graph_llm(doc_id: str, text: str, chunk_size: int = 512,
     """LLM-based graph extraction via the configured extraction model.
 
     PRIMARY extraction path. The extraction model (config: EXTRACTION_LLM)
-    is prompted with config.EXTRACTION_PROMPT — change it in config.py if you
-    swap the model and it needs a different prompt style.
-
+    is prompted with the domain profile's [extraction].prompt when a profile
+    is supplied (v2.6.0 REQ-4); otherwise falls back to config.EXTRACTION_PROMPT.
     Entities are extracted VERBATIM — exactly as they appear in the source text.
     NO translation. Jina v3's cross-lingual vector space handles merging via
     Neo4j's vector index.
     """
     from openai import OpenAI
+    # Domain-aware prompt (REQ-4): profile[extraction][prompt] wins.
+    if profile and profile.get("extraction", {}).get("prompt"):
+        prompt_tmpl = profile["extraction"]["prompt"]
+    else:
+        prompt_tmpl = C.EXTRACTION_PROMPT
+    # Safe substitution: prompts contain literal {...} (JSON schema) that break
+    # str.format(), so replace only our two tokens.
     client = OpenAI(base_url=C.EXTRACTION_LLM_BASE_URL,
                     api_key=C.EXTRACTION_LLM_API_KEY)
-    prompt = C.EXTRACTION_PROMPT.format(doc_id=doc_id, text=text[:8000])
+    prompt = (prompt_tmpl
+              .replace("{doc_id}", doc_id)
+              .replace("{text}", text[:8000]))
     try:
         resp = client.chat.completions.create(
             model=C.EXTRACTION_LLM_MODEL,
@@ -419,7 +428,17 @@ def extract_graph_llm(doc_id: str, text: str, chunk_size: int = 512,
     except Exception as e:
         print(f"[extract] LLM extraction failed: {e}", flush=True)
     print("[extract] falling back to GLiNER", flush=True)
-    return requests.post(C.DAEMON_EXTRACT, json={"text": text}, timeout=300).json()
+    # GLiNER fallback: use domain entity labels when profile provides them.
+    gliner_labels = None
+    if profile and profile.get("graph_schema", {}).get("entity_types"):
+        gliner_labels = profile["graph_schema"]["entity_types"]
+    gl_body = {"text": text}
+    if gliner_labels:
+        gl_body["labels"] = gliner_labels
+    try:
+        return requests.post(C.DAEMON_EXTRACT, json=gl_body, timeout=300).json()
+    except Exception:
+        return {"nodes": [], "edges": []}
 
 
 # ── Ingest one document (text-based, API-callable) ──────────────────────────
@@ -528,7 +547,7 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
             # Step 3 — vector-resolve entities + write to Neo4j
             driver = get_neo4j()
             try:
-                n_nodes = write_graph(doc_id, g, text, driver)
+                n_nodes = write_graph(doc_id, g, text, driver, chunk_size=chunk_size)
             finally:
                 driver.close()
         except Exception as e:
