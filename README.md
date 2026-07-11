@@ -227,6 +227,7 @@ bash run_tests.sh all    # full suite (76) + eval smoke
 | Document | Contents |
 |----------|----------|
 | [docs/README.md](docs/README.md) | Docs index |
+| [docs/architecture/neuro-symbolic-v2.7.0.md](docs/architecture/neuro-symbolic-v2.7.0.md) | Complete v2.7.0 neuro-symbolic architecture + quality improvement roadmap |
 | [docs/architecture/architecture.md](docs/architecture/architecture.md) | System design, VRAM budget, data flow, design decisions |
 | [docs/architecture/full-architecture.md](docs/architecture/full-architecture.md) | Every component, every config knob |
 | [docs/architecture/hermes-integration.md](docs/architecture/hermes-integration.md) | Hermes `rag_query` plugin setup |
