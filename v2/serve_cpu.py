@@ -99,6 +99,10 @@ def _embed_encode(texts, passage=False):
 class EmbedLateReq(BaseModel):
     text: str
     doc_id: str = "doc"
+    strategy: str = "sentence"          # v2.6.0: sentence|paragraph|section|fixed
+    chunk_size: int = 512
+    overlap: int = 64
+    header_prefix: str = "##"
 
 
 class EmbedQueryReq(BaseModel):
@@ -131,6 +135,8 @@ class IngestReq(BaseModel):
     extract_graph: bool = True
     if_checksum: Optional[str] = None
     collection: Optional[str] = None
+    domain: Optional[str] = None         # v2.6.0 profile
+    metadata: Optional[Dict[str, Any]] = None  # v2.6.0 REQ-7
 
 
 # ── Collection resolver (shared semantics with serve_gpu.py) ─────────────────
@@ -159,17 +165,18 @@ def _resolve_collections(collection: Optional[str | List[str]]) -> List[str]:
 # ── Endpoints ────────────────────────────────────────────────────────────────
 @app.post("/embed_late")
 def embed_late(req: EmbedLateReq):
-    import re
-    sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', req.text)
-                 if s.strip()]
-    if not sentences:
-        sentences = [req.text.strip()]
-    vecs = _embed_encode(sentences, passage=True)
+    import chunking as CH
+    chunks = CH.chunk_text(req.text, strategy=req.strategy,
+                           chunk_size=req.chunk_size, overlap=req.overlap,
+                           header_prefix=req.header_prefix)
+    if not chunks:
+        chunks = [req.text.strip()]
+    vecs = _embed_encode(chunks, passage=True)
     return {
         "doc_id": req.doc_id,
         "chunks": [
-            {"chunk_idx": i, "vector": vecs[i].tolist(), "text": sentences[i]}
-            for i in range(len(sentences))
+            {"chunk_idx": i, "vector": vecs[i].tolist(), "text": chunks[i]}
+            for i in range(len(chunks))
         ],
     }
 
@@ -306,14 +313,21 @@ def ask(req: AskReq):
 # ── Ingest endpoints (parity with serve_gpu.py) ──────────────────────────────
 def _run_ingest(task_id: str, req: "IngestReq"):
     import ingest as ingest_mod
+    # Derive collection from domain profile when not explicitly given.
+    target_collection = req.collection
+    if target_collection is None and req.domain:
+        prof = C.load_domain_profile(req.domain)
+        target_collection = prof["domain"]["collection"]
     try:
         with _ingest_tasks_lock:
             _ingest_tasks[task_id]["status"] = "running"
         res = ingest_mod.ingest_text(
             text=req.text, doc_id=req.doc_id,
-            meta={"doc_type": req.doc_type, "author": req.author},
+            meta=({"doc_type": req.doc_type, "author": req.author}
+                  | (req.metadata or {})),
             extract_graph=req.extract_graph, if_checksum=req.if_checksum,
-            collection=req.collection or C.COLL_CHUNKS,
+            collection=target_collection or C.COLL_CHUNKS,
+            domain=req.domain, metadata=req.metadata,
         )
         with _ingest_tasks_lock:
             _ingest_tasks[task_id].update(status="done", result=res)

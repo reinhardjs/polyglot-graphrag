@@ -325,7 +325,10 @@ def write_graph(doc_id: str, graph: dict, source_text: str, driver) -> int:
             raw_name = node["id"]
             entity_type = node.get("type", "Unknown")
             resolved_id = resolver[raw_name]
-            profile = _build_profile(raw_name, source_text)
+            # Profile window scales with chunk size so large-chunk strategies
+            # (section/fixed) still surface enough surrounding context.
+            prof_window = max(2, chunk_size // 256)
+            profile = _build_profile(raw_name, source_text, window=prof_window)
             name_vec = _embed_name(raw_name)
 
             # Check if this exact name is NEW to this resolved node
@@ -385,7 +388,8 @@ def write_graph(doc_id: str, graph: dict, source_text: str, driver) -> int:
 
 
 # ── LLM / GLiNER extraction ───────────────────────────────────────────────────
-def extract_graph_llm(doc_id: str, text: str) -> dict:
+def extract_graph_llm(doc_id: str, text: str, chunk_size: int = 512,
+                      profile: dict = None) -> dict:
     """LLM-based graph extraction via the configured extraction model.
 
     PRIMARY extraction path. The extraction model (config: EXTRACTION_LLM)
@@ -421,7 +425,8 @@ def extract_graph_llm(doc_id: str, text: str) -> dict:
 # ── Ingest one document (text-based, API-callable) ──────────────────────────
 def ingest_text(text: str, doc_id: str, meta: dict | None = None,
                 extract_graph: bool = True, if_checksum: str = None,
-                collection: str = C.COLL_CHUNKS) -> dict:
+                collection: str = C.COLL_CHUNKS,
+                domain: str = None, metadata: dict | None = None) -> dict:
     """Ingest a single document's text into Qdrant + Neo4j.
 
     Extracted from ingest_file() so the daemon's /ingest endpoint and the CLI
@@ -431,11 +436,39 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
     to C.COLL_CHUNKS (engineering_chunks). The collection is created on first
     use via ensure_collection().
 
+    `domain` (v2.6.0): selects a profile (TOML). When set, chunking strategy,
+    extraction prompt, and metadata validation are taken from the profile
+    instead of hardcoded defaults. Unknown domain → engineering profile.
+
     If `if_checksum` is provided and matches the stored Qdrant payload checksum,
     returns {"status": "unchanged", "skipped": True} in <10ms (no re-extraction).
     """
     import time
-    meta = meta or {"doc_type": "eng", "author": "unknown"}
+    import config as C
+    # Resolve domain profile (v2.6.0) — drives chunking + extraction + metadata.
+    profile = C.load_domain_profile(domain) if domain else None
+    chunk_cfg = (profile or {}).get("chunking", {}) if profile else {}
+    strategy = chunk_cfg.get("strategy", "sentence")
+    chunk_size = chunk_cfg.get("chunk_size", 512)
+    overlap = chunk_cfg.get("overlap", 64)
+    header_prefix = chunk_cfg.get("section_header_prefix", "##")
+
+    meta = dict(meta or {"doc_type": "eng", "author": "unknown"})
+    # Domain profile enriches meta (collection name + default doc_type).
+    if profile:
+        meta.setdefault("doc_type", (profile["domain"].get("name") or "eng")[:3])
+        meta["domain"] = profile["domain"]["name"]
+    # REQ-7: validate caller metadata against profile.metadata_schema.fields.
+    if profile and metadata:
+        allowed = set(profile.get("metadata_schema", {}).get("fields", []))
+        for k, v in metadata.items():
+            if allowed and k not in allowed:
+                # Unknown field → warn (do not drop), keep for transparency.
+                print(f"[ingest] WARNING: metadata field '{k}' not in "
+                      f"profile schema for domain '{profile['domain']['name']}'",
+                      flush=True)
+            meta[k] = v
+
     checksum = hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     # ── Incremental guard: skip if unchanged ──
@@ -474,9 +507,12 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
 
     t_clean = time.time()
 
-    # Step 1 — late-chunked vectors -> Qdrant
+    # Step 1 — late-chunked vectors -> Qdrant (strategy from domain profile)
     r = requests.post(C.DAEMON_EMBED_LATE,
-                      json={"text": text, "doc_id": doc_id}, timeout=300).json()
+                      json={"text": text, "doc_id": doc_id,
+                            "strategy": strategy, "chunk_size": chunk_size,
+                            "overlap": overlap, "header_prefix": header_prefix},
+                      timeout=300).json()
     n_chunks = write_vectors(doc_id, r["chunks"], meta, checksum=checksum,
                              collection=collection)
     t_embed = time.time()
@@ -486,7 +522,8 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
     extraction_method = "none"
     if extract_graph:
         try:
-            g = extract_graph_llm(doc_id, text)
+            g = extract_graph_llm(doc_id, text, chunk_size=chunk_size,
+                                  profile=profile)
             extraction_method = "llm"
             # Step 3 — vector-resolve entities + write to Neo4j
             driver = get_neo4j()

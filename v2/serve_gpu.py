@@ -151,11 +151,6 @@ def _load_gliner():
 
 
 # ── Request schemas ──────────────────────────────────────────────────────────
-class EmbedLateReq(BaseModel):
-    text: str
-    doc_id: str = "doc"
-
-
 class EmbedQueryReq(BaseModel):
     text: str
 
@@ -186,34 +181,41 @@ class IngestReq(BaseModel):
     extract_graph: bool = True
     if_checksum: Optional[str] = None   # if provided, skip if unchanged
     collection: Optional[str] = None     # Qdrant collection; None→default engineering_chunks
+    domain: Optional[str] = None         # v2.6.0 profile (engineering/medical/...)
+    metadata: Optional[Dict[str, Any]] = None  # v2.6.0 REQ-7 domain metadata
 
 
-class IngestStatusReq(BaseModel):
-    pass
+class EmbedLateReq(BaseModel):
+    text: str
+    doc_id: str = "doc"
+    strategy: str = "sentence"          # v2.6.0: sentence|paragraph|section|fixed
+    chunk_size: int = 512               # max tokens per chunk (token-estimate)
+    overlap: int = 64                   # token overlap between chunks
+    header_prefix: str = "##"          # for section strategy
 
 
-# ── Endpoints ────────────────────────────────────────────────────────────────
 @app.post("/embed_late")
 def embed_late(req: EmbedLateReq):
-    """Late-style embedding: sentence-split, embed each.
+    """Late-style embedding: chunk per the requested strategy, embed each.
 
-    Uses the task from config.EMBED_TASK_PASSAGE (Jina: "retrieval.passage").
-    For vanilla models (BGE, Gemma), it's None — standard encode().
+    Chunking is dispatched via chunking.py (v2.6.0 REQ-3) so it is testable
+    and domain-configurable. Uses config.EMBED_TASK_PASSAGE for the encode task.
     """
-    import re
-    sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', req.text)
-                 if s.strip()]
-    if not sentences:
-        sentences = [req.text.strip()]
+    import chunking as CH
+    chunks = CH.chunk_text(req.text, strategy=req.strategy,
+                           chunk_size=req.chunk_size, overlap=req.overlap,
+                           header_prefix=req.header_prefix)
+    if not chunks:
+        chunks = [req.text.strip()]
     encode_kw = {"convert_to_numpy": True, "show_progress_bar": False}
     if C.EMBED_TASK_PASSAGE:
         encode_kw["task"] = C.EMBED_TASK_PASSAGE
-    vecs = _jina.encode(sentences, **encode_kw)
+    vecs = _jina.encode(chunks, **encode_kw)
     return {
         "doc_id": req.doc_id,
         "chunks": [
-            {"chunk_idx": i, "vector": vecs[i].tolist(), "text": sentences[i]}
-            for i in range(len(sentences))
+            {"chunk_idx": i, "vector": vecs[i].tolist(), "text": chunks[i]}
+            for i in range(len(chunks))
         ],
     }
 
@@ -513,16 +515,26 @@ def ingest(req: IngestReq, background_tasks: BackgroundTasks):
 
     def _run():
         import ingest as ingest_mod
+        import config as C
+        # Derive collection from domain profile when not explicitly given
+        # (mirrors /ask routing).
+        target_collection = req.collection
+        if target_collection is None and req.domain:
+            prof = C.load_domain_profile(req.domain)
+            target_collection = prof["domain"]["collection"]
         with _ingest_tasks_lock:
             _ingest_tasks[task_id]["status"] = "running"
         try:
             res = ingest_mod.ingest_text(
                 text=req.text,
                 doc_id=req.doc_id,
-                meta={"doc_type": req.doc_type, "author": req.author},
+                meta=({"doc_type": req.doc_type, "author": req.author}
+                      | (req.metadata or {})),
                 extract_graph=req.extract_graph,
                 if_checksum=req.if_checksum,
-                collection=req.collection or C.COLL_CHUNKS,
+                collection=target_collection or C.COLL_CHUNKS,
+                domain=req.domain,
+                metadata=req.metadata,
             )
             with _ingest_tasks_lock:
                 _ingest_tasks[task_id]["status"] = "done"
