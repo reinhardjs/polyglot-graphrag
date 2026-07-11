@@ -25,6 +25,10 @@ diagram** so you can see exactly what changed.
 - [What Still Needs Improvement](#what-still-needs-improvement)
 - [Architecture Assessment](#architecture-assessment)
 
+See also [docs/guides/model-startup.md](../guides/model-startup.md) for the
+complete model-level reference — every llama-server flag, VRAM breakdown, and
+cold-start sequence.
+
 ---
 
 ## VRAM Layout

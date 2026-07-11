@@ -269,6 +269,7 @@ bash run_tests.sh all    # full suite (76) + eval smoke
 | [docs/architecture/full-architecture.md](docs/architecture/full-architecture.md) | Every component, every config knob |
 | [docs/architecture/hermes-integration.md](docs/architecture/hermes-integration.md) | Hermes `rag_query` plugin setup |
 | [docs/domains/README.md](docs/domains/README.md) | TOML profile schema + how to add a domain |
+| [docs/guides/model-startup.md](docs/guides/model-startup.md) | Every model, every flag, why — llama-server parameters, VRAM allocation, cold-start sequence |
 | [docs/guides/development.md](docs/guides/development.md) | Environment, workflows, testing |
 | [docs/roadmap/neuro-symbolic-plan.md](docs/roadmap/neuro-symbolic-plan.md) | Neuro-Symbolic GraphRAG upgrade (all 4 phases shipped) |
 | [docs/roadmap/agent-learning-system.md](docs/roadmap/agent-learning-system.md) | v3.0.0 self-improving loop (planned) |
