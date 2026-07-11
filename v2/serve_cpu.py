@@ -252,7 +252,9 @@ def ask(req: AskReq):
         target=lambda: q_res.extend(rag.qdrant_search_multi(vec, req.query, collections)))
     t2 = threading.Thread(target=lambda: g_res.extend(
         rag.neo4j_subgraph(req.query,
-                          label=(profile["domain"]["neo4j_label"] if profile else None))))
+                          label=(profile["domain"]["neo4j_label"] if profile else None),
+                          entry_strategy=(profile["neo4j_entry"]["strategy"]
+                                          if profile else "keyword"))))
     t1.start(); t2.start(); t1.join(); t2.join()
 
     # 3. Fuse + cap + rerank (CPU-optimized)

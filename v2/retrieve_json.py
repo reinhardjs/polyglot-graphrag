@@ -58,10 +58,13 @@ def main():
     profile = C.load_domain_profile(domain) if domain else None
     # Derive collection from profile when a domain is given (mirrors /ask).
     collections = [profile["domain"]["collection"]] if profile else None
+    entry_strategy = (profile["neo4j_entry"]["strategy"]
+                      if profile else "keyword")
 
     try:
         vec = ask.embed_query(query)
-        q_res, g_res = ask.parallel_retrieve(vec, query, collections=collections)
+        q_res, g_res = ask.parallel_retrieve(vec, query, collections=collections,
+                                            entry_strategy=entry_strategy)
         contexts = ask.condense(query, q_res, g_res)
         out = {"query": query, "contexts": contexts, "n_contexts": len(contexts)}
         if do_synth:

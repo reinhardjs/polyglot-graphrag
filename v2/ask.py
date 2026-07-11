@@ -131,13 +131,24 @@ def qdrant_search_multi(vec: list, query_text: str,
     return results
 
 
-def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None) -> list:
-    """Keyword-overlap entry + k-hop Neo4j subgraph traversal.
+def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
+                   entry_strategy: str = "keyword") -> list:
+    """Keyword / vector / hybrid entry + k-hop Neo4j subgraph traversal.
 
-    Finds the Entity node whose id has the most keyword overlap with the query,
-    then traverses its neighbourhood. Returns populated profiles (written by
-    ingest.py) as records {"text": prof, "doc_id": source_doc, ...} so graph
-    hits resolve to their source document for citation (v2.6.0).
+    Finds the Entity node to enter the graph from, then traverses its
+    neighbourhood. Returns populated profiles (written by ingest.py) as records
+    {"text": prof, "doc_id": source_doc, ...} so graph hits resolve to their
+    source document for citation (v2.6.0).
+
+    `entry_strategy`:
+      "keyword" (default) — score candidates by token overlap with the query.
+        Fast (1 Cypher read, no embed). Works for technical IDs like `bug-204`.
+      "vector"           — embed the query + each candidate name, pick the
+        highest cosine similarity. Needed for natural-language queries
+        ("chest pain treatment") where no token overlap exists.
+      "hybrid"           — run BOTH in parallel; use keyword entry when its
+        overlap >= 2, otherwise fall back to the vector entry. Best recall.
+
     If `label` is given, restricts the entry-node match to `:Entity:<Label>`
     (v2.6.0 domain isolation).
     """
@@ -154,23 +165,20 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None) -> l
             "LIMIT 500"
         ).data()
 
-    # Score candidates by keyword overlap with query tokens
-    scored = []
-    for r in rows:
-        if not r.get("id"):
-            continue
-        # Overlap against both the canonical id AND the display name.
-        # Use \w+ tokenization so "bug-204" splits into {"bug","204"}
-        tokens = set(re.findall(r"\w+", r["id"].lower())) | \
-                 set(re.findall(r"\w+", (r.get("name") or "").lower()))
-        overlap = len(ql & tokens)
-        if overlap:
-            scored.append((overlap, r))
-    scored.sort(key=lambda x: -x[0])
+    def _keyword_scored():
+        scored = []
+        for r in rows:
+            if not r.get("id"):
+                continue
+            tokens = set(re.findall(r"\w+", r["id"].lower())) | \
+                     set(re.findall(r"\w+", (r.get("name") or "").lower()))
+            overlap = len(ql & tokens)
+            if overlap:
+                scored.append((overlap, r))
+        scored.sort(key=lambda x: -x[0])
+        return scored
 
-    if not scored:
-        # Fallback: embed query, then cosine-similarity score entity names
-        # (slower — only triggered when keyword overlap finds nothing)
+    def _vector_scored():
         q_vec = embed_query(query)
         import numpy as np
         q_np = np.array(q_vec) / (np.linalg.norm(q_vec) + 1e-8)
@@ -184,7 +192,29 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None) -> l
             except Exception:
                 continue
         candidates.sort(key=lambda x: -x[0])
-        scored = candidates[:5]  # top 5 by vector similarity
+        return candidates[:5]
+
+    # Resolve the entry node according to strategy.
+    if entry_strategy == "vector":
+        scored = _vector_scored()
+    elif entry_strategy == "hybrid":
+        # Run both in parallel threads, then pick.
+        import threading
+        kw, vec = [], []
+        t1 = threading.Thread(target=lambda: kw.extend(_keyword_scored()))
+        t2 = threading.Thread(target=lambda: vec.extend(_vector_scored()))
+        t1.start(); t2.start(); t1.join(); t2.join()
+        if kw and kw[0][0] >= 2:
+            scored = kw            # keyword confident enough
+        elif vec:
+            scored = vec          # fall back to vector
+        else:
+            scored = kw
+    else:  # keyword (default)
+        scored = _keyword_scored()
+        if not scored:
+            # No keyword overlap — auto-fall back to vector so NL queries still work.
+            scored = _vector_scored()
 
     out = []
     if scored:
@@ -211,19 +241,21 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None) -> l
 
 
 def parallel_retrieve(vec: list, query: str,
-                      collections: list = None):
+                      collections: list = None, entry_strategy: str = "keyword"):
     """Retrieve from Qdrant (one or more collections) + Neo4j graph in parallel.
 
     `collections` is a list of Qdrant collection names to search. If None,
     defaults to [C.COLL_CHUNKS] (backward compatible). Cross-domain queries
     pass multiple collections; the rerank step fuses them.
+    `entry_strategy` is forwarded to neo4j_subgraph (v2.6.0 REQ-6).
     """
     if collections is None:
         collections = [C.COLL_CHUNKS]
     q_res, g_res = [], []
     t1 = threading.Thread(
         target=lambda: q_res.extend(qdrant_search_multi(vec, query, collections)))
-    t2 = threading.Thread(target=lambda: g_res.extend(neo4j_subgraph(query)))
+    t2 = threading.Thread(target=lambda: g_res.extend(
+        neo4j_subgraph(query, entry_strategy=entry_strategy)))
     t1.start(); t2.start(); t1.join(); t2.join()
     return q_res, g_res
 
