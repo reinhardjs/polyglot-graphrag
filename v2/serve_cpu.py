@@ -107,6 +107,7 @@ class EmbedLateReq(BaseModel):
 
 class EmbedQueryReq(BaseModel):
     text: str
+    domain: Optional[str] = None         # v2.6.0 profile (engineering/medical/...)
 
 
 class RerankReq(BaseModel):
@@ -183,8 +184,10 @@ def embed_late(req: EmbedLateReq):
 
 @app.post("/embed_query")
 def embed_query(req: EmbedQueryReq):
-    vec = _embed_encode([req.text], passage=False)[0]
-    return {"vector": vec.tolist()}
+    from query_modulator import QueryModulator
+    text = QueryModulator.moderate(req.text, domain=req.domain)
+    vec = _embed_encode([text], passage=False)[0]
+    return {"vector": vec.tolist(), "text_used": text}
 
 
 @app.post("/rerank")
@@ -239,7 +242,9 @@ def ask(req: AskReq):
     profile = C.load_domain_profile(req.domain) if req.domain else None
 
     # 1. Embed query (CPU, lazy-load on first call)
-    vec = _embed_encode([req.query], passage=False)[0].tolist()
+    from query_modulator import QueryModulator
+    query_text = QueryModulator.moderate(req.query, domain=req.domain)
+    vec = _embed_encode([query_text], passage=False)[0].tolist()
 
     # 2. Parallel retrieval: Qdrant (multi-collection) + Neo4j
     if req.collection is None and profile is not None:

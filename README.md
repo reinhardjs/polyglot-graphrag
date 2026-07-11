@@ -225,7 +225,8 @@ cd v2
 | [docs/architecture/hermes-integration.md](docs/architecture/hermes-integration.md) | Hermes `rag_query` plugin setup |
 | [docs/domains/README.md](docs/domains/README.md) | TOML profile schema + how to add a domain |
 | [docs/guides/development.md](docs/guides/development.md) | Environment, workflows, testing |
-| [docs/roadmap/version-requirements.md](docs/roadmap/version-requirements.md) | Master specification (v2.5.0 + v2.6.0) |
+| [docs/roadmap/neuro-symbolic-plan.md](docs/roadmap/neuro-symbolic-plan.md) | Neuro-Symbolic GraphRAG upgrade (Phase 1 shipped) |
+| [docs/roadmap/agent-learning-system.md](docs/roadmap/agent-learning-system.md) | v3.0.0 self-improving loop (planned) |
 | [docs/comparison-greycat.md](docs/comparison-greycat.md) | How we compare to GreyCat's unified engine |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
 

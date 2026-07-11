@@ -153,6 +153,7 @@ def _load_gliner():
 # ── Request schemas ──────────────────────────────────────────────────────────
 class EmbedQueryReq(BaseModel):
     text: str
+    domain: Optional[str] = None         # v2.6.0 profile (engineering/medical/...)
 
 
 class RerankReq(BaseModel):
@@ -223,11 +224,15 @@ def embed_late(req: EmbedLateReq):
 
 @app.post("/embed_query")
 def embed_query(req: EmbedQueryReq):
+    # Phase 1: domain-agnostic query modulation (symbolic pre-filtering) —
+    # expands known aliases before embedding so Jina v3 grounds slang correctly.
+    from query_modulator import QueryModulator
+    text = QueryModulator.moderate(req.text, domain=req.domain)
     encode_kw = {"convert_to_numpy": True, "show_progress_bar": False}
     if C.EMBED_TASK_QUERY:
         encode_kw["task"] = C.EMBED_TASK_QUERY
-    vec = _jina.encode([req.text], **encode_kw)[0]
-    return {"vector": vec.tolist()}
+    vec = _jina.encode([text], **encode_kw)[0]
+    return {"vector": vec.tolist(), "text_used": text}
 
 
 @app.post("/rerank")
@@ -326,10 +331,13 @@ def ask(req: AskReq):
     profile = C.load_domain_profile(req.domain) if req.domain else None
 
     # 1. Embed query in-process (resident model on GPU)
+    #    Phase 1: modulate first (expand domain aliases) so embedding is grounded.
+    from query_modulator import QueryModulator
+    query_text = QueryModulator.moderate(req.query, domain=req.domain)
     encode_kw = {"convert_to_numpy": True, "show_progress_bar": False}
     if C.EMBED_TASK_QUERY:
         encode_kw["task"] = C.EMBED_TASK_QUERY
-    vec = _jina.encode([req.query], **encode_kw)[0].tolist()
+    vec = _jina.encode([query_text], **encode_kw)[0].tolist()
 
     # 2. SEMANTIC CACHE
     if req.synthesize and not req.skip_cache:
