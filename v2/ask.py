@@ -230,42 +230,40 @@ def parallel_retrieve(vec: list, query: str,
 
 # ── Condense ──────────────────────────────────────────────────────────────────
 def condense(query: str, q_res: list, g_res: list) -> list:
-    pool = list(dict.fromkeys(q_res + g_res))  # dedupe, keep order
+    # Normalize records (q_res/g_res may be dicts {text,doc_id,...} or strings).
+    def _as_record(x):
+        if isinstance(x, dict):
+            return x
+        return {"text": x, "doc_id": "", "doc_type": "", "chunk_idx": -1}
+
+    def _key(r):
+        return (r.get("doc_id", ""), r.get("text", ""))
+
+    recs = [_as_record(x) for x in q_res] + [_as_record(x) for x in g_res]
+    seen = set()
+    pool = []
+    for r in recs:
+        k = _key(r)
+        if k in seen:
+            continue
+        seen.add(k)
+        pool.append(r)
     if not pool:
         return []
+    texts = [r["text"] for r in pool]
     ranked = requests.post(C.DAEMON_RERANK,
-                           json={"query": query, "docs": pool},
+                           json={"query": query, "docs": texts},
                            timeout=300).json()["ranked"]
     top = sorted(ranked, key=lambda x: x[1], reverse=True)[:C.RERANK_TOP_K]
-    return [pool[i] for i, _ in top]
+    return [pool[i]["text"] for i, _ in top]
 
 
 # ── Synthesize ────────────────────────────────────────────────────────────────
 def synthesize(query: str, contexts: list, profile: dict = None) -> str:
-    ctx = "\n\n".join(f"[{i+1}] {c}" for i, c in enumerate(contexts))
-    if profile and profile.get("synthesis"):
-        syn = profile["synthesis"]
-        role = syn.get("role", "knowledge assistant")
-        tmpl = syn.get("prompt", "")
-        if tmpl and "{context}" in tmpl and "{query}" in tmpl:
-            # Safe substitution — profiles may contain literal {...} (JSON
-            # examples) that break str.format(); replace only our two tokens.
-            prompt = (tmpl
-                      .replace("{context}", ctx)
-                      .replace("{query}", query))
-        else:
-            prompt = (
-                f"You are a {role}. Answer using ONLY the context. "
-                f"Cite sources. If missing, say so.\n\n"
-                f"CONTEXT:\n{ctx}\n\nQUESTION: {query}"
-            )
-    else:
-        prompt = (
-            "Answer the question using ONLY the context. "
-            "Cite source numbers. If missing, say so.\n\n"
-            f"CONTEXT:\n{ctx}\n\nQUESTION: {query}"
-        )
-    prompt = prompt[: C.MAX_TOKENS_CONTEXT * 4]
+    # Prompt built by shared prompts.py (v2.6.0 REQ-5) — single source of truth
+    # reused by retrieve_json.py. Domain-aware via profile[synthesis].
+    import prompts as P
+    prompt = P.build_synthesis_prompt(query, contexts, profile)
     client = OpenAI(base_url=C.SYNTHESIS_LLM_BASE_URL, api_key=C.SYNTHESIS_LLM_API_KEY)
     stream = client.chat.completions.create(
         model=C.SYNTHESIS_LLM_MODEL,

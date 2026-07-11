@@ -20,15 +20,15 @@ import config as C
 import ask  # reuse embed_query, parallel_retrieve, condense, synthesize helpers
 
 
-def _synthesize_nonstream(query: str, contexts: list) -> str:
-    """Non-streaming synthesis via E4B (ask.synthesize streams to stdout)."""
+def _synthesize_nonstream(query: str, contexts: list, profile: dict = None) -> str:
+    """Non-streaming synthesis via E4B (ask.synthesize streams to stdout).
+
+    Uses the shared prompts.build_synthesis_prompt (v2.6.0 REQ-5) so the
+    domain-aware prompt logic lives in one place.
+    """
+    import prompts as P
     from openai import OpenAI
-    ctx = "\n\n".join(f"[{i+1}] {c}" for i, c in enumerate(contexts))
-    prompt = (
-        "Answer the question using ONLY the context. "
-        "Cite source numbers. If missing, say so.\n\n"
-        f"CONTEXT:\n{ctx}\n\nQUESTION: {query}"
-    )[: C.MAX_TOKENS_CONTEXT * 4]
+    prompt = P.build_synthesis_prompt(query, contexts, profile)
     client = OpenAI(base_url=C.SYNTHESIS_LLM_BASE_URL, api_key=C.SYNTHESIS_LLM_API_KEY)
     resp = client.chat.completions.create(
         model=C.SYNTHESIS_LLM_MODEL,
@@ -42,21 +42,33 @@ def _synthesize_nonstream(query: str, contexts: list) -> str:
 def main():
     argv = sys.argv[1:]
     do_synth = False
-    if argv and argv[0] == "--synthesize":
-        do_synth = True
+    domain = None
+    while argv and argv[0].startswith("--"):
+        if argv[0] == "--synthesize":
+            do_synth = True
+        elif argv[0] == "--domain" and len(argv) > 1:
+            domain = argv[1]
+            argv = argv[1:]
         argv = argv[1:]
     query = argv[0] if argv else ""
     if not query.strip():
         print(json.dumps({"error": "empty query"}))
         sys.exit(2)
 
+    profile = C.load_domain_profile(domain) if domain else None
+    # Derive collection from profile when a domain is given (mirrors /ask).
+    collections = [profile["domain"]["collection"]] if profile else None
+
     try:
         vec = ask.embed_query(query)
-        q_res, g_res = ask.parallel_retrieve(vec, query)
+        q_res, g_res = ask.parallel_retrieve(vec, query, collections=collections)
         contexts = ask.condense(query, q_res, g_res)
         out = {"query": query, "contexts": contexts, "n_contexts": len(contexts)}
         if do_synth:
-            out["answer"] = _synthesize_nonstream(query, contexts) if contexts else ""
+            out["answer"] = (_synthesize_nonstream(query, contexts, profile)
+                             if contexts else "")
+        if domain:
+            out["domain"] = domain
         print(json.dumps(out, ensure_ascii=False))
     except Exception as e:
         print(json.dumps({"error": f"{type(e).__name__}: {e}", "query": query}))
