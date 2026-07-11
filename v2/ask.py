@@ -116,20 +116,23 @@ def qdrant_search_multi(vec: list, query_text: str,
     return results
 
 
-def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS) -> list:
+def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None) -> list:
     """Keyword-overlap entry + k-hop Neo4j subgraph traversal.
 
     Finds the Entity node whose id has the most keyword overlap with the query,
     then traverses its neighbourhood. Returns populated profiles (written by
     ingest.py) for retrieval. Fast — one Cypher query, no embedding calls.
+    If `label` is given, restricts the entry-node match to `:Entity:<Label>`
+    (v2.6.0 domain isolation).
     """
     driver = GraphDatabase.driver(C.NEO4J_URI,
                                   auth=(C.NEO4J_USER, C.NEO4J_PASSWORD))
 
+    label_clause = f":{label}" if label else ""
     ql = set(re.findall(r"\w+", query.lower()))
     with driver.session() as s:
         rows = s.run(
-            "MATCH (n:Entity) "
+            f"MATCH (n:Entity{label_clause}) "
             "RETURN n.id AS id, n.name AS name, n.profile AS prof "
             "LIMIT 500"
         ).data()
@@ -217,13 +220,31 @@ def condense(query: str, q_res: list, g_res: list) -> list:
 
 
 # ── Synthesize ────────────────────────────────────────────────────────────────
-def synthesize(query: str, contexts: list) -> str:
+def synthesize(query: str, contexts: list, profile: dict = None) -> str:
     ctx = "\n\n".join(f"[{i+1}] {c}" for i, c in enumerate(contexts))
-    prompt = (
-        "Answer the question using ONLY the context. "
-        "Cite source numbers. If missing, say so.\n\n"
-        f"CONTEXT:\n{ctx}\n\nQUESTION: {query}"
-    )[: C.MAX_TOKENS_CONTEXT * 4]
+    if profile and profile.get("synthesis"):
+        syn = profile["synthesis"]
+        role = syn.get("role", "knowledge assistant")
+        tmpl = syn.get("prompt", "")
+        if tmpl and "{context}" in tmpl and "{query}" in tmpl:
+            # Safe substitution — profiles may contain literal {...} (JSON
+            # examples) that break str.format(); replace only our two tokens.
+            prompt = (tmpl
+                      .replace("{context}", ctx)
+                      .replace("{query}", query))
+        else:
+            prompt = (
+                f"You are a {role}. Answer using ONLY the context. "
+                f"Cite sources. If missing, say so.\n\n"
+                f"CONTEXT:\n{ctx}\n\nQUESTION: {query}"
+            )
+    else:
+        prompt = (
+            "Answer the question using ONLY the context. "
+            "Cite source numbers. If missing, say so.\n\n"
+            f"CONTEXT:\n{ctx}\n\nQUESTION: {query}"
+        )
+    prompt = prompt[: C.MAX_TOKENS_CONTEXT * 4]
     client = OpenAI(base_url=C.SYNTHESIS_LLM_BASE_URL, api_key=C.SYNTHESIS_LLM_API_KEY)
     stream = client.chat.completions.create(
         model=C.SYNTHESIS_LLM_MODEL,

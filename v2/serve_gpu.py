@@ -175,7 +175,7 @@ class AskReq(BaseModel):
     synthesize: bool = True
     skip_cache: bool = False
     collection: Optional[str | List[str]] = None   # Qdrant collection(s); None→default
-    domain: Optional[str] = None                     # reserved for v2.6.0 profiles
+    domain: Optional[str] = None                     # v2.6.0 profile (engineering/medical/legal/...)
 
 
 class IngestReq(BaseModel):
@@ -315,6 +315,9 @@ def ask(req: AskReq):
     from qdrant_client import QdrantClient
     from qdrant_client.models import PointStruct
 
+    # 0. Domain profile (v2.6.0) — resolves chunking/prompts/collection/label
+    profile = C.load_domain_profile(req.domain) if req.domain else None
+
     # 1. Embed query in-process (resident model on GPU)
     encode_kw = {"convert_to_numpy": True, "show_progress_bar": False}
     if C.EMBED_TASK_QUERY:
@@ -349,12 +352,19 @@ def ask(req: AskReq):
 
     # 3. Parallel retrieval: Qdrant + Neo4j
     import threading
-    # Resolve collection(s) → list of Qdrant collection names
-    collections = _resolve_collections(req.collection)
+    # Resolve collection(s) → list of Qdrant collection names.
+    # If no explicit collection given, derive from the domain profile.
+    if req.collection is None and profile is not None:
+        req_collection = profile["domain"]["collection"]
+    else:
+        req_collection = req.collection
+    collections = _resolve_collections(req_collection)
     q_res, g_res = [], []
     t1 = threading.Thread(
         target=lambda: q_res.extend(rag.qdrant_search_multi(vec, req.query, collections)))
-    t2 = threading.Thread(target=lambda: g_res.extend(rag.neo4j_subgraph(req.query)))
+    t2 = threading.Thread(target=lambda: g_res.extend(
+        rag.neo4j_subgraph(req.query,
+                          label=(profile["domain"]["neo4j_label"] if profile else None))))
     t1.start(); t2.start(); t1.join(); t2.join()
 
     qdrant_hits = len(q_res)
@@ -382,7 +392,7 @@ def ask(req: AskReq):
     # 5. Synthesize with E4B (separate process)
     answer = ""
     if req.synthesize:
-        answer = rag.synthesize(req.query, contexts)
+        answer = rag.synthesize(req.query, contexts, profile)
 
     result = {
         "query": req.query,
