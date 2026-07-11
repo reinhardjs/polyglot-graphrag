@@ -50,3 +50,4 @@ Thumbs.db
 
 # Benchmark outputs
 *.bench
+.pytest_cache/

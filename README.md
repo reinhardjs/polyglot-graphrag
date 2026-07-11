@@ -39,7 +39,7 @@ passing `domain=` — no code changes.
 | **Pluggable chunking** | `sentence` · `paragraph` · `section` · `fixed` strategies (per profile) |
 | **Hybrid graph entry** | `keyword` (fast token overlap) · `vector` (cosine) · `hybrid` — selected per profile |
 | **Citation traceability** | Every `/ask` returns `contexts_numbered`, `contexts_meta`, and a `sources` bibliography mapping `[n]` → source doc — zero extra DB cost |
-| **Semantic cache** | Identical/similar queries (>0.95 cosine) return the cached answer in <0.01 s |
+| **Semantic cache** | Similar queries (>0.95 cosine) return the cached answer in ~0.07 s |
 | **Incremental ingest** | `POST /ingest` is non-blocking (task_id + polling), with checksum-based skip; `DELETE /ingest/{doc_id}` for edits |
 | **CPU fallback** | `serve_cpu.py` mirrors the full GPU API for CUDA-less machines (fp32 enforced) |
 
