@@ -1,138 +1,177 @@
-# GraphRAG Engineering Knowledge Base (LEGACY v1 design)
+# Polyglot GraphRAG v2
 
-> [!WARNING]
-> **This is the legacy v1 document.** The system was restructured into `v2/`
-> (dual-daemon, config-driven). The live docs are `docs/README.md` and
-> `v2/README.md`. Key differences from v1:
-> - **Synthesis LLM is now `Gemma 4 E4B QAT Q4_0` on `:8084`** (was Gemma 4 12B on `:8083`).
-> - **Extraction LLM is `Gemma 4 E2B QAT Q4_0` on `:8082`** (LLM-based, E2B primary / GLiNER fallback).
-> - Graph extraction is LLM-based (E2B), not regex.
-> - Both model names are config-driven (`v2/config.py`: `SYNTHESIS_LLM_MODEL`,
->   `EXTRACTION_LLM_MODEL`) — swap without code changes.
-> This file is kept for historical rationale only.
+**100% local, multi-domain GraphRAG** — engineering bugs, medical records, legal
+documents, accounting ledgers, and hospitality SOPs, all ingested and queried by
+the same codebase. No external APIs, no cloud, no per-token bills. Everything runs
+on a single **RTX 3060 (12 GB)** alongside Qdrant (vectors) + Neo4j (graph).
 
-Local-first GraphRAG system for engineering documents. Ingests ADRs, Jira
-tickets, PRs, and wikis into Qdrant (vector) + Neo4j (graph), then answers
-multi-hop questions via zero-shot routing, hybrid search, cross-encoder
-reranking, and Gemma 4 E4B synthesis (`:8084`, config-driven).
-
-**All data on:** `/mnt/data-970-plus` (458 GB NVMe)
+> Graph + vector hybrid retrieval · cross-encoder reranking · LLM extraction +
+> synthesis · **domain profiles** (one TOML per domain) · **citation traceability**
+> on every answer · sub-second retrieval, ~0.2 s cold retrieval / ~6 s full answer.
 
 ---
 
-## Quick Start
+## Why this exists
+
+Most RAG is a flat vector search over chunks. Polyglot GraphRAG adds a **knowledge
+graph** on top: entities are extracted from documents, resolved across languages
+and spellings via cross-lingual embeddings, and connected. A question like
+*"how does checkout relate to billing?"* walks the graph (2-hop) **and** does
+vector search — both legs run in parallel, then a reranker fuses them. The result
+is answers that cite their sources and trace multi-hop relationships a pure vector
+store misses.
+
+**v2.6.0 adds general-purpose, drop-in domains.** The 11 domain-specific
+assumptions (chunking strategy, entity vocabulary, prompts, metadata) are now
+declared in `v2/domains/*.toml`. Switch from engineering to medical to legal by
+passing `domain=` — no code changes.
+
+---
+
+## Features
+
+| | |
+|---|---|
+| **Hybrid retrieval** | Parallel Qdrant vector search + Neo4j k-hop graph traversal, fused by BGE reranker |
+| **Vector-driven entity resolution** | Jina v3 cross-lingual embeddings in a Neo4j vector index merge `Basis Data` (ID) ↔ `Database` (EN) ↔ `Base de Datos` (ES) automatically — no hardcoded translation maps |
+| **LLM graph extraction** | Gemma 4 E2B extracts entities/edges as JSON (verbatim names); GLiNER is the zero-shot NER fallback |
+| **Domain profiles** | `engineering` · `medical` · `legal` · `accounting` · `hospitality` — each with its own chunking, prompts, graph schema, metadata, entry strategy |
+| **Pluggable chunking** | `sentence` · `paragraph` · `section` · `fixed` strategies (per profile) |
+| **Hybrid graph entry** | `keyword` (fast token overlap) · `vector` (cosine) · `hybrid` — selected per profile |
+| **Citation traceability** | Every `/ask` returns `contexts_numbered`, `contexts_meta`, and a `sources` bibliography mapping `[n]` → source doc — zero extra DB cost |
+| **Semantic cache** | Identical/similar queries (>0.95 cosine) return the cached answer in <0.01 s |
+| **Incremental ingest** | `POST /ingest` is non-blocking (task_id + polling), with checksum-based skip; `DELETE /ingest/{doc_id}` for edits |
+| **CPU fallback** | `serve_cpu.py` mirrors the full GPU API for CUDA-less machines (fp32 enforced) |
+
+---
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                         RTX 3060 (12 GB)                          │
+├──────────────┬──────────────┬────────────────────────────────────┤
+│ E2B  :8082   │ E4B  :8084   │  serve_gpu.py :8000                │
+│ ~1.5 GB      │ ~3.0 GB      │  Jina v3 + BGE v2-m3 (+GLiNER lazy)│
+│ extraction   │ synthesis     │  ~4.0 GB shared                   │
+├──────────────┴──────────────┴────────────────────────────────────┤
+│                TOTAL: ~10.6 GB / 12 GB  (1.4 GB headroom)        │
+└──────────────────────────────────────────────────────────────────┘
+         ▲ systemd (Restart=no)              ▲ FastAPI daemon
+   ┌─────────────┴──────────────┐
+   │  Docker: Qdrant :6333 · Neo4j :7687  │
+   └──────────────────────────────────────┘
+```
+
+**Ingest** (`ingest.py`): late-chunk embed → Qdrant · LLM extract (E2B) →
+vector-resolve entities (Jina v3 → Neo4j index) → write graph.
+**Query** (`/ask`): embed query → semantic cache check → parallel Qdrant +
+Neo4j → rerank (BGE) → synthesize (E4B) → `{contexts, sources, answer}`.
+
+See [docs/architecture/architecture.md](docs/architecture/architecture.md) for the
+full design, VRAM budget, and per-stage latency.
+
+---
+
+## Quick start
 
 ```bash
-# 1. Start databases (Qdrant :6333 + Neo4j :7687)
-cd /mnt/data-970-plus/rag-system
+# 1. Databases (Qdrant + Neo4j)
 docker compose up -d
 
-# 2. Make sure the LLM services are running (:8082 extraction, :8084 synthesis)
-sudo systemctl start gemma-4-e2b.service gemma-4-e4b.service
+# 2. GPU LLMs (systemd, boot-only) + the RAG daemon
+sudo systemctl start gemma-4-e2b.service gemma-4-e4b.service rag-gpu-daemon.service
+#   — or, without systemd:  cd v2 && bash run.sh serve
 
-# 3. Ingest sample docs
-bash run.sh ingest-folder /mnt/data-970-plus/rag-system/data
+# 3. Ingest the sample engineering docs
+cd v2 && bash run.sh ingest sample_data
+#   — or any doc/domain:
+curl -s -X POST http://127.0.0.1:8000/ingest -H "Content-Type: application/json" \
+  -d '{"text":"...","doc_id":"enc-1","domain":"medical",
+       "metadata":{"patient_id":"P-42","title":"Encounter note"}}'
 
-# 4. Ask questions
-bash run.sh ask "who reported BUG-204 and what severity was it?"
-bash run.sh ask "how are checkout and billing connected?"
+# 4. Ask
+bash run.sh ask "who reported BUG-204?"
+curl -s -X POST http://127.0.0.1:8000/ask -H "Content-Type: application/json" \
+  -d '{"query":"what treats hypertension?","domain":"medical","synthesize":true}'
+```
 
-# 5. Interactive session (models load once, queries < 5s)
-bash run.sh serve
+Prerequisites: Python 3.11+ (`rag-env` with CUDA torch), Docker, RTX 3060 (or
+equivalent ≥12 GB VRAM). Full setup in [docs/guides/development.md](docs/guides/development.md).
+
+---
+
+## API (served by `serve_gpu.py` on `:8000`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/ask` | One-call RAG. `domain` or `collection` (str/list/`"all"`), `synthesize`, `skip_cache`. Returns `contexts_numbered`, `contexts_meta`, `sources`, `answer`. |
+| `POST` | `/ingest` | Non-blocking single-doc ingest. `domain`, `metadata`, `collection`, `if_checksum`. → `task_id`. |
+| `GET` | `/ingest/status/{task_id}` | Poll ingest task. |
+| `DELETE` | `/ingest/{doc_id}?collection=` | Remove doc from Qdrant + Neo4j. |
+| `GET` | `/ingest?collection=` | List docs (incl. per-doc `metadata`). |
+| `POST` | `/embed_query` · `/embed_late` · `/rerank` · `/extract_graph` | Model primitives. |
+| `GET` | `/collections` | List Qdrant collections + point counts. |
+| `GET` | `/profiles` | List loaded domain profiles. |
+| `GET` | `/health` | Daemon status + VRAM. |
+
+The LLMs speak OpenAI format on separate ports (`E2B :8082`, `E4B :8084`). The
+Hermes `rag_query` plugin calls `POST /ask` over HTTP — set `RAG_DAEMON_URL` to
+point any Hermes agent at the KB.
+
+---
+
+## Domain profiles
+
+Point the system at a knowledge domain with one TOML file — no code changes:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/ingest -H "Content-Type: application/json" \
+  -d '{"text":"Patient has chest pain. Lisinopril treats hypertension.",
+       "doc_id":"enc-1","domain":"medical"}'
+curl -s -X POST http://127.0.0.1:8000/ask -H "Content-Type: application/json" \
+  -d '{"query":"what treats hypertension?","domain":"medical","synthesize":true}'
+```
+
+Available: `engineering` (sentence, keyword) · `medical` (section, hybrid) ·
+`legal` (section, hybrid) · `accounting` (paragraph, keyword) · `hospitality`
+(section, hybrid). Add your own in `v2/domains/` — see
+[docs/domains/README.md](docs/domains/README.md) for the full schema and a
+copy-paste template.
+
+---
+
+## Tests
+
+```bash
+cd v2
+/mnt/data-970-plus/rag-env/bin/python -m pytest tests/ -q
+# 33 passed — chunking, extraction/synthesis prompts, metadata, condense,
+# neo4j entry strategies (unit) + cross-domain routing (e2e, needs :8000 live)
 ```
 
 ---
 
-## Commands
+## Documentation map
 
-| Command | Purpose |
-|---------|---------|
-| `bash run.sh ingest <file> [--type ADR] [--author alice]` | Ingest a single document |
-| `bash run.sh ingest-folder <dir>` | Ingest all docs in a directory |
-| `bash run.sh ask "<question>"` | Single question (cold-starts models ~20s) |
-| `bash run.sh serve` | Interactive loop (models stay loaded) |
+| Doc | What's in it |
+|-----|--------------|
+| [docs/README.md](docs/README.md) | Docs index |
+| [docs/architecture/architecture.md](docs/architecture/architecture.md) | System design, VRAM, data flow, decisions |
+| [docs/architecture/full-architecture.md](docs/architecture/full-architecture.md) | Every component, every config knob |
+| [docs/architecture/hermes-integration.md](docs/architecture/hermes-integration.md) | Hermes `rag_query` plugin |
+| [docs/domains/README.md](docs/domains/README.md) | Domain profile TOML schema + how to add a domain |
+| [docs/guides/development.md](docs/guides/development.md) | Environment, workflows, testing |
+| [docs/roadmap/version-requirements.md](docs/roadmap/version-requirements.md) | Master spec (v2.5.0 + v2.6.0) |
+| [CHANGELOG.md](CHANGELOG.md) | Version history |
 
----
-
-## Architecture (2-min overview)
-
-```
-            INGESTION                              RETRIEVAL
-            ─────────                              ─────────
-Raw doc ──→ Sentence split                        User query
-            │                                         │
-            ├──→ Jina v3 embed → Qdrant               ├──→ Jina v3 embed
-            │    (1024-d, binary quant)                │    (query vector)
-            │                                         │
-            └──→ Regex extraction → Neo4j             ├──→ Semantic cache? → return
-                 (ADR- / BUG- / PR- / components)     │       │ no
-                 (KV profiles from source text)        │       ↓
-                                                      ├──→ MiniLM router
-                                                      │    /         \
-                                                      │ vector      graph
-                                                      │ search    traversal
-                                                      │    \         /
-                                                      │     reranker
-                                                      │         │
-                                                      └──→ Gemma 4 E4B (:8084) → answer
-```
-
-**Key insight:** Gemma 4 is a reasoning model and cannot produce clean JSON
-output. Therefore graph extraction is done via regex (deterministic, reliable).
-Gemma is only used for final answer generation during retrieval.
+> **Legacy v1 docs.** The root `ARCHITECTURE.md`, `SYSTEM_CONTEXT.md`, and
+> `EXTERNAL_ACCESS.md` describe the superseded v1 pipeline (regex extraction,
+> Gemma 4 12B on `:8083`). They are retained for historical rationale only;
+> the live system is `v2/`.
 
 ---
 
-## Stack
+## License
 
-| Component | Role | Model | Location |
-|-----------|------|-------|----------|
-| Embedding | Chunk docs + query | `jinaai/jina-embeddings-v3` (1024-d) | CPU, 5.4 GB |
-| Routing | Pick graph vs vector path | `all-MiniLM-L6-v2` (384-d) | CPU, 881 MB |
-| Reranker | Condense retrieved context | `BAAI/bge-reranker-base` | CPU, 3.2 GB |
-| LLM | Answer generation only | `Gemma 4 E4B QAT Q4_0` (config-driven; swap via `SYNTHESIS_LLM_MODEL`) | GPU `:8084`, ~3.0 GB |
-| Graph extraction | Regex-based (not LLM) | ADR/BUG/PR patterns + known components | CPU, instant |
-
----
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `config.py` | Constants, DB init, OpenAI client setup |
-| `ingest.py` | Document → Qdrant + Neo4j ingestion pipeline |
-| `router.py` | Semantic cache + MiniLM zero-shot routing |
-| `retrieve.py` | Hybrid search, graph traversal, rerank, Gemma synthesis |
-| `main.py` | CLI entry point (ingest / ingest-folder / ask / serve) |
-| `config.yaml` | Tuning knobs (keep_top, top_k) |
-| `docker-compose.yml` | Qdrant + Neo4j containers |
-| `ARCHITECTURE.md` | Full technical deep-dive |
-
----
-
-## Data State (current)
-
-| Store | Count |
-|-------|-------|
-| Qdrant chunks | 51 |
-| Neo4j entities | 37 |
-| Neo4j relationships | 13 |
-
----
-
-## Notes
-
-- **Gemma 4 is a reasoning model** — it streams thinking in `reasoning_content`.
-  Final answers in `content` (or `reasoning_content` as fallback). Cannot produce
-  clean JSON → graph extraction uses regex.
-- **Gemma is NOT used for ingestion.** Graph extraction is entirely regex-based
-  (scans for ADR-\d+, BUG-\d+, PR-\d+, known component names, author lines).
-  KV profiles are extracted as sentence windows from the source document.
-- **Jina native `late_chunking=True`** is not wired through the installed
-  SentenceTransformer version. Chunks are per-sentence embedded (clean, complete
-  text) rather than with global-context pooling.
-- **Model cold-start** ~20s per `ask` invocation (loads Jina + MiniLM +
-  reranker). Use `serve` for sub-5s queries.
-- For non-reasoning models (e.g. Granite 8B), switch `llm_extract()` and
-  `llm_profile()` in `ingest.py` back to OpenAI completions for LLM-based
-  extraction.
+MIT — see repository for details.

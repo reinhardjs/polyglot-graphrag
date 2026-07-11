@@ -19,6 +19,10 @@ parent directory.
 first `/extract_graph` call (E2B LLM is primary; GLiNER is fallback). Query-only
 workloads (embed + rerank + synthesize) stay ~1.6 GB lighter.
 
+> **v2.6.0** — domain profile system: pluggable chunking (sentence/paragraph/section/fixed),
+> domain-aware extraction + synthesis prompts, hybrid Neo4j entry (keyword/vector/hybrid),
+> domain metadata schema, and citation traceability (every `/ask` carries `contexts_numbered`,
+> `contexts_meta`, and a `sources` bibliography). Multi-domain collections + per-domain labels.
 > **v2.5.0** — single-doc ingest API (`POST /ingest`, non-blocking) + multi-domain collections.
 > Dual-arch reranking (v2.4.1), fully modular config (v2.4.0), CANON_MAP replaced in v2.3.0.
 > Parallel retrieval (always run both legs) is safer and costs the same time.
@@ -53,11 +57,12 @@ Prerequisite: `rag-env` must have CUDA torch:
 | `POST` | `/embed_late` | Full-doc late-chunked vectors → `{"doc_id":"..","chunks":[...]}` |
 | `POST` | `/rerank` | BGE rerank query vs docs → `{"ranked":[[0,0.9],[1,0.8]]}` |
 | `POST` | `/extract_graph` | GLiNER NER + co-occurrence edges (lazy-loads on first call) |
-| `POST` | `/ingest` | **Single-doc ingest (non-blocking).** `{"text","doc_id","doc_type","author","extract_graph","if_checksum","collection"}` → `202 {"task_id","status":"accepted","doc_id"}` |
+| `POST` | `/ingest` | **Single-doc ingest (non-blocking).** `{"text","doc_id","doc_type","author","extract_graph","if_checksum","collection","domain","metadata"}` → `202 {"task_id","status":"accepted","doc_id"}` |
 | `GET` | `/ingest/status/{task_id}` | Poll ingest task → `{"status":"accepted|running|done|error","result":{...}}` |
 | `DELETE` | `/ingest/{doc_id}?collection=` | Remove doc from Qdrant+Neo4j → `{"vectors_deleted":N,"nodes_cleaned":N}` (404 if absent) |
 | `GET` | `/ingest?collection=` | List docs in a collection → `{"documents":[{"doc_id","doc_type","chunks","checksum"}]}` |
 | `GET` | `/collections` | List Qdrant collections + point counts |
+| `GET` | `/profiles` | List loaded domain profiles (name, collection, label, chunking, entry) |
 | `GET` | `/health` | `{"status":"ok","device":"cuda","cuda_alloc_gb":2.3}` |
 
 **Multi-domain:** `/ask` and `/ingest` accept `collection` as a domain alias (`"legal"`), direct name (`"legal_chunks"`), a list (`["engineering_chunks","legal_chunks"]` = cross-domain), or `"all"`. Collections auto-create on first ingest. Registry in `config.py` (`QDRANT_COLLECTIONS`). `serve_cpu.py` exposes the identical endpoint set.
@@ -141,7 +146,7 @@ hermes
 
 - Edges mostly `ASSOCIATED_WITH` (E2B JSON tends to drop edge types → GLiNER fallback).
 - Canonicalization is exact-match only; multi-word entities not merged.
-- Graph entry uses keyword overlap (fast, covers 95% of queries). No semantic entity search for the 5% edge case.
+- Graph entry uses configurable strategy (keyword/vector/hybrid, per profile). Keyword overlap covers ~95% of queries; vector + hybrid handle the natural-language 5% — no silent misses.
 - No multi-turn conversation support (each query is stateless).
 
 ## Verified (2026-07-10)
