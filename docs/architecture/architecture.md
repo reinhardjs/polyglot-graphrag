@@ -102,7 +102,7 @@ CUDA context + overhead  | 0.5       |                          |
 ```
 > GLiNER not in this total — only loaded if `/extract_graph` is called (ingest fallback), adding ~1.6 GB.
 
-## Performance (RTX 3060, all models on GPU, v2.4.1)
+## Performance (RTX 3060, all models on GPU, v2.5.0)
 
 | Stage | GPU (serve_gpu.py) | CPU (serve_cpu.py, standalone) |
 |-------|-------------------|-------------------------------|

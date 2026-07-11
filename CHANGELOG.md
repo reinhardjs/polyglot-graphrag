@@ -5,6 +5,39 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.5.0] — 2026-07-11 (Single-Doc Ingest API + Multi-Domain Collections)
+
+### Added
+- **`POST /ingest`** — single-document ingestion over HTTP via FastAPI `BackgroundTasks`. Returns `202 Accepted` + `task_id` immediately; does NOT block `/ask` during the ~9-12s E2B graph-extraction. Fields: `text`, `doc_id`, `doc_type`, `author`, `extract_graph`, `if_checksum`, `collection`.
+- **`GET /ingest/status/{task_id}`** — poll a background ingest task (`accepted`/`running`/`done`/`error` + result dict with timings/counts).
+- **`DELETE /ingest/{doc_id}?collection=`** — remove a document from Qdrant + Neo4j in one call. Accurate `vectors_deleted` via `qc.count(exact=True)`, `nodes_cleaned` count, 404 if not found.
+- **`GET /ingest?collection=`** — list ingested documents (doc_id, doc_type, chunks, checksum) per collection.
+- **`GET /collections`** — list all Qdrant collections + point counts + vector config.
+- **Multi-domain collections** — `QDRANT_COLLECTIONS` registry in config.py (engineering/legal/hospitality/accounting/medical) + `QDRANT_COLLECTION_DEFAULT`. `/ask` and `/ingest` accept `collection` as domain alias, direct name, list (cross-domain), or `"all"`.
+- `ensure_collection(name)` in ingest.py — auto-creates a collection (dense+sparse config) on first ingest.
+- `qdrant_search_multi()` in ask.py — parallel federated search across N collections; rerank fuses downstream.
+- `ingest_text()` in ingest.py — single-doc reusable function shared by CLI + daemon `/ingest`.
+- **Incremental-update guard** — sha256 `checksum` stored in Qdrant payload. Re-ingest with matching `if_checksum` returns `"unchanged"` in <10ms (no re-extraction).
+- **Concurrent-ingest safety** — resolution cache + lock in `resolve_node_ids()` prevents duplicate entity nodes when two ingests mention the same novel entity in parallel.
+- **serve_cpu.py parity** — CPU fallback daemon now exposes the full ingest/multi-domain API (same endpoints, fp32 enforced, reranker pool-capped).
+
+### Fixed
+- **`_sparse()` hash determinism** — replaced Python's per-process-randomized `hash(tok)` (broke sparse search across ingest↔query processes) with `int.from_bytes(hashlib.md5(tok)[:4])`. Deterministic across processes.
+- **`delete_doc_neo4j` edge-scoping** — now only deletes edges where an endpoint becomes orphaned; shared-node edges preserved (was over-deleting all edges touching any node in the doc).
+- **`/ask` nested-list crash** — daemon called `parallel_retrieve()` (returns a tuple) then `.extend()`, nesting lists → `unhashable type: 'list'`. Now calls `qdrant_search_multi()` directly (daemon runs its own retrieval threads).
+
+### Endpoints (serve_gpu.py :8000 / serve_cpu.py fallback)
+```
+POST   /ask                     collection: str | list | "all"
+POST   /ingest                  collection: str (auto-creates)
+GET    /ingest?collection=      list docs per domain
+GET    /ingest/status/{task_id}
+DELETE /ingest/{doc_id}?collection=
+GET    /collections
+```
+
+---
+
 ## [2.3.0] — 2026-07-10 (Vector-Driven Entity Resolution)
 
 ### Added

@@ -19,8 +19,8 @@ parent directory.
 first `/extract_graph` call (E2B LLM is primary; GLiNER is fallback). Query-only
 workloads (embed + rerank + synthesize) stay ~1.6 GB lighter.
 
-> **v2.4.1** — dual-architecture reranking, pool-capped CPU, model-agnostic config.
-> MiniLM was removed in v2.2.1, CANON_MAP replaced in v2.3.0, fully modular in v2.4.0.
+> **v2.5.0** — single-doc ingest API (`POST /ingest`, non-blocking) + multi-domain collections.
+> Dual-arch reranking (v2.4.1), fully modular config (v2.4.0), CANON_MAP replaced in v2.3.0.
 > Parallel retrieval (always run both legs) is safer and costs the same time.
 
 Prerequisite: `rag-env` must have CUDA torch:
@@ -35,7 +35,7 @@ Prerequisite: `rag-env` must have CUDA torch:
 | File | Purpose |
 |------|---------|
 | `config.py` | Ports, DB creds, GLiNER labels, entity resolution threshold, token budgets, URLs |
-| `serve_gpu.py` | **Primary daemon.** Preloads Jina/BGE on GPU at startup. Exposes `/ask` (one-call RAG), `/embed_late`, `/embed_query`, `/rerank`, `/extract_graph`. |
+| `serve_gpu.py` | **Primary daemon.** Preloads Jina/BGE on GPU at startup. Exposes `/ask` (one-call RAG), `/ingest` (+status, list, delete), `/collections`, `/embed_late`, `/embed_query`, `/rerank`, `/extract_graph`. |
 | `serve_cpu.py` | **CPU fallback.** Same API as `serve_gpu.py` but runs models on CPU (no CUDA torch). |
 | `ingest.py` | Late-embed → Qdrant, LLM extract (E2B :8082, verbatim) → vector-resolve (Jina v3 → Neo4j vector index) → Neo4j. |
 | `ask.py` | CLI client: embed → Qdrant‖Neo4j → rerank → E4B synthesis. Thin; all model work delegated to daemon/LLMs. |
@@ -53,7 +53,14 @@ Prerequisite: `rag-env` must have CUDA torch:
 | `POST` | `/embed_late` | Full-doc late-chunked vectors → `{"doc_id":"..","chunks":[...]}` |
 | `POST` | `/rerank` | BGE rerank query vs docs → `{"ranked":[[0,0.9],[1,0.8]]}` |
 | `POST` | `/extract_graph` | GLiNER NER + co-occurrence edges (lazy-loads on first call) |
+| `POST` | `/ingest` | **Single-doc ingest (non-blocking).** `{"text","doc_id","doc_type","author","extract_graph","if_checksum","collection"}` → `202 {"task_id","status":"accepted","doc_id"}` |
+| `GET` | `/ingest/status/{task_id}` | Poll ingest task → `{"status":"accepted|running|done|error","result":{...}}` |
+| `DELETE` | `/ingest/{doc_id}?collection=` | Remove doc from Qdrant+Neo4j → `{"vectors_deleted":N,"nodes_cleaned":N}` (404 if absent) |
+| `GET` | `/ingest?collection=` | List docs in a collection → `{"documents":[{"doc_id","doc_type","chunks","checksum"}]}` |
+| `GET` | `/collections` | List Qdrant collections + point counts |
 | `GET` | `/health` | `{"status":"ok","device":"cuda","cuda_alloc_gb":2.3}` |
+
+**Multi-domain:** `/ask` and `/ingest` accept `collection` as a domain alias (`"legal"`), direct name (`"legal_chunks"`), a list (`["engineering_chunks","legal_chunks"]` = cross-domain), or `"all"`. Collections auto-create on first ingest. Registry in `config.py` (`QDRANT_COLLECTIONS`). `serve_cpu.py` exposes the identical endpoint set.
 
 The LLMs speak OpenAI format on separate ports:
 - E2B extraction: `POST http://localhost:8082/v1/chat/completions`

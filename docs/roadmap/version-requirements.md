@@ -1,8 +1,13 @@
 # GraphRAG v2 — Version Requirements
 
 **Created:** 2026-07-10, updated 2026-07-11
-**Current:** v2.4.1 (dual-architecture, pool-capped CPU, modular config)
-**Next:** v2.5.0, v2.6.0
+**Current:** v2.5.0 ✅ SHIPPED (single-doc ingest API + multi-domain collections)
+**Next:** v2.6.0 (general-purpose domain profiles)
+
+> [!NOTE]
+> **v2.5.0 shipped 2026-07-11.** All requirements below are implemented,
+> smoke-tested, and committed (`4d68638` → `449aebc`). serve_cpu.py has full
+> endpoint parity. All P0 review findings resolved. See CHANGELOG.md [2.5.0].
 
 > [!IMPORTANT]
 > **Review amendments (2026-07-11):** All requirements updated with findings
@@ -556,20 +561,23 @@ carry `patient_id`, `encounter_date`. Legal docs carry `jurisdiction`, `court`.
 ## Full Roadmap Summary
 
 ```
-v2.4.1 ★ CURRENT
+v2.4.1
   └── Dual reranker (GPU/CPU), pool cap, modular config, fp16 fix,
       comprehensive benchmarks, all docs synced
 
-PRE-REQ — _sparse() hash fix                    (~10 min)
-  └── Replace hash(tok) with hashlib.md5 in ingest.py + ask.py
+PRE-REQ — _sparse() hash fix                    ✅ DONE
+  └── Replaced hash(tok) with hashlib.md5 in ingest.py + ask.py
 
-v2.5.0 — Single-Doc Ingest + Multi-Domain   (~6h)
+v2.5.0 ★ SHIPPED (2026-07-11)                    ✅ DONE
   └── POST/DELETE/GET /ingest (BackgroundTasks, non-blocking),
       checksum incremental updates, entity resolution cache,
-      cache invalidation, namespace collections, cross-domain queries,
-      serve_cpu.py parity, delete_doc_neo4j edge-scoping fix
+      namespace collections, cross-domain queries ("all"/list),
+      serve_cpu.py parity, delete_doc_neo4j edge-scoping fix,
+      /ask nested-list crash fix
+      commits: 4d68638 (REQ-1) abf1bba (REQ-2) b2d4bb0 (REQ-3)
+               183e256 (REQ-4) 449aebc (cpu parity)
 
-v2.6.0 — General-Purpose RAG                (~10h)
+v2.6.0 ← NEXT — General-Purpose RAG        (~10h)
   └── Domain profiles (.toml), pluggable chunking (both daemons),
       chunking-aware _build_profile, domain-aware prompts,
       prompt consolidation (prompts.py), hybrid Neo4j entry,

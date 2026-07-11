@@ -55,5 +55,5 @@ docs/
 
 ## Current Version
 
-**v2.4.1** — dual-architecture reranking, pool-capped CPU, modular config.
-All models on GPU (RTX 3060, 12 GB). See [version-requirements.md](roadmap/version-requirements.md) for the full roadmap.
+**v2.5.0** — single-doc ingest API (`POST /ingest` non-blocking) + multi-domain collections.
+All models on GPU (RTX 3060, 12 GB); CPU fallback at full endpoint parity. See [version-requirements.md](roadmap/version-requirements.md) for the full roadmap.

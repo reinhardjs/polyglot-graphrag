@@ -1,4 +1,4 @@
-# GraphRAG v2.4.1 — Full Architecture
+# GraphRAG v2.5.0 — Full Architecture
 
 ---
 
@@ -380,3 +380,4 @@ graph TB
 | v2.3.0 | Jul 10 | Vector-driven entity resolution, CANON_MAP removed |
 | v2.4.0 | Jul 10 | Fully modular — model-agnostic config, behavior flags |
 | v2.4.1 | Jul 10 | Dual-architecture reranking, CPU pool cap, fp16 fix |
+| v2.5.0 | Jul 11 | Single-doc ingest API (non-blocking), multi-domain collections, serve_cpu parity |

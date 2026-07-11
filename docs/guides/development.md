@@ -43,13 +43,13 @@ rag-system/
 │   ├── README.md                # Project README
 │   └── sample_data/             # 5 engineering docs
 ├── docs/
-│   ├── architecture.md             # Architecture decisions + VRAM budget
-│   ├── full-architecture.md        # Expanded architecture with data flows
-│   ├── full-benchmark-history.md   # All benchmarks, pool cap sweep, model alternatives
-│   ├── cpu-vs-gpu-benchmark.md     # serve_gpu vs serve_cpu detailed comparison
-│   ├── hermes-integration.md       # Hermes plugin docs
-│   ├── ingest-endpoint-plan.md     # /ingest endpoint plan + frequent-update strategy
-│   └── development.md              # This file
+│   ├── README.md                   # Docs index
+│   ├── architecture/               # architecture.md, full-architecture.md, hermes-integration.md
+│   ├── benchmarks/                 # cpu-vs-gpu-benchmark.md, full-benchmark-history.md
+│   ├── guides/                     # development.md (this file)
+│   └── roadmap/                    # version-requirements.md, multi-domain-plan.md,
+│                                   # ingest-endpoint-plan.md, general-purpose-rag-plan.md,
+│                                   # agent-learning-system.md
 ├── v2/
 │   ├── MODEL_SWITCHING.md          # Ready-made config snippets for 5 model families
 │   └── ...
@@ -111,6 +111,32 @@ curl -s -X POST http://127.0.0.1:8000/ask \
 
 # Check cache stats
 curl -s "http://localhost:6333/collections/query_cache" | python -c "import sys,json; d=json.load(sys.stdin); print(f'points: {d[\"result\"][\"points_count\"]}')"
+```
+
+### Ingest API (v2.5.0)
+```bash
+# Single-doc ingest (non-blocking → returns task_id)
+curl -s -X POST http://127.0.0.1:8000/ingest -H "Content-Type: application/json" \
+  -d '{"text":"...doc text...","doc_id":"my-doc","doc_type":"Incident","collection":"engineering_chunks"}'
+# → {"task_id":"...","status":"accepted","doc_id":"my-doc"}
+
+# Poll ingest status
+curl -s http://127.0.0.1:8000/ingest/status/<task_id>
+# → {"status":"done","result":{"chunks":4,"entities":8,"timing":{...}}}
+
+# List docs in a collection
+curl -s "http://127.0.0.1:8000/ingest?collection=engineering_chunks"
+
+# List all Qdrant collections
+curl -s http://127.0.0.1:8000/collections
+
+# Delete a doc (Qdrant + Neo4j)
+curl -s -X DELETE "http://127.0.0.1:8000/ingest/my-doc?collection=engineering_chunks"
+# → {"status":"deleted","vectors_deleted":4,"nodes_cleaned":8}
+
+# Multi-domain query (cross-domain / "all")
+curl -s -X POST http://127.0.0.1:8000/ask -H "Content-Type: application/json" \
+  -d '{"query":"...","collection":["engineering_chunks","legal_chunks"],"synthesize":false}'
 ```
 
 ### Benchmark
