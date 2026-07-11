@@ -249,25 +249,57 @@ def ask(req: AskReq):
     t1.start(); t2.start(); t1.join(); t2.join()
 
     # 3. Fuse + cap + rerank (CPU-optimized)
-    pool = list(dict.fromkeys(q_res + g_res))
+    def _as_record(x):
+        if isinstance(x, dict):
+            return x
+        return {"text": x, "doc_id": "", "doc_type": "", "chunk_idx": -1}
+    all_records = [_as_record(x) for x in q_res] + [_as_record(x) for x in g_res]
+    seen = set()
+    pool = []
+    for r in all_records:
+        key = (r.get("doc_id", ""), r.get("text", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        pool.append(r)
     if C.RERANK_CPU_POOL_CAP and len(pool) > C.RERANK_CPU_POOL_CAP:
         pool = pool[:C.RERANK_CPU_POOL_CAP]
     if not pool:
-        return {"query": req.query, "n_contexts": 0, "contexts": [], "answer": ""}
+        return {"query": req.query, "n_contexts": 0, "contexts": [],
+                "contexts_numbered": [], "contexts_meta": [], "sources": [],
+                "answer": ""}
     reranker = _load_reranker()
-    scores = reranker.predict([(req.query, d) for d in pool])
+    scores = reranker.predict([(req.query, r["text"]) for r in pool])
     ranked = sorted([(i, float(s)) for i, s in enumerate(scores)],
                     key=lambda x: x[1], reverse=True)[:req.top_k]
-    contexts = [pool[i] for i, _ in ranked]
+    contexts = [pool[i]["text"] for i, _ in ranked]
+    contexts_meta = [{"doc_id": pool[i].get("doc_id", ""),
+                      "doc_type": pool[i].get("doc_type", ""),
+                      "chunk_idx": pool[i].get("chunk_idx", -1)}
+                     for i, _ in ranked]
 
     # 4. Synthesize with E4B (:8084)
     answer = ""
     if req.synthesize:
         answer = rag.synthesize(req.query, contexts, profile)
 
+    contexts_numbered = [f"[{i+1}] {c}" for i, c in enumerate(contexts)]
+    sources = []
+    ref_by_doc = {}
+    for meta in contexts_meta:
+        did = meta["doc_id"] or "__graph__"
+        if did not in ref_by_doc:
+            ref_by_doc[did] = len(sources) + 1
+            sources.append({"ref": len(sources) + 1,
+                             "doc_id": meta["doc_id"],
+                             "doc_type": meta["doc_type"],
+                             "chunk_idx": meta["chunk_idx"]})
+
     return {"query": req.query, "n_contexts": len(contexts),
             "contexts": contexts,
-            "contexts_numbered": [f"[{i+1}] {c}" for i, c in enumerate(contexts)],
+            "contexts_numbered": contexts_numbered,
+            "contexts_meta": contexts_meta,
+            "sources": sources,
             "answer": answer}
 
 

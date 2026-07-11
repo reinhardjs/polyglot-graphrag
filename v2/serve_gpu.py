@@ -346,6 +346,8 @@ def ask(req: AskReq):
                         "contexts_numbered": p.get("contexts_numbered",
                                                   [f"[{i+1}] {c}" for i, c in
                                                    enumerate(p.get("contexts", []))]),
+                        "contexts_meta": p.get("contexts_meta", []),
+                        "sources": p.get("sources", []),
                         "rerank_scores": p.get("rerank_scores", []),
                         "answer": p.get("answer", ""),
                         "cache_hit": True,
@@ -377,19 +379,41 @@ def ask(req: AskReq):
     )
 
     # 4. Fuse + rerank in-process
-    pool = list(dict.fromkeys(q_res + g_res))
+    # q_res = list of Qdrant records {text,doc_id,doc_type,chunk_idx}
+    # g_res = list of graph profile strings (no doc_id)
+    # Normalise both into records so [n] citations can resolve to a source doc.
+    def _as_record(x):
+        if isinstance(x, dict):
+            return x
+        return {"text": x, "doc_id": "", "doc_type": "", "chunk_idx": -1}
+    all_records = [_as_record(x) for x in q_res] + [_as_record(x) for x in g_res]
+    # Dedupe by (doc_id, text) keeping order; preserve graph (doc_id="")
+    seen = set()
+    pool = []
+    for r in all_records:
+        key = (r.get("doc_id", ""), r.get("text", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        pool.append(r)
+
     if not pool:
         return {
             "query": req.query, "source": "llm", "path": path,
             "qdrant_hits": qdrant_hits, "graph_hits": graph_hits,
-            "n_contexts": 0, "contexts": [], "rerank_scores": [],
+            "n_contexts": 0, "contexts": [], "contexts_numbered": [],
+            "contexts_meta": [], "sources": [], "rerank_scores": [],
             "answer": "", "cache_hit": False,
         }
 
-    scores = _reranker.predict([(req.query, d) for d in pool])
+    scores = _reranker.predict([(req.query, r["text"]) for r in pool])
     ranked = sorted([(i, float(s)) for i, s in enumerate(scores)],
                     key=lambda x: x[1], reverse=True)[:req.top_k]
-    contexts = [pool[i] for i, _ in ranked]
+    contexts = [pool[i]["text"] for i, _ in ranked]
+    contexts_meta = [{"doc_id": pool[i].get("doc_id", ""),
+                      "doc_type": pool[i].get("doc_type", ""),
+                      "chunk_idx": pool[i].get("chunk_idx", -1)}
+                     for i, _ in ranked]
     rerank_scores = [s for _, s in ranked]
 
     # 5. Synthesize with E4B (separate process)
@@ -402,6 +426,21 @@ def ask(req: AskReq):
     # markers that match what E4B would cite.
     contexts_numbered = [f"[{i+1}] {c}" for i, c in enumerate(contexts)]
 
+    # Bibliography: map each [n] -> source doc. Dedup by doc_id; assign the
+    # [n] number of first appearance. Graph-only hits have doc_id="" -> "graph".
+    sources = []
+    ref_by_doc = {}
+    for i, meta in enumerate(contexts_meta):
+        did = meta["doc_id"] or "__graph__"
+        if did not in ref_by_doc:
+            ref_by_doc[did] = len(sources) + 1
+            sources.append({
+                "ref": len(sources) + 1,
+                "doc_id": meta["doc_id"],
+                "doc_type": meta["doc_type"],
+                "chunk_idx": meta["chunk_idx"],
+            })
+
     result = {
         "query": req.query,
         "source": "llm",
@@ -411,6 +450,8 @@ def ask(req: AskReq):
         "n_contexts": len(contexts),
         "contexts": contexts,
         "contexts_numbered": contexts_numbered,
+        "contexts_meta": contexts_meta,
+        "sources": sources,
         "rerank_scores": rerank_scores,
         "answer": answer,
         "cache_hit": False,
@@ -433,6 +474,8 @@ def ask(req: AskReq):
                             "graph_hits": graph_hits,
                             "contexts": contexts,
                             "contexts_numbered": contexts_numbered,
+                            "contexts_meta": contexts_meta,
+                            "sources": sources,
                             "rerank_scores": rerank_scores,
                             "answer": answer,
                         },

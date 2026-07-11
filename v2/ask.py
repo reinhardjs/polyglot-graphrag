@@ -68,6 +68,11 @@ def qdrant_search(vec: list, query_text: str = "",
 
     `collection` selects the Qdrant collection to search (multi-domain support).
     Defaults to C.COLL_CHUNKS (engineering_chunks).
+
+    Returns a list of dict records:
+        {"text": str, "doc_id": str, "doc_type": str, "chunk_idx": int}
+    (graph results from neo4j_subgraph are also records with doc_id resolved
+    from each entity's source_doc.)
     """
     qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
     prefetch = [
@@ -87,7 +92,17 @@ def qdrant_search(vec: list, query_text: str = "",
         limit=top_k,
         with_payload=True,
     ).points
-    return [p.payload.get("text", "") for p in res if p.payload]
+    out = []
+    for p in res:
+        if not p.payload:
+            continue
+        out.append({
+            "text": p.payload.get("text", ""),
+            "doc_id": p.payload.get("doc_id", ""),
+            "doc_type": p.payload.get("doc_type", ""),
+            "chunk_idx": p.payload.get("chunk_idx", -1),
+        })
+    return out
 
 
 def qdrant_search_multi(vec: list, query_text: str,
@@ -121,7 +136,8 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None) -> l
 
     Finds the Entity node whose id has the most keyword overlap with the query,
     then traverses its neighbourhood. Returns populated profiles (written by
-    ingest.py) for retrieval. Fast — one Cypher query, no embedding calls.
+    ingest.py) as records {"text": prof, "doc_id": source_doc, ...} so graph
+    hits resolve to their source document for citation (v2.6.0).
     If `label` is given, restricts the entry-node match to `:Entity:<Label>`
     (v2.6.0 domain isolation).
     """
@@ -133,7 +149,8 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None) -> l
     with driver.session() as s:
         rows = s.run(
             f"MATCH (n:Entity{label_clause}) "
-            "RETURN n.id AS id, n.name AS name, n.profile AS prof "
+            "RETURN n.id AS id, n.name AS name, n.profile AS prof, "
+            "n.source_doc AS source_doc "
             "LIMIT 500"
         ).data()
 
@@ -175,15 +192,19 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None) -> l
         with driver.session() as s:
             rec = s.run(
                 "MATCH (n:Entity {id:$e})-[*1..%d]-(m:Entity) "
-                "RETURN DISTINCT m.id AS id, m.profile AS prof" % hops,
+                "RETURN DISTINCT m.id AS id, m.profile AS prof, "
+                "m.source_doc AS source_doc" % hops,
                 e=entry,
             ).data()
-        # Include the entry node's own profile first
-        if scored[0][1].get("prof"):
-            out.append(scored[0][1]["prof"])
+        # Include the entry node's own profile first (with its source_doc)
+        e0 = scored[0][1]
+        if e0.get("prof"):
+            out.append({"text": e0["prof"], "doc_id": e0.get("source_doc", ""),
+                        "doc_type": "", "chunk_idx": -1})
         for r in rec:
             if r.get("prof"):
-                out.append(r["prof"])
+                out.append({"text": r["prof"], "doc_id": r.get("source_doc", ""),
+                            "doc_type": "", "chunk_idx": -1})
 
     driver.close()
     return out
