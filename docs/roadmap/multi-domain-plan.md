@@ -1,6 +1,8 @@
 # Multi-Domain Knowledge Base Plan
 
-**Status:** planned
+**Status:** ✅ SHIPPED in v2.5.0 — collections + routing + cross-domain done.
+  Neo4j per-domain labels (`:Entity:Engineering` etc.) and `domain`-aware
+  /ask are DEFERRED to v2.6.0-2 (see version-requirements.md).
 **Target:** v2.5.0 (alongside /ingest endpoint)
 **Created:** 2026-07-10, updated 2026-07-11
 

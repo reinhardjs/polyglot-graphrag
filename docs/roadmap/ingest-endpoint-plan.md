@@ -1,7 +1,7 @@
 # Plan: `/ingest` Endpoint — Incremental Knowledge Base Updates
 
-**Status:** planned, prioritized for frequent doc updates  
-**Target:** v2.5.0  
+**Status:** ✅ SHIPPED in v2.5.0 (see CHANGELOG.md [2.5.0] and v2/README.md for the live API). This file is the original design doc — kept for rationale.
+**Target:** v2.5.0
 **Created:** 2026-07-10, updated 2026-07-11
 
 > [!IMPORTANT]
