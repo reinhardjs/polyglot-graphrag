@@ -76,7 +76,22 @@ def _sparse(text: str) -> models.SparseVector:
 
 
 # ── Qdrant write ──────────────────────────────────────────────────────────────
-def write_vectors(doc_id: str, chunks: list, meta: dict, checksum: str = "") -> int:
+def ensure_collection(name: str):
+    """Create a Qdrant collection with the correct vector config if missing."""
+    qc = get_qdrant()
+    if not qc.collection_exists(name):
+        qc.create_collection(
+            name,
+            vectors_config=models.VectorParams(
+                size=C.VECTOR_DIM, distance=models.Distance.COSINE
+            ),
+            sparse_vectors_config={"text": models.SparseVectorParams()},
+        )
+        print(f"[qdrant] created collection '{name}'", flush=True)
+
+
+def write_vectors(doc_id: str, chunks: list, meta: dict, checksum: str = "",
+                 collection: str = C.COLL_CHUNKS) -> int:
     qc = get_qdrant()
     pts = []
     for ch in chunks:
@@ -87,7 +102,7 @@ def write_vectors(doc_id: str, chunks: list, meta: dict, checksum: str = "") -> 
                      "text": ch["text"], "doc_type": meta.get("doc_type", "eng"),
                      "checksum": checksum},
         ))
-    qc.upsert(C.COLL_CHUNKS, pts, wait=True)
+    qc.upsert(collection, pts, wait=True)
     return len(pts)
 
 
@@ -266,11 +281,11 @@ def delete_doc_neo4j(doc_id: str, driver):
         )
 
 
-def delete_doc_qdrant(doc_id: str):
-    """Delete ALL Qdrant points for a given doc_id."""
+def delete_doc_qdrant(doc_id: str, collection: str = C.COLL_CHUNKS):
+    """Delete ALL Qdrant points for a given doc_id in a collection."""
     qc = get_qdrant()
     qc.delete(
-        C.COLL_CHUNKS,
+        collection,
         points_selector=models.FilterSelector(
             filter=models.Filter(
                 must=[models.FieldCondition(
@@ -405,11 +420,16 @@ def extract_graph_llm(doc_id: str, text: str) -> dict:
 
 # ── Ingest one document (text-based, API-callable) ──────────────────────────
 def ingest_text(text: str, doc_id: str, meta: dict | None = None,
-                extract_graph: bool = True, if_checksum: str = None) -> dict:
+                extract_graph: bool = True, if_checksum: str = None,
+                collection: str = C.COLL_CHUNKS) -> dict:
     """Ingest a single document's text into Qdrant + Neo4j.
 
     Extracted from ingest_file() so the daemon's /ingest endpoint and the CLI
     share one code path. Returns a result dict with timings + counts.
+
+    `collection` selects the Qdrant collection (multi-domain support). Defaults
+    to C.COLL_CHUNKS (engineering_chunks). The collection is created on first
+    use via ensure_collection().
 
     If `if_checksum` is provided and matches the stored Qdrant payload checksum,
     returns {"status": "unchanged", "skipped": True} in <10ms (no re-extraction).
@@ -423,7 +443,7 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
         try:
             qc = get_qdrant()
             hits = qc.scroll(
-                C.COLL_CHUNKS,
+                collection,
                 scroll_filter=models.Filter(
                     must=[models.FieldCondition(
                         key="doc_id", match=models.MatchValue(value=doc_id))]),
@@ -434,11 +454,15 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
                     "doc_id": doc_id, "status": "unchanged", "skipped": True,
                     "checksum": checksum, "chunks": 0, "entities": 0, "edges": 0,
                     "vectors_upserted": 0, "timing": {"total": 0.0},
+                    "collection": collection,
                 }
         except Exception:
             pass  # fall through to full ingest if check fails
 
     t0 = time.time()
+
+    # Ensure the target collection exists (idempotent)
+    ensure_collection(collection)
 
     # Step 0 — delete existing data for this doc (clean re-ingest)
     driver = get_neo4j()
@@ -446,14 +470,15 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
         delete_doc_neo4j(doc_id, driver)
     finally:
         driver.close()
-    delete_doc_qdrant(doc_id)
+    delete_doc_qdrant(doc_id, collection)
 
     t_clean = time.time()
 
     # Step 1 — late-chunked vectors -> Qdrant
     r = requests.post(C.DAEMON_EMBED_LATE,
                       json={"text": text, "doc_id": doc_id}, timeout=300).json()
-    n_chunks = write_vectors(doc_id, r["chunks"], meta, checksum=checksum)
+    n_chunks = write_vectors(doc_id, r["chunks"], meta, checksum=checksum,
+                             collection=collection)
     t_embed = time.time()
 
     # Step 2 — graph extraction (LLM E2B primary, GLiNER fallback)
@@ -483,6 +508,7 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
         "vectors_upserted": n_chunks,
         "extraction_method": extraction_method,
         "checksum": checksum,
+        "collection": collection,
         "timing": {
             "clean": round(t_clean - t0, 3),
             "embed": round(t_embed - t_clean, 3),

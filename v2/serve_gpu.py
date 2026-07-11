@@ -27,8 +27,9 @@ Endpoints:
     POST /ingest           single-doc ingest (BackgroundTasks, non-blocking)
     GET  /ingest/status/{task_id}  poll ingest completion
     DELETE /ingest/{doc_id}        remove a document (Qdrant + Neo4j)
-    GET  /ingest                    list ingested documents
+    GET  /ingest                    list ingested documents (per collection)
     GET  /collections               list Qdrant collections + point counts
+  Multi-domain: pass `collection` (str | list | "all") to /ask and /ingest.
 """
 import os
 os.environ["HF_HOME"] = "/mnt/data-970-plus/hf_cache"
@@ -173,6 +174,8 @@ class AskReq(BaseModel):
     top_k: int = 5
     synthesize: bool = True
     skip_cache: bool = False
+    collection: Optional[str | List[str]] = None   # Qdrant collection(s); None→default
+    domain: Optional[str] = None                     # reserved for v2.6.0 profiles
 
 
 class IngestReq(BaseModel):
@@ -182,6 +185,7 @@ class IngestReq(BaseModel):
     author: str = "unknown"
     extract_graph: bool = True
     if_checksum: Optional[str] = None   # if provided, skip if unchanged
+    collection: Optional[str] = None     # Qdrant collection; None→default engineering_chunks
 
 
 class IngestStatusReq(BaseModel):
@@ -269,6 +273,40 @@ def extract_graph(req: ExtractReq):
     }
 
 
+# ── Collection resolver (multi-domain / cross-domain) ────────────────────────
+def _resolve_collections(collection: Optional[str | List[str]]) -> List[str]:
+    """Resolve a collection request into a list of Qdrant collection names.
+
+    - None → [QDRANT_COLLECTION_DEFAULT] (engineering_chunks)
+    - "legal" → [QDRANT_COLLECTIONS["legal"]] (domain alias)
+    - "legal_chunks" → ["legal_chunks"] (direct name, if exists)
+    - ["eng", "legal"] → [engineering_chunks, legal_chunks] (cross-domain)
+    - "all" → all registered collections in QDRANT_COLLECTIONS
+    """
+    if collection is None:
+        return [C.QDRANT_COLLECTION_DEFAULT]
+    if isinstance(collection, str):
+        if collection == "all":
+            return list(C.QDRANT_COLLECTIONS.values())
+        # Domain alias? (e.g. "legal" → "legal_chunks")
+        if collection in C.QDRANT_COLLECTIONS:
+            return [C.QDRANT_COLLECTIONS[collection]]
+        # Direct collection name (must exist)
+        return [collection]
+    # List of aliases / names
+    out = []
+    for c in collection:
+        if c == "all":
+            out.extend(C.QDRANT_COLLECTIONS.values())
+        elif c in C.QDRANT_COLLECTIONS:
+            out.append(C.QDRANT_COLLECTIONS[c])
+        else:
+            out.append(c)
+    # dedupe, preserve order
+    seen = set()
+    return [x for x in out if not (x in seen or seen.add(x))]
+
+
 @app.post("/ask")
 def ask(req: AskReq):
     """Full RAG answer in ONE call with semantic cache + route metadata."""
@@ -311,8 +349,11 @@ def ask(req: AskReq):
 
     # 3. Parallel retrieval: Qdrant + Neo4j
     import threading
+    # Resolve collection(s) → list of Qdrant collection names
+    collections = _resolve_collections(req.collection)
     q_res, g_res = [], []
-    t1 = threading.Thread(target=lambda: q_res.extend(rag.qdrant_search(vec, req.query)))
+    t1 = threading.Thread(
+        target=lambda: q_res.extend(rag.qdrant_search_multi(vec, req.query, collections)))
     t2 = threading.Thread(target=lambda: g_res.extend(rag.neo4j_subgraph(req.query)))
     t1.start(); t2.start(); t1.join(); t2.join()
 
@@ -418,6 +459,7 @@ def ingest(req: IngestReq, background_tasks: BackgroundTasks):
                 meta={"doc_type": req.doc_type, "author": req.author},
                 extract_graph=req.extract_graph,
                 if_checksum=req.if_checksum,
+                collection=req.collection or C.COLL_CHUNKS,
             )
             with _ingest_tasks_lock:
                 _ingest_tasks[task_id]["status"] = "done"
@@ -448,7 +490,7 @@ def ingest_status(task_id: str):
 
 
 @app.delete("/ingest/{doc_id}")
-def delete_ingest(doc_id: str):
+def delete_ingest(doc_id: str, collection: str = C.COLL_CHUNKS):
     """Remove a document from Qdrant + Neo4j in one call.
 
     Uses the same delete-before-reingest logic as batch ingest. Returns counts
@@ -457,19 +499,16 @@ def delete_ingest(doc_id: str):
     import ingest as ingest_mod
     from qdrant_client.models import Filter, FieldCondition, MatchValue
 
-    # ── Check existence (Qdrant payload) ──
+    # ── Check existence + accurate count (Qdrant payload) ──
     qc = ingest_mod.get_qdrant()
-    existing = qc.scroll(
-        C.COLL_CHUNKS,
-        scroll_filter=Filter(
-            must=[FieldCondition(key="doc_id",
-                                 match=MatchValue(value=doc_id))]),
-        limit=1, with_payload=False,
-    )[0]
+    flt = Filter(must=[FieldCondition(key="doc_id",
+                                      match=MatchValue(value=doc_id))])
+    existing = qc.scroll(collection, scroll_filter=flt,
+                         limit=1, with_payload=False)[0]
     if not existing:
         raise HTTPException(status_code=404, detail=f"doc_id '{doc_id}' not found")
 
-    vectors_deleted = len(existing)
+    vectors_deleted = qc.count(collection, count_filter=flt, exact=True).count
 
     # ── Neo4j: count + clean edges + orphaned nodes for this doc ──
     driver = ingest_mod.get_neo4j()
@@ -486,19 +525,24 @@ def delete_ingest(doc_id: str):
         driver.close()
 
     # ── Qdrant: delete all points for doc_id ──
-    ingest_mod.delete_doc_qdrant(doc_id)
+    ingest_mod.delete_doc_qdrant(doc_id, collection)
 
     return {
         "doc_id": doc_id,
         "status": "deleted",
         "vectors_deleted": vectors_deleted,
         "nodes_cleaned": nodes_cleaned,
+        "collection": collection,
     }
 
 
 @app.get("/ingest")
-def list_ingest():
-    """List all ingested documents with their metadata + checksum."""
+def list_ingest(collection: str = C.COLL_CHUNKS):
+    """List all ingested documents with their metadata + checksum.
+
+    `collection` selects which Qdrant collection to list (multi-domain).
+    Defaults to engineering_chunks.
+    """
     import ingest as ingest_mod
     from qdrant_client.models import Filter, FieldCondition, MatchValue
 
@@ -508,7 +552,7 @@ def list_ingest():
     offset = None
     while True:
         pts, offset = qc.scroll(
-            C.COLL_CHUNKS,
+            collection,
             scroll_filter=None,
             limit=256,
             with_payload=["doc_id", "doc_type", "checksum", "chunk_idx"],

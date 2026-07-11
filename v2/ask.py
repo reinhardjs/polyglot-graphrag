@@ -62,8 +62,13 @@ def embed_query(text: str) -> list:
 
 # ── Retrieval ─────────────────────────────────────────────────────────────────
 def qdrant_search(vec: list, query_text: str = "",
-                  top_k: int = C.QDRANT_SEARCH_TOP_K) -> list:
-    """Dense + sparse hybrid Qdrant search with RRF fusion."""
+                  top_k: int = C.QDRANT_SEARCH_TOP_K,
+                  collection: str = C.COLL_CHUNKS) -> list:
+    """Dense + sparse hybrid Qdrant search with RRF fusion.
+
+    `collection` selects the Qdrant collection to search (multi-domain support).
+    Defaults to C.COLL_CHUNKS (engineering_chunks).
+    """
     qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
     prefetch = [
         # Dense vector leg
@@ -76,13 +81,39 @@ def qdrant_search(vec: list, query_text: str = "",
             using="text", limit=top_k * 2,
         ))
     res = qc.query_points(
-        C.COLL_CHUNKS,
+        collection,
         query=vec,
         prefetch=prefetch,
         limit=top_k,
         with_payload=True,
     ).points
     return [p.payload.get("text", "") for p in res if p.payload]
+
+
+def qdrant_search_multi(vec: list, query_text: str,
+                        collections: list,
+                        top_k: int = C.QDRANT_SEARCH_TOP_K) -> list:
+    """Federated search across multiple collections (cross-domain queries).
+
+    Runs each collection search in parallel threads, merges results. The rerank
+    step (in parallel_retrieve / condense) handles fusion downstream.
+    """
+    results = []
+    threads = []
+    local = [[] for _ in collections]
+
+    def _worker(idx, coll):
+        local[idx].extend(qdrant_search(vec, query_text, top_k, coll))
+
+    for i, coll in enumerate(collections):
+        t = threading.Thread(target=_worker, args=(i, coll))
+        threads.append(t)
+        t.start()
+    for t in threads:
+        t.join()
+    for r in local:
+        results.extend(r)
+    return results
 
 
 def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS) -> list:
@@ -155,9 +186,19 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS) -> list:
     return out
 
 
-def parallel_retrieve(vec: list, query: str):
+def parallel_retrieve(vec: list, query: str,
+                      collections: list = None):
+    """Retrieve from Qdrant (one or more collections) + Neo4j graph in parallel.
+
+    `collections` is a list of Qdrant collection names to search. If None,
+    defaults to [C.COLL_CHUNKS] (backward compatible). Cross-domain queries
+    pass multiple collections; the rerank step fuses them.
+    """
+    if collections is None:
+        collections = [C.COLL_CHUNKS]
     q_res, g_res = [], []
-    t1 = threading.Thread(target=lambda: q_res.extend(qdrant_search(vec, query)))
+    t1 = threading.Thread(
+        target=lambda: q_res.extend(qdrant_search_multi(vec, query, collections)))
     t2 = threading.Thread(target=lambda: g_res.extend(neo4j_subgraph(query)))
     t1.start(); t2.start(); t1.join(); t2.join()
     return q_res, g_res

@@ -35,6 +35,19 @@ COLL_CHUNKS = "engineering_chunks"
 COLL_CACHE  = "query_cache"
 CACHE_THRESHOLD = 0.95   # cosine similarity above which we return cached answer
 
+# ── Multi-Domain Collections ─────────────────────────────────────────────────
+# Each domain gets its own Qdrant collection (namespace isolation, zero
+# overhead). Add a new domain here + create the collection in ingest.py /
+# serve_gpu.py on first use. Queries route to the collection by name.
+QDRANT_COLLECTIONS = {
+    "engineering":  "engineering_chunks",
+    "legal":        "legal_chunks",
+    "hospitality":  "hospitality_chunks",
+    "accounting":   "accounting_chunks",
+    "medical":      "medical_chunks",
+}
+QDRANT_COLLECTION_DEFAULT = "engineering_chunks"
+
 NEO4J_URI      = "bolt://localhost:7687"
 NEO4J_USER     = "neo4j"
 NEO4J_PASSWORD = "ragpassword123"
