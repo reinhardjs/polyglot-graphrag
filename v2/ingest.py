@@ -95,15 +95,44 @@ def write_vectors(doc_id: str, chunks: list, meta: dict, checksum: str = "",
     qc = get_qdrant()
     pts = []
     for ch in chunks:
+        # Store the full meta dict (REQ-7) so citations can surface rich
+        # domain metadata (title/author/url/patient_id/...) via GET /ingest
+        # and the /ask sources/contexts_meta blocks.
+        payload = {"doc_id": doc_id, "chunk_idx": ch["chunk_idx"],
+                   "text": ch["text"], "doc_type": meta.get("doc_type", "eng"),
+                   "checksum": checksum, "metadata": meta}
         pts.append(models.PointStruct(
             id=abs(hash(f"{doc_id}:{ch['chunk_idx']}")) % (2**63),
             vector={"": ch["vector"], "text": _sparse(ch["text"])},
-            payload={"doc_id": doc_id, "chunk_idx": ch["chunk_idx"],
-                     "text": ch["text"], "doc_type": meta.get("doc_type", "eng"),
-                     "checksum": checksum},
+            payload=payload,
         ))
     qc.upsert(collection, pts, wait=True)
     return len(pts)
+
+
+def validate_metadata(profile: dict, metadata: dict) -> tuple[dict, list]:
+    """Validate caller-supplied metadata against a domain profile schema.
+
+    Returns (accepted, warnings).
+      accepted — metadata dict kept as-is (unknown fields kept for transparency).
+      warnings — human-readable messages for unknown fields.
+
+    Rule (v2.6.0 REQ-7): if the profile declares metadata_schema.fields and a
+    supplied key is not in it, WARN (do not drop) so ingestion never fails on
+    schema drift. If the profile declares no fields, everything is accepted.
+    """
+    accepted = dict(metadata or {})
+    warnings = []
+    if not profile:
+        return accepted, warnings
+    allowed = set(profile.get("metadata_schema", {}).get("fields", []))
+    if allowed:
+        for k in metadata or {}:
+            if k not in allowed:
+                warnings.append(
+                    f"metadata field '{k}' not in profile schema for domain "
+                    f"'{profile['domain']['name']}'")
+    return accepted, warnings
 
 
 # ── Profile builder ───────────────────────────────────────────────────────────
@@ -479,13 +508,10 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
         meta["domain"] = profile["domain"]["name"]
     # REQ-7: validate caller metadata against profile.metadata_schema.fields.
     if profile and metadata:
-        allowed = set(profile.get("metadata_schema", {}).get("fields", []))
-        for k, v in metadata.items():
-            if allowed and k not in allowed:
-                # Unknown field → warn (do not drop), keep for transparency.
-                print(f"[ingest] WARNING: metadata field '{k}' not in "
-                      f"profile schema for domain '{profile['domain']['name']}'",
-                      flush=True)
+        accepted, warnings = validate_metadata(profile, metadata)
+        for w in warnings:
+            print(f"[ingest] WARNING: {w}", flush=True)
+        for k, v in accepted.items():
             meta[k] = v
 
     checksum = hashlib.sha256(text.encode("utf-8")).hexdigest()

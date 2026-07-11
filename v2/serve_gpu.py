@@ -637,7 +637,8 @@ def list_ingest(collection: str = C.COLL_CHUNKS):
             collection,
             scroll_filter=None,
             limit=256,
-            with_payload=["doc_id", "doc_type", "checksum", "chunk_idx"],
+            with_payload=["doc_id", "doc_type", "checksum", "chunk_idx",
+                          "metadata"],
             offset=offset,
         )
         for p in pts:
@@ -649,6 +650,7 @@ def list_ingest(collection: str = C.COLL_CHUNKS):
                     "doc_type": pl.get("doc_type", ""),
                     "chunks": 0,
                     "checksum": pl.get("checksum", ""),
+                    "metadata": pl.get("metadata", {}),
                 }
             docs[did]["chunks"] += 1
         if offset is None:

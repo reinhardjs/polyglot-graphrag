@@ -403,7 +403,8 @@ def list_ingest(collection: str = C.COLL_CHUNKS):
     while True:
         pts, offset = qc.scroll(
             collection, scroll_filter=None, limit=256,
-            with_payload=["doc_id", "doc_type", "checksum", "chunk_idx"],
+            with_payload=["doc_id", "doc_type", "checksum", "chunk_idx",
+                          "metadata"],
             offset=offset,
         )
         for p in pts:
@@ -411,7 +412,8 @@ def list_ingest(collection: str = C.COLL_CHUNKS):
             did = pl.get("doc_id", "unknown")
             if did not in docs:
                 docs[did] = {"doc_id": did, "doc_type": pl.get("doc_type", ""),
-                             "chunks": 0, "checksum": pl.get("checksum", "")}
+                             "chunks": 0, "checksum": pl.get("checksum", ""),
+                             "metadata": pl.get("metadata", {})}
             docs[did]["chunks"] += 1
         if offset is None:
             break
