@@ -14,6 +14,7 @@ diagram** so you can see exactly what changed.
 ## Table of Contents
 
 - [VRAM Layout](#vram-layout)
+- [Startup Sequence](#startup-sequence)
 - [Full Request Flow (v2.7.0)](#full-request-flow-v270)
 - [Phase 1 — Query Modulation](#phase-1--query-modulation-symbolic-pre-filtering)
 - [Phase 2 — Subgraph Pruning](#phase-2--subgraph-pruning-context-window-protection)
@@ -46,6 +47,163 @@ diagram** so you can see exactly what changed.
 ```
 *Phases 1-3 run entirely on CPU (Python logic) — they consume zero extra VRAM.
 Only Jina v3, BGE v2-m3, and GLiNER sit on the GPU.*
+
+---
+
+## Startup Sequence
+
+Bringing up all services in the correct order. Each service depends on the
+previous one, so order matters.
+
+```
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                      STARTUP ORDER                               │
+  ├──────────────────────────────────────────────────────────────────┤
+  │                                                                  │
+  │  1. docker compose up -d                                       │
+  │     ┌──────────────┐  ┌──────────────┐                          │
+  │     │   Neo4j      │  │   Qdrant     │                          │
+  │     │  :7687       │  │  :6333       │                          │
+  │     │  ~2 GB RAM   │  │  ~1 GB RAM   │                          │
+  │     └──────────────┘  └──────────────┘                          │
+  │                                                                  │
+  │  2. (OPTIONAL) Ingest sample data — one-time, builds Qdrant    │
+  │     indices + Neo4j graph. Skip if already ingested.            │
+  │                                                                  │
+  │  3. sudo systemctl start gemma-4-e2b.service                   │
+  │     ┌──────────────┐                                            │
+  │     │  Gemma E2B   │  Extractor LLM — reads documents,         │
+  │     │  :8082       │  extracts entities/edges as JSON.         │
+  │     │  ~1.5 GB VRAM│  ~45s to load.                            │
+  │     └──────────────┘                                            │
+  │                                                                  │
+  │  4. sudo systemctl start gemma-4-e4b.service                   │
+  │     ┌──────────────┐                                            │
+  │     │  Gemma E4B   │  Synthesizer LLM — reads query + context, │
+  │     │  :8084       │  produces cited answer.                   │
+  │     │  ~3.0 GB VRAM│  ~90s to load.                            │
+  │     └──────────────┘                                            │
+  │                                                                  │
+  │  5. sudo systemctl start rag-gpu-daemon.service                │
+  │     ┌──────────────────────────────────────────────────────┐   │
+  │     │  serve_gpu.py :8000                                  │   │
+  │     │  Jina v3 embed  (retrieval.passage/retrieval.query) │   │
+  │     │  BGE v2-m3 rerank                                   │   │
+  │     │  GLiNER multi-v2.1 NER (lazy)                       │   │
+  │     │  ~4.0 GB VRAM                                        │   │
+  │     │  ~30s to load (embed + rerank on GPU)                │   │
+  │     └──────────────────────────────────────────────────────┘   │
+  │                                                                  │
+  │  TOTAL: ~10.6 GB VRAM — ~2.5 min from cold start               │
+  └──────────────────────────────────────────────────────────────────┘
+```
+
+### Cold start commands
+
+```bash
+# ── 1. Databases ─────────────────────────────────────────────────────
+docker compose up -d
+# Verify: curl http://localhost:7474  (Neo4j browser)
+# Verify: curl http://localhost:6333/health  (Qdrant)
+
+# ── 2. (one-time) Ingest sample data ──────────────────────────────────
+cd v2 && bash run.sh ingest sample_data
+
+# ── 3. LLMs — each takes 45-90s to load ──────────────────────────────
+sudo systemctl start gemma-4-e2b.service
+# Verify (wait for "Ready"):
+#   curl http://localhost:8082/v1/models  → returns model list
+
+sudo systemctl start gemma-4-e4b.service
+# Verify (wait for "Ready"):
+#   curl http://localhost:8084/v1/models  → returns model list
+
+# ── 4. GPU daemon — embed + rerank on GPU ────────────────────────────
+sudo systemctl start rag-gpu-daemon.service
+# Verify:
+#   curl http://127.0.0.1:8000/health  → {"status":"ok","device":"cuda","cuda_alloc_gb":2.3}
+
+# ── 5. All running? ──────────────────────────────────────────────────
+bash run.sh health
+# E2B :8082  up
+# E4B :8084  up
+# Daemon up (2.3 GB VRAM)
+```
+
+### Alternative (no systemd)
+
+If you don't use systemd, the `run.sh` script handles everything:
+
+```bash
+# Start LLMs + daemon
+bash run.sh serve
+
+# Ingest
+bash run.sh ingest sample_data
+
+# Query
+bash run.sh ask "who reported BUG-204?"
+```
+
+### Manual per-process startup
+
+To see logs in real-time during development:
+
+```bash
+# Terminal 1: Extraction LLM
+cd /mnt/data-970-plus/rag-system
+/mnt/data-970-plus/rag-env/bin/python -m llama_cpp.server \
+  --model /mnt/data-970-plus/models/gemma-4-E2B-it-QAT-Q4_0.gguf \
+  --host 0.0.0.0 --port 8082 --n-gpu-layers -1
+
+# Terminal 2: Synthesis LLM
+/mnt/data-970-plus/rag-env/bin/python -m llama_cpp.server \
+  --model /mnt/data-970-plus/models/gemma-4-E4B-it-QAT-Q4_0.gguf \
+  --host 0.0.0.0 --port 8084 --n-gpu-layers -1
+
+# Terminal 3: GPU daemon
+cd /mnt/data-970-plus/rag-system/v2
+/mnt/data-970-plus/rag-env/bin/python serve_gpu.py
+
+# Terminal 4: (optional) CPU daemon fallback
+cd /mnt/data-970-plus/rag-system/v2
+/mnt/data-970-plus/rag-env/bin/python serve_cpu.py
+```
+
+### What loads when
+
+```
+Service startup (cold, sequential):
+  Docker (Neo4j+Qdrant)    │██████████████░░░░░░░░░░░░░░░░░░│ ~10s
+  Gemma E2B :8082           │░░░░████████████████████████░░░░│ ~45s
+  Gemma E4B :8084           │░░░░░░░░░░██████████████████████│ ~90s
+  serve_gpu.py :8000        │░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░│ ~30s
+  Total cold start          │████████████████████████████████│ ~2.5 min
+
+  Query (one request, warm):
+  Modulation + Embed +      │███░░░░░░░░░░░░░│ ~0.2s (no cache)
+  Retrieve + Rerank + E4B   │████████████████│ ~6s total
+```
+
+### GPU memory allocation timeline (cold start)
+
+```
+                    E2B loads            E4B loads            Daemon loads
+                 ┌──────────┐        ┌──────────┐        ┌─────────────────┐
+11 GB ┤                                             ▄▄▄▄▄█ daemon active
+10 GB ┤                                   ▄▄▄▄▄▄▄▄█▄▄▄▄▄▄█ daemon + E4B
+ 9 GB ┤                         ▄▄▄▄▄▄▄▄█▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄█ E4B loads + daemon
+ 8 GB ┤               ▄▄▄▄▄▄▄▄█▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ 7 GB ┤     ▄▄▄▄▄▄▄▄█
+ 6 GB ┤
+ 5 GB ┤
+ 4 GB ┤
+ 3 GB ┤
+ 2 GB ┤
+ 1 GB ┤
+      └──────────────────────────────────────────────────────────────
+      t=0   t=45s    t=90s    t=120s   t=150s   t=180s
+```
 
 ---
 
