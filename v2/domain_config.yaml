@@ -1,39 +1,66 @@
-# V3.0 Hybrid Index-Routing — Domain Configuration
-# Single source of truth for all domain schemas. Replaces domains/*.toml.
-# Consumed by domain_loader.py at runtime (no hardcoded logic in pipeline).
-
-# Dynamic label injection (v3.1.0)
-# When enabled, GLiNER's label set auto-expands based on entity names E2B
-# discovers that GLiNER missed. Candidates are promoted after
-# `promotion_threshold` documents and evicted via LRU when `max_per_domain`
-# is exceeded. State persists to ~/.hermes/labels/{domain}_dynamic.json.
-# See plans/dynamic-label-injection.md for full design + validation.
 dynamic_labels:
   enabled: true
   max_per_domain: 20
   promotion_threshold: 3
   ttl_docs: 50
-
+llm_fallback:
+  enabled: false
+  second_pass: true
+  min_dropped: 1
 domains:
   engineering:
     collection: engineering_chunks
     neo4j_label: Engineering
-    entity_types: [Microservice, Database, API, Metric, Developer, Framework, Component, Bug, PR, ADR]
-    relation_types: [FIXES, AUTHORED, REFERENCES, IMPACTS, DEPENDS_ON, REVIEWED]
-    pair_strategy: all_pairs          # all_pairs | same_sentence
+    entity_types:
+    - Microservice
+    - Database
+    - API
+    - Metric
+    - Developer
+    - Framework
+    - Component
+    - Bug
+    - PR
+    - ADR
+    relation_types:
+    - FIXES
+    - AUTHORED
+    - REFERENCES
+    - IMPACTS
+    - DEPENDS_ON
+    - REVIEWED
+    pair_strategy: all_pairs
     min_confidence: 0.6
     chunking:
       strategy: sentence
       chunk_size: 384
       overlap: 0
     metadata_schema:
-      fields: [author, doc_type]
-
+      fields:
+      - author
+      - doc_type
   legal:
     collection: legal_chunks
     neo4j_label: Legal
-    entity_types: [Statute, Case, Regulation, Court, Party, Citation, Clause, Jurisdiction, Agency]
-    relation_types: [CITES, OVERRULES, AMENDS, INTERPRETS, APPLIES_TO, GOVERNS, REFERENCES, SUPERSEDES]
+    entity_types:
+    - Statute
+    - Case
+    - Regulation
+    - Court
+    - Party
+    - Citation
+    - Clause
+    - Jurisdiction
+    - Agency
+    relation_types:
+    - CITES
+    - OVERRULES
+    - AMENDS
+    - INTERPRETS
+    - APPLIES_TO
+    - GOVERNS
+    - REFERENCES
+    - SUPERSEDES
     pair_strategy: same_sentence
     min_confidence: 0.6
     chunking:
@@ -41,13 +68,31 @@ domains:
       chunk_size: 512
       overlap: 50
     metadata_schema:
-      fields: [jurisdiction, court, date]
-
+      fields:
+      - jurisdiction
+      - court
+      - date
   medical:
     collection: medical_chunks
     neo4j_label: Medical
-    entity_types: [Symptom, Diagnosis, Disease, Medication, Procedure, LabTest, Anatomy, Patient, Doctor]
-    relation_types: [TREATS, CAUSES, INDICATES, CONTRAINDICATES, PRESCRIBED_FOR, DOSAGE, ADMINISTERED_BY]
+    entity_types:
+    - Symptom
+    - Diagnosis
+    - Disease
+    - Medication
+    - Procedure
+    - LabTest
+    - Anatomy
+    - Patient
+    - Doctor
+    relation_types:
+    - TREATS
+    - CAUSES
+    - INDICATES
+    - CONTRAINDICATES
+    - PRESCRIBED_FOR
+    - DOSAGE
+    - ADMINISTERED_BY
     pair_strategy: all_pairs
     min_confidence: 0.65
     chunking:
@@ -55,13 +100,31 @@ domains:
       chunk_size: 384
       overlap: 0
     metadata_schema:
-      fields: [patient_id, report_date]
-
+      fields:
+      - patient_id
+      - report_date
   accounting:
     collection: accounting_chunks
     neo4j_label: Accounting
-    entity_types: [Account, Transaction, Ledger, TaxCode, Invoice, Vendor, Customer, Payment, JournalEntry]
-    relation_types: [DEBITS, CREDITS, POSTS_TO, REFERENCES, PAYS, OWES, APPLIES_TO, RECONCILES]
+    entity_types:
+    - Account
+    - Transaction
+    - Ledger
+    - TaxCode
+    - Invoice
+    - Vendor
+    - Customer
+    - Payment
+    - JournalEntry
+    relation_types:
+    - DEBITS
+    - CREDITS
+    - POSTS_TO
+    - REFERENCES
+    - PAYS
+    - OWES
+    - APPLIES_TO
+    - RECONCILES
     pair_strategy: same_sentence
     min_confidence: 0.6
     chunking:
@@ -69,13 +132,30 @@ domains:
       chunk_size: 512
       overlap: 50
     metadata_schema:
-      fields: [fiscal_year, entity_name]
-
+      fields:
+      - fiscal_year
+      - entity_name
   hospitality:
     collection: hospitality_chunks
     neo4j_label: Hospitality
-    entity_types: [Recipe, Ingredient, Station, Dish, Supplier, Equipment, Procedure, Menu, Staff]
-    relation_types: [CONTAINS, PREPARED_BY, SOURCED_FROM, REQUIRES, SERVED_WITH, REPLACES, PAIRS_WITH]
+    entity_types:
+    - Recipe
+    - Ingredient
+    - Station
+    - Dish
+    - Supplier
+    - Equipment
+    - Procedure
+    - Menu
+    - Staff
+    relation_types:
+    - CONTAINS
+    - PREPARED_BY
+    - SOURCED_FROM
+    - REQUIRES
+    - SERVED_WITH
+    - REPLACES
+    - PAIRS_WITH
     pair_strategy: all_pairs
     min_confidence: 0.55
     chunking:
@@ -83,13 +163,35 @@ domains:
       chunk_size: 384
       overlap: 0
     metadata_schema:
-      fields: [venue, meal_period]
-
+      fields:
+      - venue
+      - meal_period
   journal:
     collection: journal_chunks
     neo4j_label: Journal
-    entity_types: [Person, Organization, Model, Dataset, Method, Algorithm, Framework, Metric, Theory, Institution, Author]
-    relation_types: [PROPOSES, EVALUATES, OUTPERFORMS, USES, REPORTS, SUPPORTS, CONTRADICTS, CITES, TRAINED_ON, INTRODUCES]
+    entity_types:
+    - Person
+    - Organization
+    - Model
+    - Dataset
+    - Method
+    - Algorithm
+    - Framework
+    - Metric
+    - Theory
+    - Institution
+    - Author
+    relation_types:
+    - PROPOSES
+    - EVALUATES
+    - OUTPERFORMS
+    - USES
+    - REPORTS
+    - SUPPORTS
+    - CONTRADICTS
+    - CITES
+    - TRAINED_ON
+    - INTRODUCES
     pair_strategy: all_pairs
     min_confidence: 0.6
     chunking:
@@ -97,7 +199,8 @@ domains:
       chunk_size: 384
       overlap: 0
     metadata_schema:
-      fields: [venue, year, doi]
-
-# Default domain used when none specified
+      fields:
+      - venue
+      - year
+      - doi
 default_domain: engineering

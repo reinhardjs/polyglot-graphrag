@@ -14,6 +14,9 @@ import os
 import re
 import requests
 
+import logging
+logger = logging.getLogger("hybrid_extraction")
+
 from config import (
     EXTRACTION_LLM_BASE_URL,
     EXTRACTION_LLM_MODEL,
@@ -87,6 +90,109 @@ def flush_dropped_log():
         pass
     finally:
         _dropped_buffer.clear()
+
+
+# ---------------------------------------------------------------------------
+# Strategy 3: LLM Fallback NER (entity-type classification)
+# ---------------------------------------------------------------------------
+
+FALLBACK_SYSTEM_PROMPT = """You are an entity-type classifier for a GraphRAG \
+system. You are given a list of entity names and a CLOSED set of allowed \
+entity types. For each name, return the single best-matching allowed type. \
+If no allowed type fits, return "UNKNOWN".
+
+Rules:
+1. Use ONLY types from the allowed list (or "UNKNOWN").
+2. Match by semantic meaning, not string equality.
+3. Return ONLY compact JSON — no prose, no markdown, no explanation.
+4. Format: {"EntityName": "Type", ...}"""
+
+FALLBACK_USER_TEMPLATE = """### ALLOWED TYPES
+{types}
+
+### ENTITY NAMES TO CLASSIFY
+{names}
+
+Return a JSON object mapping each name to its best-matching allowed type:
+{{"Name1": "TypeA", "Name2": "TypeB"}}"""
+
+
+def _classify_entities(names: list, domain_types: list,
+                       timeout: int = 60) -> dict:
+    """Classify dropped entity names into domain semantic types via E2B.
+
+    Returns {name: inferred_type} for names that matched an allowed type.
+    Names classified as UNKNOWN (or unparseable) are omitted. Never raises —
+    returns {} on any failure so the caller falls back to Strategy 2 behavior.
+    """
+    if not names or not domain_types:
+        return {}
+    try:
+        names_json = json.dumps(names, ensure_ascii=False)
+        types_line = ", ".join(domain_types)
+        user_msg = FALLBACK_USER_TEMPLATE.format(
+            types=types_line, names=names_json)
+        resp = _call_e2b(FALLBACK_SYSTEM_PROMPT, user_msg, timeout=timeout)
+        # Parse: strip thinking block + fences, then json.loads.
+        cleaned = resp.strip()
+        last_tag = cleaned.rfind("<|channel|>")
+        if last_tag != -1:
+            cleaned = cleaned[last_tag + len("<|channel|>"):].strip()
+        if "```" in cleaned:
+            m = re.search(r"```(?:json)?\s*(.*?)```", cleaned, re.DOTALL)
+            if m:
+                cleaned = m.group(1).strip()
+        # Find the first balanced {...} object.
+        start = cleaned.find("{")
+        if start == -1:
+            return {}
+        depth, end = 0, -1
+        for i in range(start, len(cleaned)):
+            if cleaned[i] == "{":
+                depth += 1
+            elif cleaned[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        if end == -1:
+            return {}
+        data = json.loads(cleaned[start:end])
+        allowed = set(domain_types)
+        result = {}
+        for name, typ in data.items():
+            if not isinstance(typ, str):
+                continue
+            typ = typ.strip()
+            if typ in allowed:
+                result[name] = typ
+        return result
+    except Exception as e:  # noqa: BLE001
+        logger.warning("fallback classification failed: %s", e)
+        return {}
+
+
+def _run_extraction(text: str, domain: dict, entities: list,
+                    domain_name: str = None, doc_id: str = None) -> list:
+    """Run one GLiNER-enriched E2B relation-extraction pass.
+
+    Shared by the primary path and the Strategy-3 second pass. Returns the
+    validated relation list (edges only; entities already known).
+    """
+    entity_lines = "\n".join(
+        f"- {e['name']} (type: {e.get('type', 'unknown')})"
+        for e in entities
+    )
+    user_msg = HYBRID_USER_TEMPLATE.format(
+        entity_lines=entity_lines,
+        relation_types=", ".join(domain.get("relation_types", [])),
+        text=text,
+    )
+    response = _call_e2b(SYSTEM_PROMPT, user_msg)
+    return _parse_and_validate(
+        response, entities, domain.get("relation_types", []),
+        doc_id=doc_id, domain=domain, domain_name=domain_name,
+    )
 
 
 GLINER_DAEMON_URL = "http://localhost:8000"
@@ -384,31 +490,33 @@ def extract_hybrid(doc_id: str, text: str, domain: dict,
     # 1. GLiNER entity detection (enriched label set)
     entities = _call_gliner(text, all_labels)
 
-    # 2. Build hybrid prompt
-    entity_lines = "\n".join(
-        f"- {e['name']} (type: {e.get('type', 'unknown')})"
-        for e in entities
-    )
-    user_msg = HYBRID_USER_TEMPLATE.format(
-        entity_lines=entity_lines,
-        relation_types=", ".join(domain.get("relation_types", [])),
-        text=text,
-    )
+    # 2. Primary E2B relation extraction pass
+    relations = _run_extraction(text, domain, entities,
+                                domain_name=domain_name, doc_id=doc_id)
 
-    # 3. Single E2B call (NOT batched pairs)
-    response = _call_e2b(SYSTEM_PROMPT, user_msg)
+    # 3. Strategy 3 — LLM Fallback NER for dropped entities
+    recovered = _strategy3_fallback(doc_id, text, domain, domain_name,
+                                   entities, relations, provider)
+    if recovered["new_entities"]:
+        entities = entities + recovered["new_entities"]
+        if recovered["second_pass"]:
+            # Re-extract relations now that entities are known.
+            extra = _run_extraction(text, domain, entities,
+                                    domain_name=domain_name, doc_id=doc_id)
+            # Merge de-duplicated by (src, type, tgt)
+            seen_keys = {(r["source_name"], r["relation_type"], r["target_name"])
+                         for r in relations}
+            for r in extra:
+                k = (r["source_name"], r["relation_type"], r["target_name"])
+                if k not in seen_keys:
+                    seen_keys.add(k)
+                    relations.append(r)
 
-    # 4. Parse + validate (records dropped entities for dynamic labels)
-    relations = _parse_and_validate(
-        response, entities, domain.get("relation_types", []),
-        doc_id=doc_id, domain=domain, domain_name=domain_name,
-    )
-
-    # 5. Advance dynamic-label state (promotion/eviction) + flush audit log
+    # 4. Advance dynamic-label state (promotion/eviction) + flush audit log
     provider.step_document(doc_id)
     flush_dropped_log()
 
-    # 6. Return in extract_graph_llm-compatible shape
+    # 5. Return in extract_graph_llm-compatible shape
     return {
         "nodes": [
             {"id": e["name"], "type": e.get("type", "unknown")}
@@ -423,3 +531,62 @@ def extract_hybrid(doc_id: str, text: str, domain: dict,
             for r in relations
         ],
     }
+
+
+def _strategy3_fallback(doc_id, text, domain, domain_name, entities,
+                       relations, provider) -> dict:
+    """Recover entities E2B referenced but GLiNER missed, via E2B typing.
+
+    Triggered only when (a) llm_fallback.enabled and (b) drops occurred.
+    Calls E2B once to classify dropped names into domain semantic types,
+    records them on the provider (so the TYPE is promoted by Strategy 2),
+    and returns recovered entity nodes {id, type}.
+
+    Returns:
+        {"new_entities": [...], "second_pass": bool}
+    """
+    cfg = (domain or {}).get("llm_fallback", {}) or {}
+    if not cfg:
+        # llm_fallback lives at top-level of domain_config.yaml, not inside
+        # each domain sub-dict. Read it via the loader's top-level accessor.
+        try:
+            import domain_loader
+            cfg = domain_loader.get_top_level("llm_fallback") or {}
+        except Exception:
+            cfg = {}
+    enabled = cfg.get("enabled", False)
+    result = {"new_entities": [], "second_pass": False}
+    if not enabled:
+        return result
+
+    # Collect dropped names from the audit buffer for this doc.
+    dropped = _dropped_buffer.get(doc_id or "__unknown__", {}).get("dropped", [])
+    names = sorted({d["name"] for d in dropped if d.get("name")})
+    if not names:
+        return result
+
+    domain_types = list(domain.get("entity_types", []))
+    classified = _classify_entities(names, domain_types)
+    if not classified:
+        return result
+
+    # Record on provider with inferred_type so Strategy 2 promotes the TYPE.
+    for name, inferred in classified.items():
+        try:
+            provider.record_unknown(name, inferred_type=inferred)
+        except Exception:
+            pass
+
+    # Build recovered entity nodes with correct semantic type.
+    known = {e["name"].lower() for e in entities}
+    new_entities = []
+    for name, inferred in classified.items():
+        if name.lower() not in known:
+            new_entities.append({"name": name, "type": inferred})
+            known.add(name.lower())
+    result["new_entities"] = new_entities
+    result["second_pass"] = bool(cfg.get("second_pass", True))
+    logger.info("Strategy3 recovered %d entities for doc %s: %s",
+                len(new_entities), doc_id,
+                {e["name"]: e["type"] for e in new_entities})
+    return result

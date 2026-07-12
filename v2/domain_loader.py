@@ -33,6 +33,9 @@ _REQUIRED_KEYS = [
 _LOCK = threading.Lock()
 _DOMAINS: Dict[str, Any] = {}
 _DEFAULT_DOMAIN = "engineering"
+# Top-level config blocks (dynamic_labels, llm_fallback) exposed for runtime
+# access without re-parsing the YAML.
+_TOP_LEVEL: Dict[str, Any] = {}
 
 
 def _validate_domain(name: str, cfg: Dict[str, Any]) -> None:
@@ -74,16 +77,29 @@ def _load_file() -> Dict[str, Any]:
     return {
         "domains": domains,
         "default_domain": raw.get("default_domain", _DEFAULT_DOMAIN),
+        "dynamic_labels": raw.get("dynamic_labels", {}),
+        "llm_fallback": raw.get("llm_fallback", {}),
     }
 
 
 def reload_domains() -> None:
     """Reload domain_config.yaml from disk (call after editing the file)."""
-    global _DOMAINS, _DEFAULT_DOMAIN
+    global _DOMAINS, _DEFAULT_DOMAIN, _TOP_LEVEL
     parsed = _load_file()
     with _LOCK:
         _DOMAINS = parsed["domains"]
         _DEFAULT_DOMAIN = parsed["default_domain"]
+        _TOP_LEVEL = {
+            "dynamic_labels": parsed.get("dynamic_labels", {}),
+            "llm_fallback": parsed.get("llm_fallback", {}),
+        }
+
+
+def get_top_level(key: str) -> Dict[str, Any]:
+    """Return a top-level config block (dynamic_labels / llm_fallback)."""
+    _ensure_loaded()
+    with _LOCK:
+        return _TOP_LEVEL.get(key, {})
 
 
 def _ensure_loaded() -> None:

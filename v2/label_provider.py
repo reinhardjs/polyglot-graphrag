@@ -195,9 +195,13 @@ class LabelProvider:
     # -- Internal -------------------------------------------------------------
 
     def _promote(self, key: str) -> None:
+        cand = self._candidates[key]
+        # Strategy 3: if an inferred semantic type was supplied by the LLM
+        # fallback, promote THAT (so GLiNER learns the category, not the name).
+        # Otherwise (Strategy 2) promote the name itself.
+        label = cand.inferred_type if cand.inferred_type else cand.label
         if len(self._active) >= self.max_labels:
             self._evict_lru()
-        label = self._candidates[key].label
         self._active.add(label)
         logger.info("promoted dynamic label '%s' for domain '%s' "
                     "(active=%d)", label, self.domain, len(self._active))

@@ -195,3 +195,11 @@ hermes
   Audit dropped entities to `logs/dropped_entities.jsonl` (per-doc JSON).
   Iterate with `scripts/bench_drift.py` (baseline gate) and
   `scripts/validate_dynamic_labels.py` (A/B/C recall harness).
+
+- **Strategy 3: LLM Fallback NER** (opt-in, `llm_fallback.enabled: true` in
+  `domain_config.yaml`). When E2B references an entity GLiNER missed, a single
+  E2B call classifies the dropped name into a domain *semantic type*. The
+  inferred type is promoted (not the raw name) → clean taxonomy + generalization
+  (e.g. `Kubernetes`→`Component` rather than `type="Kubernetes"`). Recovered
+  entities become typed graph nodes; `second_pass: true` re-extracts the
+  dropped edges. Triggers only when drops occur (zero cost otherwise).

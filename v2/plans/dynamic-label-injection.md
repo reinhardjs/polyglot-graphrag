@@ -631,3 +631,41 @@ target domain's candidates stayed empty. Fixed by adding `_domain_name()`
 (derives from `neo4j_label`/`collection`) and threading `domain_name` through
 `ingest_text` → `extract_hybrid`/`sliding_window_extract` → `_parse_and_validate`.
 Verified: journal/engineering/legal/medical all resolve correctly.
+
+### Strategy 3 (LLM Fallback NER) — IMPLEMENTED (v3.1.2)
+
+**What it does:** When E2B references an entity GLiNER missed, a single E2B
+call classifies the dropped *name* into a domain *semantic type* (from
+`entity_types`). The inferred type is recorded on the provider so Strategy 2's
+promotion machinery promotes the **CATEGORY** (e.g. "Component") instead of the
+**name** (e.g. "Kubernetes") → clean taxonomy + generalization. Recovered
+entities are returned as typed nodes; with `second_pass: true` the relations
+are re-extracted so the previously-dropped edges are captured.
+
+**Files changed (v3.1.2):**
+- `hybrid_extraction.py`: `FALLBACK_SYSTEM_PROMPT`/`FALLBACK_USER_TEMPLATE`,
+  `_classify_entities()` (1 E2B call → `{name: type}`), `_run_extraction()`
+  (refactored shared extraction pass), `_strategy3_fallback()` (orchestrates
+  classification + recovery + optional second pass), and `logger` added.
+- `label_provider.py`: `_promote()` now prefers `inferred_type` over the name
+  when present (so promotion injects the semantic category).
+- `domain_loader.py`: exposes top-level `dynamic_labels`/`llm_fallback` via
+  `_TOP_LEVEL` + `get_top_level()` (the loader previously STRIPPED them, which
+  would have left `llm_fallback` permanently disabled — fixed).
+- `domain_config.yaml`: top-level `llm_fallback:` block
+  (`enabled: false`, `second_pass: true`, `min_dropped: 1`).
+
+**Verified end-to-end:**
+- `_classify_entities(['Kubernetes','PostgreSQL','Terraform','Bob the intern'])`
+  → `{Kubernetes:Framework, PostgreSQL:Database, Terraform:Framework,
+  Bob the intern:Developer}` (gibberish correctly omitted).
+- Full drop→classify→record→promote cycle: `Kubernetes` dropped 3× with
+  `inferred_type='Component'` → `get_active()` returns `['Component']` (the
+  semantic type, NOT the name).
+- `extract_hybrid` with `llm_fallback.enabled=true` recovers typed nodes
+  (e.g. `{name:'Kubernetes', type:'Component'}`) and re-extracts edges.
+
+**Latency:** Strategy 3 triggers ONLY when drops occur. Each triggering doc
+adds 1 E2B classification call (+ optionally 1 re-extraction call). When no
+drops, the cost is zero (early return). Default `enabled: false` — opt-in per
+domain by setting `llm_fallback.enabled: true` in `domain_config.yaml`.
