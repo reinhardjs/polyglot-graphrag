@@ -327,7 +327,7 @@ def delete_doc_qdrant(doc_id: str, collection: str = C.COLL_CHUNKS):
 
 
 def write_graph(doc_id: str, graph: dict, source_text: str, driver,
-                chunk_size: int = 512) -> int:
+                chunk_size: int = 512, neo4j_label: str = None) -> int:
     """Write entity nodes + edges into Neo4j using VECTOR-DRIVEN resolution.
 
     Phase A — Node Resolution:
@@ -338,10 +338,20 @@ def write_graph(doc_id: str, graph: dict, source_text: str, driver,
     Phase B — Node Write:
       MERGE each resolved entity with its profile, type, source_doc, and
       name_vector. Append raw names to aliases[] for audit trail.
+      If `neo4j_label` is given (V3.0 domain config), also tag the node with
+      that secondary label so graph retrieval can scope by domain.
 
     Phase C — Edge Write:
       Map source/target to resolved IDs from Phase A → MERGE relationships.
     """
+    # Sanitize the domain label for Cypher (:Label can't be parameterized).
+    safe_label = None
+    if neo4j_label:
+        cand = "".join(c if (c.isalnum() or c == "_") else "_"
+                       for c in neo4j_label)
+        if cand and (cand[0].isalpha() or cand[0] == "_"):
+            safe_label = cand
+
     nodes = graph.get("nodes", [])
     if not nodes:
         return 0
@@ -363,8 +373,11 @@ def write_graph(doc_id: str, graph: dict, source_text: str, driver,
 
             # Check if this exact name is NEW to this resolved node
             # (MERGE the node; append the alias only if novel)
+            # V3.0: also attach the domain label (e.g. :Engineering) when set,
+            # so graph retrieval can scope subgraphs by domain.
+            label_clause = f":{safe_label}" if safe_label else ""
             result = s.run(
-                "MERGE (n:Entity {id:$id}) "
+                f"MERGE (n:Entity{label_clause} {{id:$id}}) "
                 "ON CREATE SET "
                 "  n.name        = $name, "
                 "  n.type        = $type, "
@@ -394,30 +407,83 @@ def write_graph(doc_id: str, graph: dict, source_text: str, driver,
                     print(f"[write]  {raw_name} → {resolved_id} "
                           f"(aliases: {aliases})", flush=True)
 
-    # ── Phase C: Write edges using resolved IDs ─
+    # ── Phase C: Write edges using resolved IDs (BATCH UNWIND by rel-type) ─
+    # V3.0: group edges by relationship type, then one UNWIND query per type.
+    # This replaces the old per-edge MERGE loop (single-query-per-edge) with
+    # batched writes — far fewer round-trips to Neo4j.
+    edges_by_type: dict = {}
+    for e in graph.get("edges", []):
+        src_id = resolver.get(e["source"])
+        tgt_id = resolver.get(e["target"])
+        if not src_id or not tgt_id:
+            continue  # resolution failed for one end
+        if src_id == tgt_id:
+            continue  # self-loop, skip
+        edge_type = e.get("type", "ASSOCIATED_WITH")
+        # Sanitize edge type for Cypher (relationship types can't be parameterized):
+        # allow only A-Z, 0-9, underscore; uppercase.
+        safe_type = "".join(
+             c if (c.isalnum() or c == "_") else "_" for c in edge_type.upper()
+        )
+        if not safe_type or not (safe_type[0].isalpha() or safe_type[0] == "_"):
+            safe_type = "REL_" + safe_type
+        edges_by_type.setdefault(safe_type, []).append(
+            {"source_id": src_id, "target_id": tgt_id}
+        )
+
     edge_count = 0
     with driver.session() as s:
-        for e in graph.get("edges", []):
-            src_id = resolver.get(e["source"])
-            tgt_id = resolver.get(e["target"])
-            if not src_id or not tgt_id:
-                continue  # resolution failed for one end
-            if src_id == tgt_id:
-                continue  # self-loop, skip
-            edge_type = e.get("type", "ASSOCIATED_WITH")
+        for rel_type, batch in edges_by_type.items():
+            # Relationship type is validated/sanitized above; safe to interpolate.
             s.run(
-                "MATCH (a:Entity {id:$s}), (b:Entity {id:$t}) "
-                f"MERGE (a)-[:{edge_type}]->(b)",
-                s=src_id, t=tgt_id,
+                "UNWIND $edges AS edge "
+                "MATCH (a:Entity {id: edge.source_id}) "
+                "MATCH (b:Entity {id: edge.target_id}) "
+                f"MERGE (a)-[:{rel_type}]->(b)",
+                edges=batch,
             )
-            edge_count += 1
+            edge_count += len(batch)
 
     print(f"[write] {doc_id}: {len(nodes)} nodes resolved, "
-          f"{edge_count} edges written", flush=True)
+          f"{edge_count} edges written ({len(edges_by_type)} rel-types, "
+          f"batched UNWIND)", flush=True)
     return len(nodes)
 
 
 # ── LLM / GLiNER extraction ───────────────────────────────────────────────────
+def extract_graph_index_routing(doc_id: str, text: str,
+                                domain: "str | None" = None) -> dict:
+    """V3.0 Hybrid Index-Routing extraction (GLiNER entities → Qwen relations).
+
+    Returns a graph dict in write_graph's expected shape:
+      {"nodes": [{"id": <name>, "type": <type>}, ...],
+       "edges": [{"source": <name>, "target": <name>, "type": <REL>}, ...]}
+
+    Entity source/target names come from the index_router's remapped relations
+    (source_name / target_name), so write_graph's vector resolver can dedupe.
+    """
+    import index_router
+    result = index_router.extract(text, domain_name=domain)
+    entities = result.get("entities", [])
+    relations = result.get("relations", [])
+
+    nodes = [{"id": e["name"], "type": e.get("type", "Unknown")}
+             for e in entities]
+    edges = []
+    for r in relations:
+        sname = r.get("source_name")
+        tname = r.get("target_name")
+        if not sname or not tname:
+            continue
+        edges.append({
+            "source": sname,
+            "target": tname,
+            "type": r.get("type", "ASSOCIATED_WITH"),
+        })
+    return {"nodes": nodes, "edges": edges,
+            "meta": result.get("meta", {})}
+
+
 def extract_graph_llm(doc_id: str, text: str, chunk_size: int = 512,
                       profile: dict = None) -> dict:
     """LLM-based graph extraction via the configured extraction model.
@@ -495,7 +561,15 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
     import config as C
     # Resolve domain profile (v2.6.0) — drives chunking + extraction + metadata.
     profile = C.load_domain_profile(domain) if domain else None
-    chunk_cfg = (profile or {}).get("chunking", {}) if profile else {}
+    if profile:
+        chunk_cfg = profile.get("chunking", {})
+    else:
+        # V3.0: no TOML profile — pull chunking from domain_config.yaml
+        try:
+            import domain_loader
+            chunk_cfg = domain_loader.get_domain(domain).get("chunking", {})
+        except Exception:
+            chunk_cfg = {}
     strategy = chunk_cfg.get("strategy", "sentence")
     chunk_size = chunk_cfg.get("chunk_size", 512)
     overlap = chunk_cfg.get("overlap", 64)
@@ -562,18 +636,38 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
                              collection=collection)
     t_embed = time.time()
 
-    # Step 2 — graph extraction (LLM E2B primary, GLiNER fallback)
+    # Step 2 — graph extraction
+    #   V3.0: Hybrid Index-Routing (GLiNER→Qwen) is the primary path when
+    #   config.EXTRACTION_MODE == "index_routing"; otherwise the legacy LLM
+    #   (E2B) path is used. Both feed write_graph's batched UNWIND writer.
     n_nodes = 0
     extraction_method = "none"
     if extract_graph:
+        mode = getattr(C, "EXTRACTION_MODE", "index_routing")
         try:
-            g = extract_graph_llm(doc_id, text, chunk_size=chunk_size,
-                                  profile=profile)
-            extraction_method = "llm"
-            # Step 3 — vector-resolve entities + write to Neo4j
+            if mode == "index_routing":
+                g = extract_graph_index_routing(doc_id, text, domain=domain)
+                extraction_method = "index_routing"
+            else:
+                g = extract_graph_llm(doc_id, text, chunk_size=chunk_size,
+                                      profile=profile)
+                extraction_method = "llm"
+            # Step 3 — vector-resolve entities + write to Neo4j (batched UNWIND)
             driver = get_neo4j()
             try:
-                n_nodes = write_graph(doc_id, g, text, driver, chunk_size=chunk_size)
+                # V3.0: pull the domain's Neo4j label from YAML so nodes are
+                # tagged (e.g. :Engineering) for domain-scoped graph retrieval.
+                neo4j_label = None
+                if domain:
+                    try:
+                        import domain_loader
+                        neo4j_label = domain_loader.get_domain(domain).get(
+                            "neo4j_label")
+                    except Exception:
+                        neo4j_label = None
+                n_nodes = write_graph(doc_id, g, text, driver,
+                                      chunk_size=chunk_size,
+                                      neo4j_label=neo4j_label)
             finally:
                 driver.close()
         except Exception as e:

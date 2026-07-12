@@ -286,6 +286,38 @@ def extract_graph(req: ExtractReq):
     }
 
 
+@app.post("/extract_entities")
+def extract_entities(req: ExtractReq):
+    """GLiNER zero-shot NER → entities with character spans (Index-Routing Stage 1).
+
+    Returns entities with exact `start`/`end` character offsets so the caller
+    can build entity pairs (all_pairs or same_sentence) and route them to the
+    Qwen index-router LLM for typed relation classification.
+
+    `labels` (v2.6.0): domain GLiNER entity labels from domain_config.yaml
+    graph_schema.entity_types. If omitted, falls back to config.GLINER_LABELS.
+    """
+    gliner = _load_gliner()
+    labels = req.labels or C.GLINER_LABELS
+    preds = gliner.predict_entities(req.text, labels,
+                                    threshold=C.GLINER_THRESHOLD)
+    entities = []
+    seen = set()
+    for p in preds:
+        name = p["text"].strip()
+        key = (name.lower(), p["label"])
+        if key in seen:
+            continue
+        seen.add(key)
+        entities.append({
+            "name": name,
+            "type": p["label"],
+            "start": int(p.get("start", 0)),
+            "end": int(p.get("end", len(name))),
+        })
+    return {"entities": entities}
+
+
 # ── Collection resolver (multi-domain / cross-domain) ────────────────────────
 def _resolve_collections(collection: Optional[str | List[str]]) -> List[str]:
     """Resolve a collection request into a list of Qdrant collection names.
@@ -551,11 +583,18 @@ def ingest(req: IngestReq, background_tasks: BackgroundTasks, response: Response
     if not req.doc_id or not req.doc_id.strip():
         raise HTTPException(status_code=400, detail="doc_id is required")
 
-    # Derive collection from domain profile when not explicitly given.
+    # Derive collection from domain config when not explicitly given.
+    # V3.0: domain schema comes from domain_config.yaml (domain_loader), with
+    # a fallback to the legacy TOML profile if one still exists.
     target_collection = req.collection
     if target_collection is None and req.domain:
-        prof = C.load_domain_profile(req.domain)
-        target_collection = prof["domain"]["collection"]
+        try:
+            import domain_loader
+            target_collection = domain_loader.get_domain(req.domain).get("collection")
+        except Exception:
+            prof = C.load_domain_profile(req.domain)
+            if prof:
+                target_collection = prof["domain"]["collection"]
     target_collection = target_collection or C.COLL_CHUNKS
 
     # ── Synchronous incremental guard: skip if unchanged ──
@@ -777,6 +816,50 @@ def list_profiles():
         except Exception as e:
             out.append({"file": _os.path.basename(path), "error": str(e)})
     return {"profiles": out}
+
+
+# ── V3.0 Admin endpoints (YAML domain config) ────────────────────────────────
+@app.get("/admin/domains")
+def admin_domains():
+    """List domains from domain_config.yaml (V3.0 YAML-driven config).
+
+    Returns each domain's schema summary: entity/relation types, pair
+    strategy, min_confidence, collection, and neo4j_label.
+    """
+    import domain_loader
+    out = []
+    for name in domain_loader.list_domains():
+        d = domain_loader.get_domain(name)
+        out.append({
+            "domain": name,
+            "collection": d.get("collection"),
+            "neo4j_label": d.get("neo4j_label"),
+            "entity_types": d.get("entity_types", []),
+            "relation_types": d.get("relation_types", []),
+            "pair_strategy": d.get("pair_strategy"),
+            "min_confidence": d.get("min_confidence"),
+        })
+    return {
+        "domains": out,
+        "default_domain": domain_loader.get_default_domain(),
+        "count": len(out),
+    }
+
+
+@app.post("/admin/reload")
+def admin_reload():
+    """Reload domain_config.yaml from disk without restarting the daemon."""
+    import domain_loader
+    try:
+        domain_loader.reload_domains()
+        return {
+            "status": "reloaded",
+            "domains": domain_loader.list_domains(),
+            "default_domain": domain_loader.get_default_domain(),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500,
+                            detail=f"reload failed: {e}")
 
 
 @app.get("/health")

@@ -1,0 +1,77 @@
+# V3.0 Hybrid Index-Routing — Domain Configuration
+# Single source of truth for all domain schemas. Replaces domains/*.toml.
+# Consumed by domain_loader.py at runtime (no hardcoded logic in pipeline).
+
+domains:
+  engineering:
+    collection: engineering_chunks
+    neo4j_label: Engineering
+    entity_types: [Microservice, Database, API, Metric, Developer, Framework, Component, Bug, PR, ADR]
+    relation_types: [FIXES, AUTHORED, REFERENCES, IMPACTS, DEPENDS_ON, REVIEWED]
+    pair_strategy: all_pairs          # all_pairs | same_sentence
+    min_confidence: 0.6
+    chunking:
+      strategy: sentence
+      chunk_size: 384
+      overlap: 0
+    metadata_schema:
+      fields: [author, doc_type]
+
+  legal:
+    collection: legal_chunks
+    neo4j_label: Legal
+    entity_types: [Statute, Case, Regulation, Court, Party, Citation, Clause, Jurisdiction, Agency]
+    relation_types: [CITES, OVERRULES, AMENDS, INTERPRETS, APPLIES_TO, GOVERNS, REFERENCES, SUPERSEDES]
+    pair_strategy: same_sentence
+    min_confidence: 0.6
+    chunking:
+      strategy: paragraph
+      chunk_size: 512
+      overlap: 50
+    metadata_schema:
+      fields: [jurisdiction, court, date]
+
+  medical:
+    collection: medical_chunks
+    neo4j_label: Medical
+    entity_types: [Symptom, Diagnosis, Disease, Medication, Procedure, LabTest, Anatomy, Patient, Doctor]
+    relation_types: [TREATS, CAUSES, INDICATES, CONTRAINDICATES, PRESCRIBED_FOR, DOSAGE, ADMINISTERED_BY]
+    pair_strategy: all_pairs
+    min_confidence: 0.65
+    chunking:
+      strategy: sentence
+      chunk_size: 384
+      overlap: 0
+    metadata_schema:
+      fields: [patient_id, report_date]
+
+  accounting:
+    collection: accounting_chunks
+    neo4j_label: Accounting
+    entity_types: [Account, Transaction, Ledger, TaxCode, Invoice, Vendor, Customer, Payment, JournalEntry]
+    relation_types: [DEBITS, CREDITS, POSTS_TO, REFERENCES, PAYS, OWES, APPLIES_TO, RECONCILES]
+    pair_strategy: same_sentence
+    min_confidence: 0.6
+    chunking:
+      strategy: paragraph
+      chunk_size: 512
+      overlap: 50
+    metadata_schema:
+      fields: [fiscal_year, entity_name]
+
+  hospitality:
+    collection: hospitality_chunks
+    neo4j_label: Hospitality
+    entity_types: [Recipe, Ingredient, Station, Dish, Supplier, Equipment, Procedure, Menu, Staff]
+    relation_types: [CONTAINS, PREPARED_BY, SOURCED_FROM, REQUIRES, SERVED_WITH, REPLACES, PAIRS_WITH]
+    pair_strategy: all_pairs
+    min_confidence: 0.55
+    chunking:
+      strategy: sentence
+      chunk_size: 384
+      overlap: 0
+    metadata_schema:
+      fields: [venue, meal_period]
+
+# Default domain used when none specified
+default_domain: engineering

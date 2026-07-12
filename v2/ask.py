@@ -230,7 +230,8 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
             ).data()
             edge_rows = s.run(
                 "MATCH (n:Entity {id:$e})-[*1..%d]-(m:Entity) "
-                "WITH collect(DISTINCT m) + n AS ns "
+                "WITH collect(DISTINCT m) AS ms, n AS entry "
+                "WITH ms + entry AS ns "
                 "UNWIND ns AS a UNWIND ns AS b "
                 "MATCH (a)-[r]-(b) WHERE a.id < b.id "
                 "RETURN DISTINCT a.id AS src, b.id AS dst" % hops,

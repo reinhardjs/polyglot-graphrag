@@ -68,7 +68,12 @@ DAEMON_ASK         = f"{DAEMON_URL}/ask"
 # Extraction: smaller model for structured JSON entity/edge output.
 EXTRACTION_LLM_BASE_URL = "http://localhost:8082/v1"
 EXTRACTION_LLM_API_KEY  = "not-needed"
-EXTRACTION_LLM_MODEL    = "gemma-4-E2B-it-QAT-Q4_0.gguf"
+EXTRACTION_LLM_MODEL    = "gemma-4-E2B_q4_0-it.gguf"
+
+# V3.0 extraction mode:
+#   "llm"           — full-doc single-pass extraction with E2B (89% precision)
+#   "index_routing" — Hybrid GLiNER (entities) → Qwen (relation classification, 20% precision)
+EXTRACTION_MODE = "llm"
 
 # Extraction context — how much document text to feed the LLM at once.
 # The E2B model supports 128K context, so 32K chars (~8K tokens) is safe
@@ -207,6 +212,11 @@ def load_domain_profile(name: str) -> dict:
         # Fallback to engineering defaults (non-fatal — keeps /ask working)
         path = os.path.join(DOMAIN_PROFILE_DIR,
                             f"{DOMAIN_PROFILE_DEFAULT}.toml")
+    if not os.path.exists(path):
+        # V3.0: TOML profiles archived — domain config now lives in
+        # domain_config.yaml (consumed by domain_loader). Return None so
+        # callers fall back to YAML-driven defaults instead of crashing.
+        return None
     with open(path, "rb") as f:
         return tomllib.load(f)
 
