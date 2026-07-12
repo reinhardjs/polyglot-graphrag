@@ -1,0 +1,5 @@
+
+# User-provided data files (not part of pipeline)
+/data/
+*.pdf
+SNOMED_BENCHMARK.md
