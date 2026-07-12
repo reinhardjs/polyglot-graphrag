@@ -1,5 +1,6 @@
-# NEXT PHASE PLAN — GLiNER+E2B Hybrid, Sliding Window, Server Tuning & Model Benchmarking
+# NEXT PHASE PLAN — Polyglot-GraphRAG v3.1.0
 
+**Status:** WS1-4 COMPLETE (2026-07-12). Next: Dynamic Label Injection.  
 **Author:** Hermes Agent · **Date:** 2026-07-12  
 **Handoff target:** hy3:free (OpenRouter) — self-contained, no parent context needed  
 **Repo:** `/mnt/data-970-plus/rag-system/v2/`
@@ -735,5 +736,35 @@ Phase 5 — Documentation
 | Phi-3 model precision | exact match vs gold | ≥ 60% | ❌ 23% (worse than E2B) |
 | Qwen3B model precision | exact match vs gold | ≥ 60% | ⏳ Skipped (E2B wins) |
 | Benchmarks documented | BENCHMARKS.md | Complete | ✅ WS1-4 |
-| Architecture doc matches reality | ARCHITECTURE_V3.0.0.md | E2B + hybrid + sliding_window | ✅ |
-| Test suite passes | pytest test_index_router.py | 18/18 | ⏳ not run this session |
+|| Architecture doc matches reality | ARCHITECTURE_V3.0.0.md | E2B + hybrid + sliding_window | ✅ |
+|| Test suite passes | pytest test_index_router.py | 18/18 | ⏳ not run this session |
+
+## Phase 2: Dynamic Label Injection (v3.1.0)
+
+**Problem:** The pipeline's `_parse_and_validate` silently drops edges when
+E2B references an entity type GLiNER didn't detect. Static `entity_types` in
+`domain_config.yaml` creates entity drift as new documents introduce concepts.
+
+**Solution:** Dynamic Label Injection — a `LabelProvider` accumulates unknown
+entity types from dropped edges, promotes candidates after N documents, and
+feeds enriched label lists to GLiNER on subsequent calls.
+
+Full plan: `plans/dynamic-label-injection.md`
+
+### Workstreams
+
+| WS | Name | Description | Effort |
+|----|------|-------------|--------|
+| WS5 | Audit logging | Add dropped-entity recording to `_parse_and_validate` | 2h |
+| WS6 | LabelProvider class | Candidate accumulator with promotion/eviction/TTL | 3h |
+| WS7 | Hot-path integration | Merge static+dynamic labels in `extract_hybrid` + `sliding_window` | 1h |
+| WS8 | A/B validation | 10 gold docs, compare static vs dynamic recall/precision | 3h |
+
+### Success criteria
+
+| Criterion | Target |
+|-----------|--------|
+| Entity recall improvement | ≥15% over static baseline |
+| False-positive rate | ≤8% |
+| Latency delta | ≤50ms |
+| Active labels | ≤20 (no explosion) |

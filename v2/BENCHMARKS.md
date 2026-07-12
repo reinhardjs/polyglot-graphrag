@@ -1,8 +1,9 @@
-# BENCHMARKS — polyglot-graphrag v3.0.0
+# BENCHMARKS — polyglot-graphrag v3.0.8
 
-**Date:** 2026-07-12
-**Hardware:** NVIDIA GeForce RTX 3060 12GB · Intel i5-11400F · 48GB RAM
-**Test document:** `/tmp/prove_extraction.md` (648 chars, PR-482 engineering doc)
+**Date:** 2026-07-12  
+**Hardware:** NVIDIA GeForce RTX 3060 12GB · Intel i5-11400F · 48GB RAM  
+**Test document (engineering):** `/tmp/prove_extraction.md` (648 chars, PR-482)  
+**Test document (journal):** arxiv 2401.18059 (RAPTOR, 77K chars, 19K tokens)  
 **Key:** All numbers measured live — no estimates, no simulations.
 
 ---
@@ -277,6 +278,48 @@ Graphs reused: 1034 (KV cache working)
 1. **Systemd unit still points to Qwen** — sudo required to update. E2B running as user process (Option B flags documented in NEXT_PHASE_PLAN.md).
 2. **`--no-warmup` active** — first extraction call slightly slower (~+1s) than subsequent.
 3. **GLiNER double-prefixes ADR entities** ("ADR-ADR-014") — quirk in entity detection, not extraction. Relations still resolve correctly.
-4. **E2B thinking block** — ignores `--reasoning-format none`, emits `<\|channel\|>thought`. Parser strips it (and harvests from it as fallback).
+4. **E2B thinking block** — ignores `--reasoning-format none`, emits `<|channel|>thought`. Parser strips it (and harvests from it as fallback).
 5. **`index_routing` mode deprecated** — Qwen1.5B = 20% precision. Use `hybrid` (100%) or `sliding_window` for long docs.
 6. **Context 4096 → now 8192** — long-doc truncation SOLVED via sliding_window (sentence-boundary chunking).
+
+---
+
+## 8. v3.0.8 — Journal Domain (arxiv paper benchmark)
+
+**Document:** arxiv 2401.18059 (RAPTOR: Recursive Abstractive Processing for Tree-Organized Retrieval)  
+**Size:** 77,775 characters, ~19K tokens, 14 pages  
+**Domain:** `journal` (Person, Organization, Model, Dataset, Method, Algorithm, Institution, Author)
+
+### 8.1 Bug-fix journey (real-time debugging, 2026-07-12)
+
+| Attempt | What changed | Result |
+|---------|-------------|--------|
+| 1. Static labels (engineering vocab) | Journal domain with `entity_types: [Study, Method, ...]` | 0 entities matched — GLiNER can't recognize abstract types |
+| 2. GLiNER-friendly labels | `entity_types: [Person, Organization, Model, ...]` | 69 entities but only 6 edges (3 noise: Cinderella/Prince) |
+| 3. Raised `max_tokens: 2048→4096` | More room for JSON answer | NO CHANGE — still 6 edges |
+| 4. **Chunk-size fix (ROOT CAUSE)** | `max_words: 3000→1400` (~4500→2000 tokens) | **65 edges, 7 relation types** |
+
+**Root cause:** `max_words=3000` produced chunks of ~19K characters (~4500 tokens).
+With E2B's 8192-token context, the `<|channel|>thought` block consumed the entire
+budget, leaving 0 room for the JSON answer on 3 of 4 chunks. Only the smallest
+chunk (15K chars) produced any relations.
+
+### 8.2 Final result
+
+| Metric | Before fix | After fix |
+|--------|-----------|-----------|
+| Entities detected | 69 | **138** |
+| Edges written | 6 (3 noise) | **65** |
+| Relation types | 5 | **7** (CITES, USES, EVALUATES, OUTPERFORMS, PROPOSES, REPORTS, SUPPORTS) |
+| Ingest time | 89s | 323s |
+| Chunks processed | 4 | 9–10 (smaller, more E2B calls) |
+
+### 8.3 Production bug fixes (all found during journal testing)
+
+| # | Bug | File | Fix |
+|---|-----|------|-----|
+| 1 | GLiNER field mismatch — sent `entity_types`, daemon expects `labels` | `hybrid_extraction.py:61` | Changed to `"labels": entity_types` |
+| 2 | Qdrant 33MB upsert cap — 37MB single payload on long docs | `ingest.py:109` | Batched at 250 points/call |
+| 3 | Sparse vector collision — duplicate indices from hash collision | `ingest.py:60-75` | Accumulate by index (sum tf) |
+| 4 | YAML domain relation types not passed to E2B | `ingest.py:668-672` | Load domain dict when profile=None |
+| 5 | Collection routing — journal docs to `engineering_chunks` | `ingest.py:587-590` | Route from domain's `collection:` field |
