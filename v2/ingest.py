@@ -62,16 +62,19 @@ def _sparse(text: str) -> models.SparseVector:
 
     Hashing each token to the same 64K-bin space ensures "checkout" always
     maps to the same index in every chunk AND in the query.
+
+    NOTE: two distinct tokens can collide on `md5[:4] % _SPARSE_VOCAB`.
+    We accumulate by index (summing tf weights) so no duplicate indices
+    are ever emitted — Qdrant requires unique indices per sparse vector.
     """
     toks = re.findall(r"\w+", text.lower())
     c = Counter(toks)
-    idxs, vals = [], []
+    acc: dict = {}
     for tok, f in c.items():
-        # Deterministic across processes (Python's built-in hash() is randomized
-        # per process via PYTHONHASHSEED, which silently breaks sparse search
-        # when ingest and query run in different processes).
-        idxs.append(int.from_bytes(hashlib.md5(tok.encode()).digest()[:4], "little") % _SPARSE_VOCAB)
-        vals.append(float(f))
+        idx = int.from_bytes(hashlib.md5(tok.encode()).digest()[:4], "little") % _SPARSE_VOCAB
+        acc[idx] = acc.get(idx, 0.0) + float(f)
+    idxs = list(acc.keys())
+    vals = list(acc.values())
     return models.SparseVector(indices=idxs, values=vals)
 
 
@@ -94,6 +97,7 @@ def write_vectors(doc_id: str, chunks: list, meta: dict, checksum: str = "",
                  collection: str = C.COLL_CHUNKS) -> int:
     qc = get_qdrant()
     pts = []
+    BATCH = 250  # keep each upsert payload well under Qdrant's 33MB HTTP limit
     for ch in chunks:
         # Store the full meta dict (REQ-7) so citations can surface rich
         # domain metadata (title/author/url/patient_id/...) via GET /ingest
@@ -106,8 +110,13 @@ def write_vectors(doc_id: str, chunks: list, meta: dict, checksum: str = "",
             vector={"": ch["vector"], "text": _sparse(ch["text"])},
             payload=payload,
         ))
-    qc.upsert(collection, pts, wait=True)
-    return len(pts)
+        # Flush in batches to avoid the 33MB single-request payload cap.
+        if len(pts) >= BATCH:
+            qc.upsert(collection, pts, wait=True)
+            pts = []
+    if pts:
+        qc.upsert(collection, pts, wait=True)
+    return len(chunks)
 
 
 def validate_metadata(profile: dict, metadata: dict) -> tuple[dict, list]:
@@ -573,7 +582,12 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
         # V3.0: no TOML profile — pull chunking from domain_config.yaml
         try:
             import domain_loader
-            chunk_cfg = domain_loader.get_domain(domain).get("chunking", {})
+            _dom = domain_loader.get_domain(domain)
+            chunk_cfg = _dom.get("chunking", {})
+            # Route vectors to the domain's own Qdrant collection
+            # (multi-domain isolation) instead of the hardcoded default.
+            if domain and _dom.get("collection"):
+                collection = _dom["collection"]
         except Exception:
             chunk_cfg = {}
     strategy = chunk_cfg.get("strategy", "sentence")
@@ -656,10 +670,16 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
                 extraction_method = "index_routing"
             elif mode == "hybrid":
                 from hybrid_extraction import extract_hybrid
+                if profile is None and domain:
+                    import domain_loader
+                    profile = domain_loader.get_domain(domain)
                 g = extract_hybrid(doc_id, text, domain=profile)
                 extraction_method = "hybrid"
             elif mode == "sliding_window":
                 from sliding_window import sliding_window_extract
+                if profile is None and domain:
+                    import domain_loader
+                    profile = domain_loader.get_domain(domain)
                 g = sliding_window_extract(text, domain=profile)
                 extraction_method = "sliding_window"
             else:

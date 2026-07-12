@@ -58,7 +58,7 @@ def _call_gliner(text: str, entity_types: list, daemon_url: str = None) -> list:
     url = (daemon_url or GLINER_DAEMON_URL or "http://localhost:8000")
     resp = requests.post(
         f"{url}/extract_entities",
-        json={"text": text, "entity_types": entity_types},
+        json={"text": text, "labels": entity_types},
         timeout=60,
     )
     resp.raise_for_status()
@@ -173,14 +173,28 @@ def _parse_and_validate(content: str, entities: list, valid_types: list) -> list
     valid_names = {e["name"] for e in entities}
     valid_types_set = set(valid_types) if valid_types else set()
 
+    # Normalize for fuzzy matching: E2B often appends trailing punctuation
+    # (e.g. "Zhang et al." vs GLiNER's "Zhang et al.") or
+    # wraps in quotes. Strip trailing/leading punctuation + whitespace
+    # and build a normalized lookup so near-matches still validate.
+    import re as _re
+    def _norm(s: str) -> str:
+        return _re.sub(r"[\s\"'`.,;:]+$", "", (s or "").strip()).strip()
+
+    valid_norm = {_norm(n): n for n in valid_names}
+
     relations = []
     seen = set()
     for rel in rel_list:
         src = rel.get("source") or rel.get("source_name")
         tgt = rel.get("target") or rel.get("target_name")
         rtype = rel.get("type") or rel.get("relation_type")
-        # Entity verification (Gemini recommendation)
-        if src not in valid_names or tgt not in valid_names:
+        # Entity verification (Gemini recommendation) — normalize first
+        src_n = _norm(src)
+        tgt_n = _norm(tgt)
+        src_real = valid_norm.get(src_n)
+        tgt_real = valid_norm.get(tgt_n)
+        if src_real is None or tgt_real is None:
             continue  # discard non-matching entities to prevent noise
         if valid_types_set and rtype not in valid_types_set:
             continue
@@ -188,13 +202,13 @@ def _parse_and_validate(content: str, entities: list, valid_types: list) -> list
             conf = float(rel.get("confidence", 1.0))
         except (TypeError, ValueError):
             conf = 1.0
-        key = (src.lower(), rtype.lower(), tgt.lower())
+        key = (src_real.lower(), rtype.lower(), tgt_real.lower())
         if key in seen:
             continue
         seen.add(key)
         relations.append({
-            "source_name": src,
-            "target_name": tgt,
+            "source_name": src_real,
+            "target_name": tgt_real,
             "relation_type": rtype,
             "confidence": conf,
         })

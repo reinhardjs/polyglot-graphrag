@@ -73,5 +73,19 @@ domains:
     metadata_schema:
       fields: [venue, meal_period]
 
+  journal:
+    collection: journal_chunks
+    neo4j_label: Journal
+    entity_types: [Person, Organization, Model, Dataset, Method, Algorithm, Framework, Metric, Theory, Institution, Author]
+    relation_types: [PROPOSES, EVALUATES, OUTPERFORMS, USES, REPORTS, SUPPORTS, CONTRADICTS, CITES, TRAINED_ON, INTRODUCES]
+    pair_strategy: all_pairs
+    min_confidence: 0.6
+    chunking:
+      strategy: sentence
+      chunk_size: 384
+      overlap: 0
+    metadata_schema:
+      fields: [venue, year, doi]
+
 # Default domain used when none specified
 default_domain: engineering
