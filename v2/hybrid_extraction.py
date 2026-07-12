@@ -79,7 +79,7 @@ def _call_e2b(system_prompt: str, user_prompt: str, timeout: int = 120) -> str:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "max_tokens": 2048,
+            "max_tokens": 4096,
             "temperature": 0.0,
         },
         timeout=timeout,

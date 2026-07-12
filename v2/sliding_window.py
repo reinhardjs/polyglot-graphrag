@@ -206,7 +206,12 @@ def sliding_window_extract(text: str, domain: dict) -> dict:
         import domain_loader
         domain = domain_loader.get_domain("engineering")
 
-    chunks = sentence_chunk(text, max_words=3000, overlap_sentences=2)
+    # Chunk size MUST fit E2B's 8192-token context WITH room for the
+    # thinking block + JSON answer. 3000 words (~4500 tok) left too
+    # little headroom -> E2B's <|channel|>thought consumed the whole
+    # budget and emitted 0 relations. 1400 words (~2000 tok) leaves
+    # ~6000 tok for prompt overhead + thinking + answer.
+    chunks = sentence_chunk(text, max_words=1400, overlap_sentences=2)
 
     all_entities = {}
     all_edges = {}
