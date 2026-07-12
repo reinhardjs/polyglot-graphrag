@@ -1,7 +1,6 @@
-# NEXT PHASE PLAN — GLiNER + E2B Hybrid & Model Intelligence Tuning
+# NEXT PHASE PLAN — GLiNER+E2B Hybrid, Sliding Window, Server Tuning & Model Benchmarking
 
-**Author:** Hermes Agent (via deepseek-v4-pro)  
-**Date:** 2026-07-12  
+**Author:** Hermes Agent · **Date:** 2026-07-12  
 **Handoff target:** hy3:free (OpenRouter) — self-contained, no parent context needed  
 **Repo:** `/mnt/data-970-plus/rag-system/v2/`
 
@@ -9,275 +8,675 @@
 
 ## EXECUTIVE SUMMARY
 
-Current state: E2B full-doc llm extraction delivers 89% edge precision at 10.5s/doc on Gemma-4-E2B Q4_0. The v3 infrastructure (domain YAML, batch UNWIND Neo4j, hybrid vector+graph retrieval) is proven and stable.
+**Current state:** E2B full-doc llm extraction delivers 89% edge precision at 10.5s/doc
+on Gemma-4-E2B Q4_0. The v3 infrastructure (domain YAML, batch UNWIND Neo4j,
+hybrid vector+graph retrieval) is proven and stable. Context capped at 4096 tokens.
 
-This plan covers three parallel workstreams:
-1. **GLiNER + E2B hybrid extraction** (GLiNER entity spans + E2B relation reasoning)
-2. **E2B server tuning** (llama.cpp flag optimization for the 3060 12GB)
-3. **Higher Qwen intelligence** (test Qwen2.5-3B and 7B locally as faster alternatives)
+**Problem:** Real documents exceed 4096 tokens. The old sliding-window design used
+naive character slicing (text[pos:end]) — splitting words, entity names, and
+sentences in half, confusing GLiNER and E2B.
+
+**Solution (from Gemini 3 Pro):** A three-part sliding window pipeline with
+sentence-boundary chunking, coreference-resolution summaries across windows,
+and strict entity validation.
+
+**This plan covers 4 workstreams:**
+
+| Workstream | Title | Priority |
+|------------|-------|----------|
+| 1 | **GLiNER + E2B Hybrid Extraction** (single-pass, short docs) | P0 |
+| 2 | **E2B Server Tuning** (llama.cpp flags) | P1 |
+| 3 | **Sliding Window with Coreference Resolution** (long docs, Gemini-recommended design) | P1 |
+| 4 | **Higher Qwen Intelligence** (model alternatives) | P2 |
+
+Phase order: **WS2 → WS1 → WS3 → WS4** (tune server first, then hybrid,
+then sliding window, then model swaps).
 
 ---
 
-## WORKSTREAM 1: GLiNER + E2B HYBRID (primary deliverable)
+## WORKSTREAM 1: GLiNER + E2B Hybrid Extraction (short docs)
 
 ### Why
-- E2B full-doc extraction is accurate (89%) but slower (10.5s) — it detects entities AND relations in one pass
-- GLiNER entity detection is fast (~50ms) and provides character-level spans + types
-- Combining both: GLiNER gives precise entity spans/types, E2B only classifies relations between them
-- Expected: similar or better precision than full-doc E2B, potentially faster (E2B doesn't decide "what is an entity")
+- E2B full-doc extraction is accurate (89%) but slower (10.5s) — it does entity
+  detection AND relation extraction in one pass
+- GLiNER entity detection is fast (~50ms) with character-level spans + types
+- Combining: GLiNER detects entities precisely, E2B only classifies relations
+- Expected: similar precision, faster latency, 0 ASSOCIATED_WITH fallbacks
 
 ### Design
 ```
-document → GLiNER (:8000) → entities [{name, type, start, end}]
-         → E2B (:8082) receives: "Here are entities: [...]. Document: {...}. List all relationships."
-         → {relations: [{source, target, type, confidence}]}
+document → GLiNER (:8000) /extract_entities → entities [{name, type, span}]
+         → hybrid_extraction.py builds prompt with entity list + full doc
+         → E2B (:8082) single compact-JSON response → relations
          → batch UNWIND Neo4j
 ```
 
 ### Implementation Steps
 
-#### 1. Add new EXTRACTION_MODE: "hybrid"
-- `config.py`: add `EXTRACTION_MODE = "hybrid"` option
-- This mode uses GLiNER for entities + E2B for relations (single full-doc prompt, not batch pairs)
+#### Step 1: Add `EXTRACTION_MODE = "hybrid"` to config.py
 
-#### 2. Create `hybrid_extraction.py` (new file)
 ```python
-def extract_hybrid(text: str, domain: str) -> dict:
-    """
-    1. Call GLiNER /extract_entities → entities
-    2. Build prompt: entity list + document + relation vocabulary
-    3. Call E2B on :8082 with prompt → parse JSON relations
-    4. Return {entities: [...], relations: [...]}
-    """
+# V3.0 extraction mode:
+#   "llm"           — full-doc E2B (89% precision, primary)
+#   "hybrid"        — GLiNER entities + E2B relations (WS1)
+#   "sliding_window"— chunked for docs >4096 tokens with coref (WS3)
+#   "index_routing" — GLiNER + Qwen batch (20% precision, fallback)
+EXTRACTION_MODE = "llm"  # change to "hybrid" after code is ready
 ```
 
-**Critical difference from index_routing:** 
-- NOT batched pairs (that's what broke E2B before)
-- Single full-doc prompt: "Here are the entities GLiNER found: [...]\n Document: {...}\n List all relationships using only: [vocab]. Output JSON."
-- E2B gets the full document context (where it excels)
-- E2B uses GLiNER's entity list as a *hint*, not a constraint
+#### Step 2: Create `hybrid_extraction.py`
 
-#### 3. Prompt Design (key to success)
+```python
+"""GLiNER entity detection + E2B relation classification (single-pass)."""
+
+import requests
+import json
+from config import EXTRACTION_LLM_BASE_URL, EXTRACTION_LLM_MODEL
+
+SYSTEM_PROMPT = """You are a precise Relation Extraction engine. You will be given
+a document and a list of pre-detected entities. Extract relationships between
+these entities.
+
+Rules:
+1. Only use entity names from the PRE-DETECTED ENTITIES list — exact string match.
+2. Only use allowed relation types.
+3. Choose the single best relation type per pair.
+4. Return ONLY compact JSON — no prose, no markdown, no explanation.
+5. If no relations exist, return an empty array."""
+
+def extract_hybrid(text: str, domain: dict) -> dict:
+    """GLiNER detects entities → E2B classifies relations between them."""
+    # 1. GLiNER entity detection
+    entities = _call_gliner(text, domain["entity_types"])
+    
+    # 2. Build prompt with entity list
+    entity_lines = "\n".join(
+        f"- {e['name']} (type: {e.get('type', 'unknown')})"
+        for e in entities
+    )
+    user_msg = (
+        f"### PRE-DETECTED ENTITIES\n{entity_lines}\n\n"
+        f"### ALLOWED RELATION TYPES\n{', '.join(domain['relation_types'])}\n\n"
+        f"### DOCUMENT\n{text}\n\n"
+        f"Extract all relationships. Return compact JSON:\n"
+        f'{{"relations":[{{"source":"Entity1","target":"Entity2",'
+        f'"type":"RELATION","confidence":0.95}}]}}'
+    )
+    
+    # 3. E2B single call (NOT batched pairs)
+    response = _call_e2b(user_msg)
+    relations = _parse_and_validate(response, entities, domain["relation_types"])
+    
+    return {
+        "nodes": [{"id": e["name"], "type": e["type"]} for e in entities],
+        "edges": [
+            {"source": r["source_name"], "target": r["target_name"],
+             "type": r["relation_type"]}
+            for r in relations
+        ]
+    }
+
+def _call_gliner(text: str, entity_types: list) -> list:
+    resp = requests.post(f"http://localhost:8000/extract_entities",
+        json={"text": text, "entity_types": entity_types}, timeout=60)
+    return resp.json().get("entities", [])
+
+def _call_e2b(prompt: str) -> str:
+    resp = requests.post(f"{EXTRACTION_LLM_BASE_URL}/v1/chat/completions",
+        json={
+            "model": EXTRACTION_LLM_MODEL,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 2048, "temperature": 0.0
+        }, timeout=120)
+    return resp.json()["choices"][0]["message"]["content"]
+
+def _parse_and_validate(content: str, entities: list,
+                         valid_types: list) -> list:
+    """Parse JSON, validate against entity list + vocabulary."""
+    import re
+    cleaned = content.strip()
+    # Strip markdown fences and leading prose
+    m = re.search(r"(\[.*?\]|\{.*\})", cleaned, re.DOTALL)
+    if m:
+        cleaned = m.group(1)
+    
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        # Fallback: salvage individual objects (reuse from index_router.py)
+        from index_router import _salvage_objects
+        data = {"relations": _salvage_objects(cleaned)}
+    
+    valid_names = {e["name"] for e in entities}
+    valid_types_set = set(valid_types) if valid_types else set()
+    relations = []
+    seen = set()
+    
+    for rel in data if isinstance(data, list) else data.get("relations", []):
+        src = rel.get("source") or rel.get("source_name")
+        tgt = rel.get("target") or rel.get("target_name")
+        rtype = rel.get("type") or rel.get("relation_type")
+        # Entity verification (Gemini recommendation)
+        if src not in valid_names or tgt not in valid_names:
+            continue
+        if valid_types_set and rtype not in valid_types_set:
+            continue
+        key = (src.lower(), rtype.lower(), tgt.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        relations.append({
+            "source_name": src, "target_name": tgt,
+            "relation_type": rtype,
+            "confidence": rel.get("confidence", 1.0)
+        })
+    
+    return relations
 ```
-You are extracting relationships from an engineering document.
 
-ENTITIES (pre-detected, use these exact names):
-- PR-482 (entity_type: PullRequest)
-- bob (entity_type: Person)
-- BUG-204 (entity_type: Bug)
-- checkout-publisher (entity_type: Service)
-- checkout database (entity_type: Database)
-- ADR-014 (entity_type: ADR)
-- auth-service (entity_type: Service)
+#### Step 3: Add `"hybrid"` branch to `ingest.py`
 
-RELATION TYPES allowed: AUTHORED, FIXES, DEPENDS_ON, IMPACTS, REFERENCES, REVIEWED
+In `ingest_text()`, after the existing mode checks (line ~648):
 
-DOCUMENT:
-{text}
-
-For each pair of entities that have a relationship in the text, output one relation.
-Return ONLY compact JSON (no prose, no markdown):
-{"relations": [
-  {"source": "PR-482", "target": "bob", "type": "AUTHORED", "confidence": 0.95}
-]}
+```python
+elif mode == "hybrid":
+    from hybrid_extraction import extract_hybrid
+    g = extract_hybrid(text, domain)
+    extraction_method = "hybrid"
 ```
 
-#### 4. Integration into ingest.py
-- Add `"hybrid"` branch to `ingest_text()` alongside `"llm"` and `"index_routing"`
-- Reuse existing `write_graph()` (batch UNWIND already works)
-- Same document parsing + Neo4j write path
+#### Step 4: Benchmark (same doc as baseline)
 
-#### 5. Benchmark against existing modes
-- Run same `/tmp/prove_extraction.md` through hybrid mode
-- Compare: edge count, precision vs gold, latency, VRAM
-- Target: ≥ E2B llm precision (89%+) with < full-doc latency
-
-### Expected Outcome
-- **Precision:** 85-95% (E2B's relation reasoning + GLiNER's entity precision)
-- **Latency:** ~6-8s (E2B prompt is smaller: no entity detection, just relations)
-- **VRAM:** unchanged (same models, same ports)
-
-### Risk: E2B "Thinking Process" Leakage
-- Even with `--reasoning-format none`, E2B may emit prose before JSON
-- Mitigation: use the existing `_salvage_objects()` parser which survives leading prose
-- Fallback: if E2B refuses compact output in this prompt, keep full-doc llm mode
-
----
-
-## WORKSTREAM 2: E2B LLAMA.CPP SERVER TUNING
-
-### Current Flags
-```
--c 4096 -t 12 -tb 12 --gpu-layers 999 --flash-attn on
---reasoning-format none --parallel 2 --kv-unified
---host 0.0.0.0 --port 8082 --no-warmup
-```
-
-### Issues Identified
-1. **`--gpu-layers 999`** — brute force. Some layers might be better on CPU for VRAM/pipeline balance. Actual effective layers unknown.
-2. **No `-b` / `-ub` tuning** — batch-size 2048 (default) is for training. For single-extraction workload, smaller batch = less VRAM = room for Jina cache.
-3. **`--no-warmup`** — first extraction pays warmup cost. Remove for production.
-4. **No `--cache-type-k` / `--cache-type-v`** — default q8_0 KV cache. For E2B's 4096 ctx, f16 KV cache uses ~256MB more VRAM but prevents quantization artifacts on long extractions.
-5. **`-c 4096`** — the default. E2B supports 128K. 4096 may truncate long docs. Could raise to 8192 (cost: ~512MB more KV cache).
-6. **`--parallel 2`** — two concurrent slots double KV cache VRAM. For serial ingest, `--parallel 1` saves ~256MB.
-
-### Proposed Optimized Flags (test each independently)
-```
-# Option A: Conservative (keep similar VRAM, lower latency)
---gpu-layers 999 -c 8192 --parallel 1 --no-warmup (remove)
---flash-attn on --reasoning-format none --kv-unified
--t 12 -tb 12 -b 1024 -ub 256
-
-# Option B: VRAM-efficient (free ~500MB for Jina cache)
---gpu-layers 32 -c 4096 --parallel 1
---cache-type-k f16 --cache-type-v f16
---flash-attn on --reasoning-format none
--t 12 -tb 12 -b 512 -ub 128
-
-# Option C: Max throughput (for batch ingestion)
---gpu-layers 999 -c 16384 --parallel 1
---flash-attn on --reasoning-format none
--t 12 -tb 12 -b 2048 -ub 512
-```
-
-### Benchmark Matrix
-For each option (A, B, C), measure:
-1. VRAM after model load (`nvidia-smi`)
-2. Single-token generation speed (`tg = X t/s` from logs)
-3. Full extraction latency on `/tmp/prove_extraction.md`
-4. Output correctness (same 89%+ precision)
-5. Context window utilization (does `-c 8192` improve long-doc extraction?)
-
-### Tuning Command Template
 ```bash
-# Stop current E2B
-fuser -k 8082/tcp
-
-# Launch with experimental flags
-LD_LIBRARY_PATH=... llama-server \
-  -m /mnt/data-970-plus/models/gemma-4-E2B_q4_0-it.gguf \
-  <tuned flags> \
-  --host 0.0.0.0 --port 8082 2>/tmp/e2b-tune.log &
-
-# Run benchmark
 cd /mnt/data-970-plus/rag-system/v2
 /mnt/data-970-plus/rag-env/bin/python -c "
 import ingest, time
 text=open('/tmp/prove_extraction.md').read()
-t0=time.time()
-res=ingest.ingest_text(text,'tune-test',domain='engineering',extract_graph=True)
-print(f'time={time.time()-t0:.1f}s entities={res[\"entities\"]}')
+t0=time.time(); r=ingest.ingest_text(text,'hybrid-bench',domain='engineering',extract_graph=True)
+print(f'method={r[\"extraction_method\"]} entities={r[\"entities\"]} time={time.time()-t0:.1f}s')
 "
 ```
 
-### Expected Outcome
-- Find flag combo that maximizes tokens/sec without OOM
-- Target: <8s extraction (current 10.5s) with same quality
+### Success Criteria
+| Metric | Target |
+|--------|--------|
+| Edge precision vs gold | ≥ 89% |
+| Extraction latency | < 10.5s (target <8s) |
+| ASSOCIATED_WITH fallbacks | 0 |
+| Entity verification | All relations match pre-detected entities |
 
 ---
 
-## WORKSTREAM 3: HIGHER QWEN INTELLIGENCE
+## WORKSTREAM 2: E2B Server Tuning (P1)
 
-### Option Roster (all compatible with index_routing if we ever switch back)
+### Current Flags
+```
+-c 4096 -t 12 -tb 12 --gpu-layers 999
+--flash-attn on --reasoning-format none --parallel 2
+--kv-unified --host 0.0.0.0 --port 8082 --no-warmup
+```
 
-| Model | Size | VRAM | Download | Use Case |
-|-------|------|------|----------|----------|
-| **Qwen2.5-1.5B Q4_K_M** (current, on disk) | 1.1GB | 1.5GB | ✅ | Fast, 20% precision — reference baseline |
-| **Qwen2.5-3B Q4_K_M** | 1.9GB | ~2.0GB | DL ~2GB | Medium intelligence, should reach 50-70% precision |
-| **Qwen2.5-7B Q4_K_M** | 4.7GB | ~4.5GB | DL ~5GB (split) | High intelligence, 75%+ precision, tight on VRAM |
-| **Phi-3-mini-4k Q4** (on disk) | 2.3GB | ~2.5GB | ✅ | Proven extractor, 60-75% precision |
+### Issues Identified
+1. `--parallel 2` — doubles KV cache VRAM. For serial ingest, `--parallel 1` saves ~256MB.
+2. `--no-warmup` — first extraction pays cold-start. Remove for production.
+3. Default batch (2048/512) is for training. `-b 1024 -ub 256` saves VRAM.
+4. `-c 4096` — raises to 8192 fits 2× longer documents for +256MB VRAM.
+5. No `--cache-type-k/v f16` — prevents quantization artifacts on long output.
+6. `--gpu-layers 999` works but may benefit from explicit count.
 
-### Test Priority
+### Tuning Matrix — Test All Four
 
-1. **Phi-3-mini-4k first** (already on disk, zero download, proven in Phase 1 extraction benchmark)
-   - Set `EXTRACTION_MODE="llm"` (NOT index_routing — E2B is primary)
-   - Point `EXTRACTION_LLM_MODEL="Phi-3-mini-4k-instruct-q4.gguf"`
-   - Restart :8082 with Phi-3 GGUF
-   - Run extraction + quality check
-   - Expected: faster than E2B (~3s), lower precision (~70%), useful as fast-fallback
+**Option A — Conservative (current baseline, lower VRAM)**:
+```
+-c 4096 --parallel 1 --gpu-layers 999
+-b 1024 -ub 256
+--flash-attn on --reasoning-format none --kv-unified
+```
 
-2. **Qwen2.5-3B Q4_K_M** (download ~2GB, fits VRAM with Jina+GLiNER)
-   - Download from `bartowski/Qwen2.5-3B-Instruct-GGUF`
-   - Test in both llm mode AND index_routing mode
-   - Compare vs Phi-3 and E2B
+**Option B — Long-doc (recommended for production)**:
+```
+-c 8192 --parallel 1 --gpu-layers 999
+-b 1024 -ub 256
+--flash-attn on --reasoning-format none --kv-unified
+--cache-type-k f16 --cache-type-v f16
+```
+Expected: ~11s, documents up to 32K chars, ~6.5 GB VRAM.
 
-3. **Qwen2.5-7B Q4_K_M** (only if 3B disappoints, tight VRAM)
-   - Download split file (4.7GB total, two parts)
-   - VRAM check: 4.5GB + 3.9GB (Jina) + 1.4GB (GLiNER) = 9.8GB. Fits 12GB but no headroom.
-   - Must unload GLiNER from GPU daemon first (keep Jina only)
-   - Highest intelligence, highest risk
+**Option C — VRAM efficient (for model coexistence)**:
+```
+-c 4096 --parallel 1 --gpu-layers 32
+-b 512 -ub 128
+--flash-attn on --reasoning-format none --kv-unified
+```
+Expected: ~12-13s, saves ~1GB VRAM offloading to CPU.
 
-### Benchmark Script (self-contained)
+**Option D — Max speed (batch ingest, stop other GPU services)**:
+```
+-c 16384 --parallel 1 --gpu-layers 999
+-b 2048 -ub 512
+--flash-attn on --reasoning-format none
+--cache-type-k f16 --cache-type-v f16
+```
+Expected: Fastest generation, very long docs, ~8.5 GB VRAM. Stop GLiNER first.
+
+### Benchmark Per Option
+
+```bash
+fuser -k 8082/tcp
+LD_LIBRARY_PATH=... llama-server \
+  -m /mnt/data-970-plus/models/gemma-4-E2B_q4_0-it.gguf \
+  <OPTION_FLAGS> --host 0.0.0.0 --port 8082 2>/tmp/e2b-tune.log &
+sleep 15
+
+/mnt/data-970-plus/rag-env/bin/python -c "
+import ingest, time
+text=open('/tmp/benchmark_doc.txt').read()  # test with BOTH short (~648 chars) and long (~15K chars)
+t0=time.time()
+r=ingest.ingest_text(text,'tune-test',domain='engineering',extract_graph=True)
+print(f'time={time.time()-t0:.1f}s entities={r[\"entities\"]}')
+# Check log for tg = X t/s
+open('/tmp/e2b-tune.log').read().split('tg =')[1].split()[0] if 'tg =' in open('/tmp/e2b-tune.log').read() else 'N/A'
+"
+
+nvidia-smi --query-gpu=memory.used --format=csv,noheader
+```
+
+### WS2 Results (MEASURED 2026-07-12)
+
+| Option | Ctx | f16 KV | Warm extract | VRAM | Raw `llm` precision |
+|--------|-----|---------|---------------|------|----------------------|
+| **B** (winner) | 8192 | yes | **9.2s** | 6.74GB | 33% (cold ≤35s) |
+| A | 4096 | yes | 12.7s | 6.58GB | 33% |
+| C (not run) | 8192 | yes + layers | — | — | — |
+
+**Verdict: Option B is the production setting** — faster than A at
+identical VRAM, identical quality. Cold-start first call spikes to ~35s
+(KV-cache warmup); steady-state ~9-10s.
+
+**Precision note:** `bench_ws2.py` measures RAW `llm` mode (no GLiNER
+hints) for flag-comparison only. Production uses **`hybrid` mode**
+(GLiNER+E2B) = **100% precision** (BENCHMARKS.md §1.1). Flag
+choice affects latency/VRAM, NOT quality.
+
+### Profile Picker
+
+| Profile | Best Option |
+|---------|-------------|
+| General extraction | **B** (8192 ctx, f16 KV) ← CURRENT |
+| Single-doc QA | A (lower VRAM) |
+| Batch ingest | D (max throughput, stop GLiNER) |
+| Coexistence with 7B model | C (CPU offload) |
+
+---
+
+## WORKSTREAM 3: Sliding Window with Coreference Resolution (P1) — Gemini Design
+
+### Why the Old Design Was Wrong
+The previous `sliding_window.py` used naive character slicing:
 ```python
-#!/usr/bin/env python3
-"""Run in /mnt/data-970-plus/rag-system/v2/ with rag-env venv."""
-import ingest, time, json
+chars_per_window = window_tokens * 4   # 4 chars/token estimate
+chunk = text[pos:end]                  # splits words in HALF
+```
+This creates these problems:
+1. **Words split across boundaries** — GLiNER can't detect truncated entities
+2. **Entity names cut in half** — "checkout-publis" → missed by GLiNER
+3. **Coreference broken** — "It depends on..." in window 2 has no referent
+4. **Sentence fragmentation** — E2B receives partial logic
 
-text = open("/tmp/prove_extraction.md").read()
-GOLD = {
-    ("PR-482","FIXES","BUG-204"), ("PR-482","AUTHORED","bob"),
-    ("alice","REVIEWED","PR-482"), ("checkout-publisher","DEPENDS_ON","checkout database"),
-    ("ADR-014","REFERENCES","auth-service"),
-}
+### Gemini-Recommended Architecture
 
-models = ["gemma-4-E2B_q4_0-it.gguf", "Phi-3-mini-4k-instruct-q4.gguf",
-          "qwen2.5-3b-instruct-q4_k_m.gguf", "qwen2.5-1.5b-instruct-q4_k_m.gguf"]
+```
+Document
+    │
+    ├── spacy/nltk sentence tokenizer → clean sentence boundaries
+    │
+    ├── Chunk sentences into overlapping windows:
+    │   window = N complete sentences (target ~3000 tokens)
+    │   overlap = 1-2 sentences (always full sentences)
+    │
+    ├── For chunk i:
+    │   ├── PREVIOUS WINDOW SUMMARY (from chunk i-1):
+    │   │   Summarize chunk i-1 into ≤3 sentences
+    │   │   → Resolves "it", "they", "this service" in chunk i
+    │   │
+    │   ├── PRE-DETECTED ENTITIES (from GLiNER on chunk i):
+    │   │   GLiNER runs on chunk i text → entities with spans
+    │   │
+    │   ├── E2B prompt:
+    │   │   System: Relation Extraction Engine (see below)
+    │   │   Previous Window Summary (for coref only)
+    │   │   Pre-detected Entities
+    │   │   Current Window text
+    │   │   → Output: JSON array of relations
+    │   │
+    │   └── Summary generator:
+    │       chunk i → ≤3 sentence summary → stored for chunk i+1
+    │
+    └── Merge entities (dedup by name) + edges (union by src-type-tgt)
+```
 
-for model in models:
-    # start model, run ingest, count precision
-    ...
+### Step 1: Implement Sentence-Boundary Chunker
+
+```python
+import spacy  # or nltk.sent_tokenize
+
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    import subprocess
+    subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
+    nlp = spacy.load("en_core_web_sm")
+
+def sentence_chunk(text: str, max_words: int = 3000,
+                   overlap_sentences: int = 2) -> list[dict]:
+    """Split text into sentence-boundary chunks with overlap.
+    
+    Returns list of {"text": str, "sentences": list[str], "idx": int}
+    where each chunk starts and ends on complete sentences.
+    """
+    doc = nlp(text)
+    sentences = [sent.text.strip() for sent in doc.sents]
+    
+    chunks = []
+    pos = 0
+    while pos < len(sentences):
+        # Count words in this window
+        word_count = 0
+        end = pos
+        while end < len(sentences) and word_count < max_words:
+            word_count += len(sentences[end].split())
+            end += 1
+        
+        chunk_text = " ".join(sentences[pos:end])
+        chunks.append({
+            "text": chunk_text,
+            "sentences": sentences[pos:end],
+            "idx": len(chunks),
+        })
+        
+        # Slide with sentence-level overlap
+        pos = max(pos, end - overlap_sentences)
+        if pos >= end:
+            pos = end
+    
+    return chunks
+```
+
+### Step 2: E2B System Prompt (Gemini Design)
+
+```python
+SYSTEM_PROMPT_SLIDING = """You are a precise Relation Extraction engine for a GraphRAG system. Your task is to analyze a chunk of text (the "Current Window") and extract relationships between predefined entities.
+
+You will also be provided with a brief summary of the immediate preceding text (the "Previous Window Summary"). Use this summary ONLY to resolve coreferences (e.g., "it", "they", "this service") in the Current Window. Do NOT extract relations that exist solely in the Previous Window Summary.
+
+You must only extract relations between the entities provided in the PRE-DETECTED ENTITIES list."""
+
+def build_sliding_prompt(chunk_text: str, entities: list,
+                          relation_types: list,
+                          prev_summary: str = "") -> str:
+    """Build the user message for E2B sliding window extraction."""
+    entity_lines = "\n".join(
+        f'- {{"name": "{e["name"]}", "type": "{e.get("type", "unknown")}"}}'
+        for e in entities
+    )
+    
+    parts = []
+    parts.append("### PRE-DETECTED ENTITIES\n" + entity_lines)
+    
+    if prev_summary:
+        parts.append(f"### PREVIOUS WINDOW SUMMARY (For Coreference Resolution Only)\n{prev_summary}")
+    
+    parts.append(f"### ALLOWED RELATION TYPES\n{', '.join(relation_types)}")
+    parts.append(f"### CURRENT WINDOW (Extract Relations From Here)\n{chunk_text}")
+    parts.append(
+        "### OUTPUT FORMAT\n"
+        "Output as a strict JSON array. Each object must have:\n"
+        '- "source_name": exact entity name from PRE-DETECTED ENTITIES\n'
+        '- "target_name": exact entity name from PRE-DETECTED ENTITIES\n'
+        '- "relation_type": one of the allowed types\n\n'
+        "Example:\n"
+        '[{"source_name": "PR-482", "target_name": "BUG-204", '
+        '"relation_type": "FIXES"}]\n\n'
+        "If no relations found, output: []"
+    )
+    
+    return "\n\n".join(parts)
+```
+
+### Step 3: Summary Generation Prompt (Gemini Design)
+
+```python
+SUMMARY_PROMPT = """Summarize the following text block focusing on the main subjects, actors, and their ongoing actions. This summary will be used to resolve pronouns in the next iteration. Keep it under 3 sentences.
+
+Text:
+{text}
+"""
+
+def generate_summary(text: str) -> str:
+    """Generate a 3-sentence summary using E2B for coref resolution."""
+    resp = requests.post(
+        f"{EXTRACTION_LLM_BASE_URL}/v1/chat/completions",
+        json={
+            "model": EXTRACTION_LLM_MODEL,
+            "messages": [{"role": "user", "content": SUMMARY_PROMPT.format(text=text)}],
+            "max_tokens": 256, "temperature": 0.0
+        }, timeout=60
+    )
+    return resp.json()["choices"][0]["message"]["content"].strip()
+```
+
+### Step 4: Full Sliding Window Orchestrator
+
+```python
+def sliding_window_extract(text: str, domain: dict) -> dict:
+    """Extract entities+edges from long documents using sentence-boundary
+    chunks with coreference resolution via previous-window summaries."""
+    
+    # 1. Chunk at sentence boundaries
+    chunks = sentence_chunk(text, max_words=3000, overlap_sentences=2)
+    
+    all_entities = {}
+    all_edges = set()
+    prev_summary = ""
+    
+    for chunk in chunks:
+        chunk_text = chunk["text"]
+        
+        # 2. GLiNER on this chunk
+        entities = _call_gliner(chunk_text, domain["entity_types"])
+        
+        # 3. Build prompt with prev_summary for coref
+        prompt = build_sliding_prompt(
+            chunk_text, entities, domain["relation_types"], prev_summary
+        )
+        
+        # 4. E2B extraction
+        response = _call_e2b(SYSTEM_PROMPT_SLIDING, prompt)
+        
+        # 5. Parse + validate (strict entity check)
+        relations = _parse_and_validate(
+            response, entities, domain["relation_types"]
+        )
+        
+        # 6. Merge entities
+        for e in entities:
+            key = e["name"].lower()
+            if key not in all_entities:
+                all_entities[key] = e
+        
+        # 7. Merge edges (union across windows)
+        for rel in relations:
+            all_edges.add((
+                rel["source_name"].lower(),
+                rel["relation_type"].lower(),
+                rel["target_name"].lower()
+            ))
+        
+        # 8. Generate summary for next window (Gemini coref mechanism)
+        prev_summary = generate_summary(chunk_text)
+    
+    return {
+        "nodes": [{"id": e["name"], "type": e["type"]}
+                  for e in all_entities.values()],
+        "edges": [
+            {"source": s, "type": t, "target": tg}
+            for s, t, tg in all_edges
+        ]
+    }
+```
+
+### Step 5: Add `"sliding_window"` mode to `ingest.py` + `config.py`
+
+In `ingest_text()`, along with the other modes:
+
+```python
+elif mode == "sliding_window":
+    from sliding_window import sliding_window_extract
+    g = sliding_window_extract(text, domain)
+    extraction_method = "sliding_window"
+```
+
+In config.py:
+
+```python
+#   "sliding_window" — sentence-boundary chunked extraction with coref
+#                     resolution for documents >4096 tokens
+```
+
+### Step 6: Benchmark
+
+```bash
+# Short doc (must equal current precision)
+text=$(cat /tmp/prove_extraction.md)
+cd /mnt/data-970-plus/rag-system/v2
+/mnt/data-970-plus/rag-env/bin/python -c "
+import ingest, time
+t0=time.time(); r=ingest.ingest_text(open('/tmp/prove_extraction.md').read(),'sw-short',domain='engineering',extract_graph=True)
+print(f'short: {r[\"extraction_method\"]} entities={r[\"entities\"]} time={time.time()-t0:.1f}s')
+# Check Neo4j
+from neo4j import GraphDatabase
+from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
+d=GraphDatabase.driver(NEO4J_URI,auth=(NEO4J_USER,NEO4J_PASSWORD))
+with d.session() as s:
+    rels=s.run(\"MATCH (a)-[r]->(b) WHERE 'sw-short' IN a.source_docs RETURN count(*) AS c\").single()['c']
+    types=s.run(\"MATCH (a)-[r]->(b) WHERE 'sw-short' IN a.source_docs RETURN collect(DISTINCT type(r)) AS t\").single()['t']
+    print(f'  edges={rels} types={types}')
+d.close()
+"
+
+# Long doc (15K+ chars, must complete without truncation)
+python3 -c "
+text=open('/path/to/real/50k_doc.txt').read() if ... else 'Engineering doc with ' + 'PR-482 fixes BUG-204. ' * 500
+print(f'len={len(text)} chars ~{len(text)//4} tokens')
+t0=time.time(); r=ingest.ingest_text(text,'sw-long',domain='engineering',extract_graph=True)
+print(f'long: entities={r[\"entities\"]} time={time.time()-t0:.1f}s')
+"
+```
+
+### Success Criteria
+
+| Metric | Target |
+|--------|--------|
+| Short doc (648 chars) | Same as single-call E2B (89% precision) |
+| 50K char doc (no truncation) | Completes, ≥10 edges found |
+| Edge precision (gold match) | ≥ 85% |
+| Entity names intact | No truncated entity names in any window |
+| Coref in overlapping region | "It depends on the database" in window 2 resolves to entity from window 1 |
+| Test suite | All 18 tests pass |
+
+### Spacy Install
+
+```bash
+/mnt/data-970-plus/rag-env/bin/pip install spacy
+/mnt/data-970-plus/rag-env/bin/python -m spacy download en_core_web_sm
 ```
 
 ---
 
-## DOCUMENTATION DELIVERABLES
+## WORKSTREAM 4: Higher Qwen Intelligence (P2)
 
-This plan covers updating these files:
+### Candidate Models
 
-1. **`NEXT_PHASE_PLAN.md`** — this file (workstreams 1-3)
-2. **`ARCHITECTURE_V3.0.0.md`** — update with:
-   - E2B llm mode as primary extraction (replacing index-routing diagram)
-   - All benchmark tables (Qwen vs E2B, E2B tuning options, Qwen alternatives)
-   - Systemd table (E2B on :8082, not Qwen)
-   - VRAM budget (E2B-based, not Qwen-based)
-3. **`BENCHMARKS.md`** (new) — comprehensive benchmark data:
-   - E2B llm mode: 89% precision, 10.5s, 28 edges across 6 types
-   - Qwen index_routing: 20% precision, 1.2s, 5 edges across 3 types
-   - E2B llm server log analysis: 129 t/s gen, 396 t/s prompt eval
-   - Hybrid retrieval: 127ms (vector+graph)
-   - VRAM: 5.8GB (E2B+Jina+GLiNER) / 12GB
-4. **`config.py`** — already updated (llm mode + E2B), no changes needed
+| Model | Params | Size | VRAM | On Disk? | Est. Precision | Est. Latency |
+|-------|--------|------|------|----------|----------------|--------------|
+| **Qwen2.5-1.5B Q4_K_M** (baseline) | 1.5B | 1.1 GB | 1.5 GB | ✅ | ~20% | 1.2s |
+| **Phi-3-mini-4k Q4** | 3.8B | 2.3 GB | 2.5 GB | ✅ | 60-75% | ~3s |
+| **Qwen2.5-3B Q4_K_M** | 3B | 1.9 GB | 2.0 GB | ❌ DL needed | 50-70% | ~2.5s |
+| **Qwen2.5-7B Q4_K_M** | 7B | 4.7 GB | 4.5 GB | ❌ DL needed | 75-85% | ~5s |
+| **NuExtract Q4_K_M** | spec | 2.3 GB | 2.5 GB | ✅ | 75-85% | ~3s |
+
+### Test Priority
+
+1. **Phi-3-mini** (on disk, zero download) — test in `llm` mode first
+2. **Qwen2.5-3B Q4_K_M** — download and test in BOTH `llm` and `index_routing`
+3. **Qwen2.5-7B Q4_K_M** — only if 3B disappoints, tight VRAM
+
+### Benchmark Script
+
+```python
+GOLD = {
+    ("PR-482","FIXES","BUG-204"),
+    ("PR-482","AUTHORED","bob"),
+    ("alice","REVIEWED","PR-482"),
+    ("checkout-publisher","DEPENDS_ON","checkout database"),
+    ("ADR-014","REFERENCES","auth-service"),
+}
+
+def eval_model(model_name, mode="llm"):
+    """Swap :8082 to model, run extraction, return precision."""
+    # ...start model on :8082, wait...
+    res = ingest.ingest_text(text, f"eval-{model_name}",
+                              domain="engineering", extract_graph=True)
+    # fetch from neo4j, compare to GOLD
+    ...
+```
 
 ---
 
 ## EXECUTION ORDER (for hy3 agent)
 
 ```
-Phase A — Documentation first
-  1. Read ARCHITECTURE_V3.0.0.md current state
-  2. Update with final E2B llm architecture (diagram, systemd, VRAM)
-  3. Create BENCHMARKS.md with all data from this plan
+Phase 1 — E2B Tuning (WS2)
+  1. Stop E2B on :8082
+  2. Test Option B flags (recommended production default)
+  3. Run benchmark (short + long doc) → VRAM, latency, quality
+  4. If Option B passes → update systemd unit (or note for manual sudo)
+  5. Leave E2B running with winning flags
 
-Phase B — E2B Tuning
-  4. Stop E2B on :8082
-  5. Test Option A flags → measure VRAM + latency + quality
-  6. Test Option B flags → measure VRAM + latency + quality
-  7. Pick best, update systemd unit (keep as -tuned variant)
-  8. Restart E2B with winning flags
+Phase 2 — GLiNER + E2B Hybrid (WS1)
+  6. Create hybrid_extraction.py with all 3 helpers + Gemini entity validation
+  7. Add "hybrid" branch to ingest.py
+  8. Benchmark vs llm mode (same doc, short)
+  9. If hybrid beats llm (quality AND speed) → make it default EXTRACTION_MODE
+  10. If hybrid underperforms → document, keep llm
 
-Phase C — GLiNER + E2B Hybrid
-  9. Create hybrid_extraction.py with prompt from Workstream 1
-  10. Add "hybrid" branch to ingest.py
-  11. Benchmark vs llm mode (same doc)
-  12. If hybrid beats llm on both quality AND speed → make it default
-  13. If hybrid underperforms → document why, keep llm as primary
+Phase 3 — Sliding Window with Coref (WS3 — Gemini design)
+  11. pip install spacy + en_core_web_sm
+  12. Create sliding_window.py with:
+      - sentence_chunk() — sentence-boundary chunker
+      - build_sliding_prompt() — with prev_summary
+      - generate_summary() — per-window for next chunk
+      - sliding_window_extract() — orchestrator
+      - Reuse _call_gliner(), _call_e2b(), _parse_and_validate() from hybrid_extraction
+  13. Add "sliding_window" branch to ingest.py + config.py
+  14. Benchmark short doc (must equal current 89%)
+  15. Create a 15K+ char test doc, benchmark long doc
+  16. Verify no truncated entities (check Neo4j edge names)
 
-Phase D — Higher Qwen Intelligence
-  14. Test Phi-3-mini in llm mode (already on disk)
-  15. Download Qwen2.5-3B Q4_K_M (~2GB)
-  16. Test Qwen2.5-3B in llm mode
-  17. Run benchmark comparison E2B vs Phi-3 vs Qwen3B
-  18. Report: which model gives best quality/speed tradeoff
+Phase 4 — Higher Qwen Intelligence (WS4)
+  17. Test Phi-3-mini in llm mode (on disk, swap model)
+  18. Download Qwen2.5-3B Q4_K_M (~2GB)
+  19. Test Qwen3B in llm + index_routing modes
+  20. Run full model comparison → update BENCHMARKS.md
+
+Phase 5 — Documentation
+  21. Update ARCHITECTURE_V3.0.0.md with all changes
+  22. Update BENCHMARKS.md with complete numbers
+  23. Update systemd unit (sudo needed)
+  24. Commit + push
 ```
 
 ---
@@ -285,15 +684,20 @@ Phase D — Higher Qwen Intelligence
 ## CONSTRAINTS
 
 - **Never overwrite live config without backup.** Copy to `.bak` first.
-- **GPU**: RTX 3060 12GB. 3.9GB Jina v3 + 1.4GB GLiNER permanently resident in rag-gpu-daemon. ~6.7GB free for extraction model.
-- **Sudo may fail** — use direct process launch (fuser -k / background llama-server) when systemctl is unavailable.
+- **GPU:** RTX 3060 12GB. Jina 3.9GB + GLiNER 1.4GB permanently resident. ~6.7GB free.
+- **Sudo may fail** — use `fuser -k :8082/tcp` + background `llama-server`.
 - **No model downloads during benchmarking** — download first, then benchmark.
-- **All benchmarks must use `/tmp/prove_extraction.md`** for consistency (648 chars, PR-482 document).
-- **Neo4j credentials:** bolt://localhost:7687, neo4j / ragpassword123
-- **Qdrant:** localhost:6333
+- **Short benchmark:** `/tmp/prove_extraction.md` (recreate if missing — 648 chars, PR-482 doc).
+- **Long test doc:** create at `/tmp/long_test_doc.md` (~15K chars, e.g. repeated PR descriptions).
+- **Neo4j:** `neo4j / ragpassword123` at `bolt://localhost:7687`
+- **Qdrant:** `localhost:6333`
 - **Python venv:** `/mnt/data-970-plus/rag-env/bin/python`
-- **llama.cpp bin:** `/home/reinhard/.lmstudio/extensions/backends/llama.cpp-linux-x86_64-nvidia-cuda-avx2-2.23.1/llama-server`
-- **LD_LIBRARY_PATH:** `/home/reinhard/.lmstudio/extensions/backends/llama.cpp-linux-x86_64-nvidia-cuda-avx2-2.23.1`
+- **llama-server:** `/home/reinhard/.lmstudio/extensions/backends/llama.cpp-linux-x86_64-nvidia-cuda-avx2-2.23.1/llama-server`
+- **LD_LIBRARY_PATH:** As above
+- **Test suite:** 18 tests in `test_index_router.py` must pass.
+- **Files to create:** `hybrid_extraction.py`, `sliding_window.py`
+- **Files to modify:** `ingest.py` (add 2 mode branches), `config.py` (add 2 mode options in comments)
+- **Files to update after benchmarking:** `BENCHMARKS.md`, `ARCHITECTURE_V3.0.0.md`
 
 ---
 
@@ -301,9 +705,15 @@ Phase D — Higher Qwen Intelligence
 
 | Criterion | Measurement | Target |
 |-----------|-------------|--------|
-| GLiNER+E2B hybrid works | edges extracted ≥ 5, types > 2 | Must beat Qwen index_routing (5 edges, 3 types) |
-| Hybrid precision | exact match vs gold | ≥ 80% |
-| E2B tuning latency | extraction time | < 8s (from 10.5s baseline) |
-| Higher Qwen precision | exact match vs gold | ≥ 60% for 3B, ≥ 75% for 7B |
-| All benchmarks documented | BENCHMARKS.md | Complete with all numbers |
-| Architecture doc matches reality | ARCHITECTURE_V3.0.0.md | E2B llm, not index-routing |
+| GLiNER+E2B hybrid precision | exact match vs gold | ≥ 89% |
+| Hybrid latency | extraction time | < 10.5s (stretch <8s) |
+| E2B tuning latency | extraction time | < 10.5s (option B) |
+| Sliding window (short doc) | exact match vs gold | ≥ 85% |
+| Sliding window (long doc) | completes without truncation | edges ≥ 10 |
+| Sentence boundary integrity | check entity names in Neo4j | No truncated names |
+| Coreference resolution (swap test) | "it" in window 2 resolves correctly | Verified by inspection |
+| Phi-3 model precision | exact match vs gold | ≥ 60% |
+| Qwen3B model precision | exact match vs gold | ≥ 60% |
+| Benchmarks documented | BENCHMARKS.md | Complete |
+| Architecture doc matches reality | ARCHITECTURE_V3.0.0.md | E2B llm + hybrid + sliding_window |
+| Test suite passes | pytest test_index_router.py | 18/18 |
