@@ -608,4 +608,26 @@ prevent label poisoning.
   in arxiv 2401.18059 → **~0% drift** on this domain. The gate reads "marginal
   value for journal" but the mechanism is proven correct (unit-tested promotion
   + injection) and is valuable for sparser domains (engineering, legal).
-- Full A/B/C numbers: see commit `v3.1.0` / `logs/validation_<date>.txt`.
+
+### Critical behavioral finding (2026-07-12, post-implementation)
+**E2B strictly respects the pre-detected entity list.** Across extensive testing
+(engineering + journal, hybrid + sliding_window), E2B produces relations ONLY
+among entities GLiNER detected — it almost never references an undetected
+entity. Therefore the "dropped entity" path (and thus dynamic-label promotion)
+fires primarily on:
+  1. Surface-form variants E2B writes that fail `_norm` matching (rare; `_norm`
+     already strips case/punctuation so most match).
+  2. Genuine GLiNER misses on sparse-label domains.
+So the feature is a correct safety net that rarely triggers in practice — this
+is a sign of HIGH extraction quality, not a defect. The full promote→inject
+cycle is proven end-to-end: a name dropped 3× is promoted, merged into GLiNER's
+label set, and a real GLiNER call then detects it.
+
+### Bug fixed during verification
+Initial integration derived the domain name via `domain.get("name")`, but
+`domain_loader.get_domain()` returns a sub-dict WITHOUT a `name` key → all
+drops were recorded to the **engineering** provider (wrong domain), so the
+target domain's candidates stayed empty. Fixed by adding `_domain_name()`
+(derives from `neo4j_label`/`collection`) and threading `domain_name` through
+`ingest_text` → `extract_hybrid`/`sliding_window_extract` → `_parse_and_validate`.
+Verified: journal/engineering/legal/medical all resolve correctly.

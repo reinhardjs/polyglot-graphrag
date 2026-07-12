@@ -195,7 +195,8 @@ def _parse_and_validate(content: str, entities: list, valid_types: list,
 # Step 4: Full sliding-window orchestrator
 # ---------------------------------------------------------------------------
 
-def sliding_window_extract(text: str, domain: dict, doc_id: str = None) -> dict:
+def sliding_window_extract(text: str, domain: dict, doc_id: str = None,
+                           domain_name: str = None) -> dict:
     """Extract entities+edges from long documents using sentence-boundary
     chunks with coreference resolution via previous-window summaries.
 
@@ -209,7 +210,10 @@ def sliding_window_extract(text: str, domain: dict, doc_id: str = None) -> dict:
 
     # Dynamic labels: enrich GLiNER's vocabulary with promoted candidates.
     from label_provider import get_provider
-    provider = get_provider(domain.get("name", "engineering"))
+    if domain_name is None:
+        from hybrid_extraction import _domain_name
+        domain_name = _domain_name(domain)
+    provider = get_provider(domain_name)
     dynamic = provider.get_active()
     static_labels = list(domain.get("entity_types", []))
     all_labels = static_labels + dynamic
@@ -238,7 +242,7 @@ def sliding_window_extract(text: str, domain: dict, doc_id: str = None) -> dict:
         # 4. Parse + validate (strict entity check, records dropped for dynamic)
         relations = _parse_and_validate(
             response, entities, domain.get("relation_types", []),
-            doc_id=doc_id, domain=domain,
+            doc_id=doc_id, domain=domain, domain_name=domain_name,
         )
 
         # 5. Merge entities (dedup by name, first occurrence wins)

@@ -28,6 +28,25 @@ _DROPPED_LOG = os.path.join(
 _dropped_buffer: dict = {}
 
 
+def _domain_name(domain: dict) -> str:
+    """Derive the domain's short name from its config dict.
+
+    ``domain_loader.get_domain()`` returns a sub-dict WITHOUT a ``name`` key,
+    so we recover it from ``neo4j_label`` (e.g. "Journal" -> "journal") or
+    ``collection`` (e.g. "journal_chunks" -> "journal"). Falls back to
+    "engineering".
+    """
+    if not isinstance(domain, dict):
+        return "engineering"
+    nl = domain.get("neo4j_label")
+    if nl:
+        return nl.lower()
+    coll = domain.get("collection", "")
+    if coll.endswith("_chunks"):
+        coll = coll[:-len("_chunks")]
+    return coll or "engineering"
+
+
 def _record_dropped(doc_id, domain_name, src, tgt,
                     src_missing, tgt_missing):
     """Buffer a dropped-entity observation for the audit log.
@@ -145,7 +164,8 @@ def _call_e2b(system_prompt: str, user_prompt: str, timeout: int = 120) -> str:
 # ---------------------------------------------------------------------------
 
 def _parse_and_validate(content: str, entities: list, valid_types: list,
-                        doc_id: str = None, domain: dict = None) -> list:
+                        doc_id: str = None, domain: dict = None,
+                        domain_name: str = None) -> list:
     """Parse JSON, validate against entity list + vocabulary.
 
     Discards any relation referencing an entity NOT in the pre-detected set
@@ -251,13 +271,14 @@ def _parse_and_validate(content: str, entities: list, valid_types: list,
             # Record dropped entity name for dynamic-label promotion.
             try:
                 from label_provider import get_provider
-                dname = domain.get("name") if isinstance(domain, dict) else None
-                prov = get_provider(dname or "engineering")
+                if domain_name is None:
+                    domain_name = _domain_name(domain)
+                prov = get_provider(domain_name or "engineering")
                 if src_real is None:
                     prov.record_unknown(src)
                 if tgt_real is None:
                     prov.record_unknown(tgt)
-                _record_dropped(doc_id, dname, src, tgt,
+                _record_dropped(doc_id, domain_name, src, tgt,
                                 src_real is None, tgt_real is None)
             except Exception:
                 pass  # never let label bookkeeping break extraction
@@ -335,7 +356,8 @@ def _salvage_from_thinking(content: str, entities: list,
 # Public API
 # ---------------------------------------------------------------------------
 
-def extract_hybrid(doc_id: str, text: str, domain: dict) -> dict:
+def extract_hybrid(doc_id: str, text: str, domain: dict,
+                   domain_name: str = None) -> dict:
     """GLiNER detects entities → E2B classifies relations.
 
     `domain` is the profile dict from domain_loader.get_domain()
@@ -352,7 +374,9 @@ def extract_hybrid(doc_id: str, text: str, domain: dict) -> dict:
 
     # Dynamic labels: enrich GLiNER's vocabulary with promoted candidates.
     from label_provider import get_provider
-    provider = get_provider(domain.get("name", "engineering"))
+    if domain_name is None:
+        domain_name = _domain_name(domain)
+    provider = get_provider(domain_name)
     dynamic = provider.get_active()
     static_labels = list(domain.get("entity_types", []))
     all_labels = static_labels + dynamic
@@ -377,7 +401,7 @@ def extract_hybrid(doc_id: str, text: str, domain: dict) -> dict:
     # 4. Parse + validate (records dropped entities for dynamic labels)
     relations = _parse_and_validate(
         response, entities, domain.get("relation_types", []),
-        doc_id=doc_id, domain=domain,
+        doc_id=doc_id, domain=domain, domain_name=domain_name,
     )
 
     # 5. Advance dynamic-label state (promotion/eviction) + flush audit log

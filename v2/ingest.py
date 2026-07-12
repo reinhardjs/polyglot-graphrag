@@ -673,14 +673,16 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
                 if profile is None and domain:
                     import domain_loader
                     profile = domain_loader.get_domain(domain)
-                g = extract_hybrid(doc_id, text, domain=profile)
+                g = extract_hybrid(doc_id, text, domain=profile,
+                                  domain_name=domain)
                 extraction_method = "hybrid"
             elif mode == "sliding_window":
                 from sliding_window import sliding_window_extract
                 if profile is None and domain:
                     import domain_loader
                     profile = domain_loader.get_domain(domain)
-                g = sliding_window_extract(text, domain=profile, doc_id=doc_id)
+                g = sliding_window_extract(text, domain=profile, doc_id=doc_id,
+                                           domain_name=domain)
                 extraction_method = "sliding_window"
             else:
                 g = extract_graph_llm(doc_id, text, chunk_size=chunk_size,
