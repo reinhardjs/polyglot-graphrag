@@ -412,6 +412,7 @@ def write_graph(doc_id: str, graph: dict, source_text: str, driver,
     # This replaces the old per-edge MERGE loop (single-query-per-edge) with
     # batched writes — far fewer round-trips to Neo4j.
     edges_by_type: dict = {}
+    seen_edges: set = set()  # (src_id, tgt_id, safe_type) to avoid dup MERGEs
     for e in graph.get("edges", []):
         src_id = resolver.get(e["source"])
         tgt_id = resolver.get(e["target"])
@@ -423,10 +424,15 @@ def write_graph(doc_id: str, graph: dict, source_text: str, driver,
         # Sanitize edge type for Cypher (relationship types can't be parameterized):
         # allow only A-Z, 0-9, underscore; uppercase.
         safe_type = "".join(
-             c if (c.isalnum() or c == "_") else "_" for c in edge_type.upper()
+            c if (c.isalnum() or c == "_") else "_" for c in edge_type.upper()
         )
         if not safe_type or not (safe_type[0].isalpha() or safe_type[0] == "_"):
             safe_type = "REL_" + safe_type
+        # Dedup: if 2 name-variants resolve to the same node pair, skip the 2nd
+        dedup_key = (src_id, tgt_id, safe_type)
+        if dedup_key in seen_edges:
+            continue
+        seen_edges.add(dedup_key)
         edges_by_type.setdefault(safe_type, []).append(
             {"source_id": src_id, "target_id": tgt_id}
         )
@@ -652,6 +658,10 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
                 from hybrid_extraction import extract_hybrid
                 g = extract_hybrid(doc_id, text, domain=profile)
                 extraction_method = "hybrid"
+            elif mode == "sliding_window":
+                from sliding_window import sliding_window_extract
+                g = sliding_window_extract(text, domain=profile)
+                extraction_method = "sliding_window"
             else:
                 g = extract_graph_llm(doc_id, text, chunk_size=chunk_size,
                                       profile=profile)

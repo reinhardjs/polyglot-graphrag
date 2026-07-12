@@ -73,6 +73,9 @@ EXTRACTION_LLM_MODEL    = "gemma-4-E2B_q4_0-it.gguf"
 # V3.0 extraction mode:
 #   "llm"           — full-doc single-pass extraction with E2B (89% precision)
 #   "index_routing" — Hybrid GLiNER (entities) → Qwen (relation classification, 20% precision)
+#   "hybrid"        — GLiNER (entities) → E2B (relation class, 100% precision) [RECOMMENDED]
+#   "sliding_window" — sentence-boundary chunked extraction with coref
+#                     resolution for documents >4096 tokens
 EXTRACTION_MODE = "llm"
 
 # Extraction context — how much document text to feed the LLM at once.

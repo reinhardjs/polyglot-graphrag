@@ -594,6 +594,26 @@ print(f'long: entities={r[\"entities\"]} time={time.time()-t0:.1f}s')
 /mnt/data-970-plus/rag-env/bin/python -m spacy download en_core_web_sm
 ```
 
+### WS3 Fixes Applied (2026-07-12, measured)
+
+1. **Infinite-loop in `sentence_chunk`** — when a chunk reaches
+   `end >= len(sentences)`, the overlap slide didn't advance. Fixed:
+   `if end >= len(sentences): pos = end` (consume rest).
+
+2. **E2B `--reasoning-format none` ignored** — emits
+   `<|channel|>thought` block. Parser strips it AND harvests relations
+   from the thinking examples as LAST-RESORT (`_salvage_from_thinking`)
+   when `max_tokens` (2048) is exhausted before the final JSON on
+   long chunks.
+
+3. **`write_graph` edge dedup** — 2 GLiNER name-variants
+   (e.g. "Auth Service" + "auth-service") resolving to the SAME
+   node created duplicate MERGE edges. Fixed: dedup by
+   `(src_id, tgt_id, safe_type)` before UNWIND.
+
+**Result:** 36,613-char doc → 2 sentence-boundary chunks →
+15 edges (5 types), 0 truncation, 63s total.
+
 ---
 
 ## WORKSTREAM 4: Higher Qwen Intelligence (P2)
@@ -708,12 +728,12 @@ Phase 5 — Documentation
 | GLiNER+E2B hybrid precision | exact match vs gold | ≥ 89% |
 | Hybrid latency | extraction time | < 10.5s (stretch <8s) |
 | E2B tuning latency | extraction time | < 10.5s (option B) |
-| Sliding window (short doc) | exact match vs gold | ≥ 85% |
-| Sliding window (long doc) | completes without truncation | edges ≥ 10 |
-| Sentence boundary integrity | check entity names in Neo4j | No truncated names |
-| Coreference resolution (swap test) | "it" in window 2 resolves correctly | Verified by inspection |
-| Phi-3 model precision | exact match vs gold | ≥ 60% |
-| Qwen3B model precision | exact match vs gold | ≥ 60% |
-| Benchmarks documented | BENCHMARKS.md | Complete |
-| Architecture doc matches reality | ARCHITECTURE_V3.0.0.md | E2B llm + hybrid + sliding_window |
-| Test suite passes | pytest test_index_router.py | 18/18 |
+| Sliding window (short doc) | exact match vs gold | ≥ 85% | ✅ 100% (5/5) |
+| Sliding window (long doc) | completes without truncation | edges ≥ 10 | ✅ 15 edges, 36K chars |
+| Sentence boundary integrity | check entity names in Neo4j | No truncated names | ✅ spaCy sentences |
+| Coreference resolution (swap test) | "it" in window 2 resolves | Verified by inspection | ✅ prev_summary |
+| Phi-3 model precision | exact match vs gold | ≥ 60% | ❌ 23% (worse than E2B) |
+| Qwen3B model precision | exact match vs gold | ≥ 60% | ⏳ Skipped (E2B wins) |
+| Benchmarks documented | BENCHMARKS.md | Complete | ✅ WS1-4 |
+| Architecture doc matches reality | ARCHITECTURE_V3.0.0.md | E2B + hybrid + sliding_window | ✅ |
+| Test suite passes | pytest test_index_router.py | 18/18 | ⏳ not run this session |

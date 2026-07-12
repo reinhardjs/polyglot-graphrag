@@ -106,29 +106,62 @@ def _parse_and_validate(content: str, entities: list, valid_types: list) -> list
     last_tag = cleaned.rfind("<|channel|>")
     if last_tag != -1:
         cleaned = cleaned[last_tag + len("<|channel|>"):].strip()
-    # Strip markdown fences
+    # Strip markdown fences (```json ... ```)
+    fenced = None
     if "```" in cleaned:
         m = re.search(r"```(?:json)?\s*(.*?)```", cleaned, re.DOTALL)
         if m:
-            cleaned = m.group(1).strip()
-    # Grab LAST JSON array or object (final answer, not examples in thinking)
-    arrays = [m.start() for m in re.finditer(r"\[", cleaned)]
-    objs = [m.start() for m in re.finditer(r"\{", cleaned)]
-    candidates = arrays + objs
-    if candidates:
-        start = max(candidates)  # last JSON opening
-        snippet = cleaned[start:]
+            fenced = m.group(1).strip()
+    if fenced is not None:
+        # Parse the fenced content directly (it is the final JSON)
         try:
-            if start in arrays:
-                data = json.loads(snippet)
-            else:
-                data = json.loads(snippet)
+            data = json.loads(fenced)
         except (json.JSONDecodeError, ValueError):
-            # Salvage individual relation objects
             from index_router import _salvage_objects
-            data = {"relations": _salvage_objects(cleaned)}
+            data = {"relations": _salvage_objects(fenced)}
     else:
-        data = {"relations": []}
+        # No fence: find the LAST '[' that starts a COMPLETE balanced
+        # JSON array (the final answer). Thinking blocks may contain
+        # example '{...}' snippets, but the real output is a '[...]'.
+        last_arr = cleaned.rfind("[")
+        if last_arr != -1:
+            # Extract balanced brackets from last_arr
+            depth = 0
+            end = -1
+            for i in range(last_arr, len(cleaned)):
+                if cleaned[i] == "[":
+                    depth += 1
+                elif cleaned[i] == "]":
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+            if end != -1:
+                snippet = cleaned[last_arr:end]
+                try:
+                    data = json.loads(snippet)
+                except (json.JSONDecodeError, ValueError):
+                    from index_router import _salvage_objects
+                    data = {"relations": _salvage_objects(cleaned)}
+            else:
+                from index_router import _salvage_objects
+                data = {"relations": _salvage_objects(cleaned)}
+        else:
+            # No array at all — maybe a bare {...} object
+            last_obj = cleaned.rfind("{")
+            if last_obj != -1:
+                snippet = cleaned[last_obj:]
+                try:
+                    data = json.loads(snippet)
+                except (json.JSONDecodeError, ValueError):
+                    from index_router import _salvage_objects
+                    data = {"relations": _salvage_objects(cleaned)}
+            else:
+                # LAST RESORT: extract relations from E2B's thinking
+                # block. Gemma emits lines like:
+                #   * "Authored by: frank" -> frank AUTHORED PR-485
+                # or "* X -> Y [REL]" inside its reasoning. Harvest those.
+                data = _salvage_from_thinking(cleaned, entities, valid_types)
 
     if isinstance(data, list):
         rel_list = data
@@ -167,6 +200,56 @@ def _parse_and_validate(content: str, entities: list, valid_types: list) -> list
         })
     return relations
 
+
+def _salvage_from_thinking(content: str, entities: list,
+                             valid_types: list) -> dict:
+    """LAST-RESORT parser: harvest relations from Gemma's thinking block.
+
+    When E2B emits a huge <|channel|>thought block and exhausts
+    max_tokens before the final JSON, the reasoning text still
+    contains correct relations as bullet examples, e.g.:
+        * "Authored by: frank" -> frank AUTHORED PR-485
+        * "X -> Y [REL]"  or  "frank AUTHORED PR-485"
+    We regex-harvest (src, tgt, type) triples whose src/tgt are in
+    the pre-detected entity set, then validate against valid_types.
+    """
+    valid_names = {e["name"] for e in entities}
+    valid_types_set = set(valid_types) if valid_types else set()
+    harvested = []
+    seen = set()
+
+    # Pattern A: "* "<phrase>" -> <SRC> <TYPE> <TGT>"
+    pat_a = re.compile(
+        r'->\s*([^\s"][^\n]*?)\s+([A-Z][A-Z_]+)\s+([^\s"][^\n]*)'
+    )
+    # Pattern B: "<SRC> <TYPE> <TGT>" (space-separated, all caps type)
+    pat_b = re.compile(
+        r'\b([A-Za-z0-9\-]+)\s+([A-Z][A-Z_]{2,})\s+([A-Za-z0-9\-]+)\b'
+    )
+
+    for m in pat_a.finditer(content):
+        src, rtype, tgt = m.group(1).strip(), m.group(2), m.group(3).strip()
+        if src in valid_names and tgt in valid_names:
+            if not valid_types_set or rtype in valid_types_set:
+                key = (src.lower(), rtype.lower(), tgt.lower())
+                if key not in seen:
+                    seen.add(key)
+                    harvested.append({"source_name": src,
+                                    "target_name": tgt,
+                                    "relation_type": rtype})
+
+    for m in pat_b.finditer(content):
+        src, rtype, tgt = m.group(1), m.group(2), m.group(3)
+        if src in valid_names and tgt in valid_names:
+            if not valid_types_set or rtype in valid_types_set:
+                key = (src.lower(), rtype.lower(), tgt.lower())
+                if key not in seen:
+                    seen.add(key)
+                    harvested.append({"source_name": src,
+                                    "target_name": tgt,
+                                    "relation_type": rtype})
+
+    return {"relations": harvested}
 
 # ---------------------------------------------------------------------------
 # Public API
