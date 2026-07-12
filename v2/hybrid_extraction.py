@@ -10,6 +10,7 @@ verification, compact JSON-only output, no prose/explanation leakage.
 """
 
 import json
+import os
 import re
 import requests
 
@@ -17,6 +18,57 @@ from config import (
     EXTRACTION_LLM_BASE_URL,
     EXTRACTION_LLM_MODEL,
 )
+
+# Audit log for dropped entities (Phase 1 of dynamic-label plan).
+_DROPPED_LOG = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "logs", "dropped_entities.jsonl"
+)
+
+# Module-level buffer of dropped entities per doc_id, flushed at doc end.
+_dropped_buffer: dict = {}
+
+
+def _record_dropped(doc_id, domain_name, src, tgt,
+                    src_missing, tgt_missing):
+    """Buffer a dropped-entity observation for the audit log.
+
+    Called from _parse_and_validate whenever an edge references an entity
+    GLiNER did not detect. Flushed by ``flush_dropped_log()`` at document end.
+    Never raises.
+    """
+    try:
+        key = doc_id or "__unknown__"
+        _dropped_buffer.setdefault(key, {
+            "doc_id": doc_id,
+            "domain": domain_name,
+            "timestamp": __import__("time").time(),
+            "dropped": [],
+        })
+        if src_missing and src:
+            _dropped_buffer[key]["dropped"].append(
+                {"name": src, "side": "src", "inferred_type": ""})
+        if tgt_missing and tgt:
+            _dropped_buffer[key]["dropped"].append(
+                {"name": tgt, "side": "tgt", "inferred_type": ""})
+    except Exception:
+        pass
+
+
+def flush_dropped_log():
+    """Append buffered dropped-entity records to the jsonl audit log."""
+    if not _dropped_buffer:
+        return
+    try:
+        os.makedirs(os.path.dirname(_DROPPED_LOG), exist_ok=True)
+        with open(_DROPPED_LOG, "a") as f:
+            for rec in _dropped_buffer.values():
+                if rec["dropped"]:
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    finally:
+        _dropped_buffer.clear()
+
 
 GLINER_DAEMON_URL = "http://localhost:8000"
 
@@ -92,7 +144,8 @@ def _call_e2b(system_prompt: str, user_prompt: str, timeout: int = 120) -> str:
 # Parsing + strict entity validation (Gemini recommendation)
 # ---------------------------------------------------------------------------
 
-def _parse_and_validate(content: str, entities: list, valid_types: list) -> list:
+def _parse_and_validate(content: str, entities: list, valid_types: list,
+                        doc_id: str = None, domain: dict = None) -> list:
     """Parse JSON, validate against entity list + vocabulary.
 
     Discards any relation referencing an entity NOT in the pre-detected set
@@ -195,6 +248,19 @@ def _parse_and_validate(content: str, entities: list, valid_types: list) -> list
         src_real = valid_norm.get(src_n)
         tgt_real = valid_norm.get(tgt_n)
         if src_real is None or tgt_real is None:
+            # Record dropped entity name for dynamic-label promotion.
+            try:
+                from label_provider import get_provider
+                dname = domain.get("name") if isinstance(domain, dict) else None
+                prov = get_provider(dname or "engineering")
+                if src_real is None:
+                    prov.record_unknown(src)
+                if tgt_real is None:
+                    prov.record_unknown(tgt)
+                _record_dropped(doc_id, dname, src, tgt,
+                                src_real is None, tgt_real is None)
+            except Exception:
+                pass  # never let label bookkeeping break extraction
             continue  # discard non-matching entities to prevent noise
         if valid_types_set and rtype not in valid_types_set:
             continue
@@ -284,8 +350,15 @@ def extract_hybrid(doc_id: str, text: str, domain: dict) -> dict:
         import domain_loader
         domain = domain_loader.get_domain("engineering")
 
-    # 1. GLiNER entity detection
-    entities = _call_gliner(text, domain.get("entity_types", []))
+    # Dynamic labels: enrich GLiNER's vocabulary with promoted candidates.
+    from label_provider import get_provider
+    provider = get_provider(domain.get("name", "engineering"))
+    dynamic = provider.get_active()
+    static_labels = list(domain.get("entity_types", []))
+    all_labels = static_labels + dynamic
+
+    # 1. GLiNER entity detection (enriched label set)
+    entities = _call_gliner(text, all_labels)
 
     # 2. Build hybrid prompt
     entity_lines = "\n".join(
@@ -301,12 +374,17 @@ def extract_hybrid(doc_id: str, text: str, domain: dict) -> dict:
     # 3. Single E2B call (NOT batched pairs)
     response = _call_e2b(SYSTEM_PROMPT, user_msg)
 
-    # 4. Parse + validate
+    # 4. Parse + validate (records dropped entities for dynamic labels)
     relations = _parse_and_validate(
-        response, entities, domain.get("relation_types", [])
+        response, entities, domain.get("relation_types", []),
+        doc_id=doc_id, domain=domain,
     )
 
-    # 5. Return in extract_graph_llm-compatible shape
+    # 5. Advance dynamic-label state (promotion/eviction) + flush audit log
+    provider.step_document(doc_id)
+    flush_dropped_log()
+
+    # 6. Return in extract_graph_llm-compatible shape
     return {
         "nodes": [
             {"id": e["name"], "type": e.get("type", "unknown")}

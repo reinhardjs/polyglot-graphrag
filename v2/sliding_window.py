@@ -185,16 +185,17 @@ def _call_e2b(system_prompt: str, user_prompt: str, timeout: int = 120) -> str:
     return _e(system_prompt, user_prompt, timeout)
 
 
-def _parse_and_validate(content: str, entities: list, valid_types: list) -> list:
+def _parse_and_validate(content: str, entities: list, valid_types: list,
+                        doc_id: str = None, domain: dict = None) -> list:
     from hybrid_extraction import _parse_and_validate as _p
-    return _p(content, entities, valid_types)
+    return _p(content, entities, valid_types, doc_id=doc_id, domain=domain)
 
 
 # ---------------------------------------------------------------------------
 # Step 4: Full sliding-window orchestrator
 # ---------------------------------------------------------------------------
 
-def sliding_window_extract(text: str, domain: dict) -> dict:
+def sliding_window_extract(text: str, domain: dict, doc_id: str = None) -> dict:
     """Extract entities+edges from long documents using sentence-boundary
     chunks with coreference resolution via previous-window summaries.
 
@@ -206,11 +207,13 @@ def sliding_window_extract(text: str, domain: dict) -> dict:
         import domain_loader
         domain = domain_loader.get_domain("engineering")
 
-    # Chunk size MUST fit E2B's 8192-token context WITH room for the
-    # thinking block + JSON answer. 3000 words (~4500 tok) left too
-    # little headroom -> E2B's <|channel|>thought consumed the whole
-    # budget and emitted 0 relations. 1400 words (~2000 tok) leaves
-    # ~6000 tok for prompt overhead + thinking + answer.
+    # Dynamic labels: enrich GLiNER's vocabulary with promoted candidates.
+    from label_provider import get_provider
+    provider = get_provider(domain.get("name", "engineering"))
+    dynamic = provider.get_active()
+    static_labels = list(domain.get("entity_types", []))
+    all_labels = static_labels + dynamic
+
     chunks = sentence_chunk(text, max_words=1400, overlap_sentences=2)
 
     all_entities = {}
@@ -220,8 +223,8 @@ def sliding_window_extract(text: str, domain: dict) -> dict:
     for chunk in chunks:
         chunk_text = chunk["text"]
 
-        # 1. GLiNER on this chunk (entities with spans)
-        entities = _call_gliner(chunk_text, domain.get("entity_types", []))
+        # 1. GLiNER on this chunk (entities with spans) — enriched label set
+        entities = _call_gliner(chunk_text, all_labels)
 
         # 2. Build prompt with prev_summary for coref
         prompt = build_sliding_prompt(
@@ -232,9 +235,10 @@ def sliding_window_extract(text: str, domain: dict) -> dict:
         # 3. E2B extraction
         response = _call_e2b(SYSTEM_PROMPT_SLIDING, prompt)
 
-        # 4. Parse + validate (strict entity check)
+        # 4. Parse + validate (strict entity check, records dropped for dynamic)
         relations = _parse_and_validate(
-            response, entities, domain.get("relation_types", [])
+            response, entities, domain.get("relation_types", []),
+            doc_id=doc_id, domain=domain,
         )
 
         # 5. Merge entities (dedup by name, first occurrence wins)
@@ -256,6 +260,11 @@ def sliding_window_extract(text: str, domain: dict) -> dict:
 
         # 7. Generate summary for NEXT window (Gemini coref mechanism)
         prev_summary = generate_summary(chunk_text)
+
+    # Advance dynamic-label state (promotion/eviction) + flush audit log
+    provider.step_document(doc_id)
+    from hybrid_extraction import flush_dropped_log
+    flush_dropped_log()
 
     return {
         "nodes": [

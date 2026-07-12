@@ -2,6 +2,18 @@
 # Single source of truth for all domain schemas. Replaces domains/*.toml.
 # Consumed by domain_loader.py at runtime (no hardcoded logic in pipeline).
 
+# Dynamic label injection (v3.1.0)
+# When enabled, GLiNER's label set auto-expands based on entity names E2B
+# discovers that GLiNER missed. Candidates are promoted after
+# `promotion_threshold` documents and evicted via LRU when `max_per_domain`
+# is exceeded. State persists to ~/.hermes/labels/{domain}_dynamic.json.
+# See plans/dynamic-label-injection.md for full design + validation.
+dynamic_labels:
+  enabled: true
+  max_per_domain: 20
+  promotion_threshold: 3
+  ttl_docs: 50
+
 domains:
   engineering:
     collection: engineering_chunks

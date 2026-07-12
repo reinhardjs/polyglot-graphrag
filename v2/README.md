@@ -169,11 +169,29 @@ hermes
 
 ## Version
 
-**v3.0.8** — production. Key features:
+**v3.1.0** — production. Key features:
 
 - GLiNER+E2B hybrid extraction (100% precision, engineering domain)
 - Sliding window for arbitrary-length documents
 - Journal domain (academic literature extraction)
 - 5 production bug fixes (Qdrant batch cap, sparse collision, label routing,
   domain passthrough, collection isolation)
-- Dynamic Label Injection plan for entity-drift resolution (next phase)
+- **Dynamic Label Injection** — `label_provider.py` auto-expands GLiNER's
+  vocabulary with entity names E2B discovers that GLiNER missed. Candidates are
+  promoted after `promotion_threshold` documents (default 3) and evicted via LRU
+  when `max_per_domain` (default 20) is exceeded. Zero-latency in-memory merge
+  on the hot path. State persists to `~/.hermes/labels/{domain}_dynamic.json`.
+  See `plans/dynamic-label-injection.md` for design + validation.
+
+  Enable/configure in `domain_config.yaml`:
+  ```yaml
+  dynamic_labels:
+    enabled: true
+    max_per_domain: 20
+    promotion_threshold: 3
+    ttl_docs: 50
+  ```
+
+  Audit dropped entities to `logs/dropped_entities.jsonl` (per-doc JSON).
+  Iterate with `scripts/bench_drift.py` (baseline gate) and
+  `scripts/validate_dynamic_labels.py` (A/B/C recall harness).
