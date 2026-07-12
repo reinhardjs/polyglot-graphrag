@@ -648,6 +648,10 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
             if mode == "index_routing":
                 g = extract_graph_index_routing(doc_id, text, domain=domain)
                 extraction_method = "index_routing"
+            elif mode == "hybrid":
+                from hybrid_extraction import extract_hybrid
+                g = extract_hybrid(doc_id, text, domain=profile)
+                extraction_method = "hybrid"
             else:
                 g = extract_graph_llm(doc_id, text, chunk_size=chunk_size,
                                       profile=profile)

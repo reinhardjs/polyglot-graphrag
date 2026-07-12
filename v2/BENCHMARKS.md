@@ -20,6 +20,60 @@
 | **ASSOCIATED_WITH fallback** | N/A | 1 of 9 edges | acceptable |
 | **Extraction latency** | **1.2s** | 11.8s | Qwen 10× faster |
 | **Total ingest (extract+embed+write)** | ~fast | **13.3s** | Qwen |
+
+## 1.1 Hybrid Mode (WS1 — GLiNER + E2B, NEW)
+
+| Metric | Value |
+|--------|-------|
+| **Entities detected** | 13 (GLiNER) |
+| **Edges written** | **5** (clean, deduped) |
+| **Relationship types** | **5 of 6** (AUTHORED, FIXES, REFERENCES, DEPENDS_ON, REVIEWED) |
+| **Edge precision (vs gold)** | **100%** (5/5 correct) |
+| **Latency** | **10.7–15.2s/doc** (E2B dominates) |
+| **ASSOCIATED_WITH fallbacks** | **0** (entity-aware prompt eliminates) |
+
+### Gold match (hybrid)
+
+```
+Document says:              Hybrid extracted:
+PR-482 authored by bob    →  ✅ bob AUTHORED PR-482
+PR-482 fixes BUG-204      →  ✅ PR-482 FIXES BUG-204
+ADR-014 references auth    →  ✅ ADR-014 REFERENCES auth-service
+checkout-publisher dep.  →  ✅ checkout-publisher DEPENDS_ON auth-service
+  on auth-service
+alice reviewed PR-482     →  ✅ alice REVIEWED PR-482
+
+Result: 5/5 correct (100% precision). Zero fallbacks.
+```
+
+### Key fix: E2B `<|channel>thought` leakage
+
+E2B ignores `--reasoning-format none` and emits a `<|channel>thought`
+reasoning block BEFORE the JSON. The parser was grabbing the FIRST
+JSON array — which was an EXAMPLE inside the thinking block → 77 garbage
+edges (e.g. `alice ASSOCIATED_WITH "checkout thread pool exhaustion"`).
+
+**Fix in `hybrid_extraction._parse_and_validate()`:**
+```python
+# Strip E2B's <|channel|>thought reasoning block.
+# Real JSON output appears AFTER the closing <|channel>| tag.
+last_tag = cleaned.rfind("<|channel>|")
+if last_tag != -1:
+    cleaned = cleaned[last_tag + len("<|channel>|"):].strip()
+# Then parse the LAST JSON array/object (final answer)
+```
+
+### Comparison: all 3 extraction modes
+
+| Mode | Entities | Edges | Precision | Latency | Notes |
+|------|----------|-------|-----------|----------|-------|
+| `index_routing` (Qwen) | 9 (GLiNER) | ~5 | ~20% | 1.2s | Too inaccurate |
+| `llm` (E2B full-doc) | E2B decides | 9 | 89% | 11.8s | 1 fallback |
+| **`hybrid` (GLiNER+E2B)** | 13 (GLiNER) | **5** | **100%** | 10.7–15.2s | **BEST precision** |
+
+**Verdict:** `hybrid` is the production recommendation — GLiNER detects
+entities precisely, E2B only classifies relations between them → highest
+precision, zero fallbacks, zero hallucinations.
 | **VRAM** | **5.4 GB** | 5.8 GB | close |
 
 **Ruling:** E2B llm mode is primary. Qwen index-routing is too inaccurate for production use (20% precision = 80% wrong edges). The 10× latency cost is acceptable — extraction runs once per document at ingest time, not at query time.
