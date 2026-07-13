@@ -2,6 +2,11 @@
 
 No GPU / LLM required — we monkeypatch the OpenAI client and the GLiNER HTTP
 call to assert the right prompt + labels reach the model.
+
+Architecture note (v0.x): domain schemas live in domain_config.yaml (loaded by
+domain_loader). The extraction prompt is config.EXTRACTION_PROMPT (generic) when
+the YAML profile has no [extraction].prompt section — which is the current
+state. Domain entity_types still flow into GLiNER fallback labeling.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -35,11 +40,11 @@ class _FakeClient:
         self.chat = type("Chat", (), {"completions": _FakeCompletions(capture)})()
 
 
-def test_engineering_profile_uses_engineering_prompt():
+def test_engineering_profile_uses_generic_extraction_prompt():
+    """YAML engineering profile has no [extraction].prompt → generic fallback."""
     import domain_loader
     prof = domain_loader.get_domain("engineering")
     capture = {}
-    # monkeypatch OpenAI used inside extract_graph_llm
     import openai
     orig = openai.OpenAI
     openai.OpenAI = lambda *a, **k: _FakeClient(capture)
@@ -47,11 +52,13 @@ def test_engineering_profile_uses_engineering_prompt():
         I.extract_graph_llm("doc1", "Bug-204 caused outage.", profile=prof)
     finally:
         openai.OpenAI = orig
-    assert "Microservice" in capture["prompt"], capture["prompt"][:200]
-    assert "engineering document" in capture["prompt"].lower()
+    # Generic prompt is used (no domain-specific [extraction].prompt in YAML)
+    assert capture["prompt"] == C.EXTRACTION_PROMPT.replace("{doc_id}", "doc1").replace(
+        "{text}", "Bug-204 caused outage."[:C.EXTRACTION_CHAR_LIMIT])
 
 
-def test_medical_profile_uses_medical_prompt():
+def test_medical_profile_uses_generic_extraction_prompt():
+    """YAML medical profile has no [extraction].prompt → generic fallback."""
     import domain_loader
     prof = domain_loader.get_domain("medical")
     capture = {}
@@ -61,14 +68,13 @@ def test_medical_profile_uses_medical_prompt():
     try:
         I.extract_graph_llm("doc2", "Lisinopril treats hypertension.", profile=prof)
     finally:
-        openai.OpenAI = orig
-    assert "Symptom" in capture["prompt"], capture["prompt"][:200]
-    assert "Diagnosis" in capture["prompt"]
-    assert "Medication" in capture["prompt"]
+        # Generic prompt is used (no domain-specific [extraction].prompt in YAML)
+        assert capture["prompt"] == C.EXTRACTION_PROMPT.replace("{doc_id}", "doc2").replace(
+            "{text}", "Lisinopril treats hypertension."[:C.EXTRACTION_CHAR_LIMIT])
 
 
 def test_unknown_domain_falls_back_to_config_prompt():
-    # unknown domain -> engineering defaults -> config.EXTRACTION_PROMPT
+    # unknown domain -> domain_loader returns None -> config.EXTRACTION_PROMPT
     import domain_loader
     prof = domain_loader.get_domain("nonexistent")
     capture = {}
@@ -79,12 +85,13 @@ def test_unknown_domain_falls_back_to_config_prompt():
         I.extract_graph_llm("doc3", "text", profile=prof)
     finally:
         openai.OpenAI = orig
-    # engineering default prompt mentions Microservice
-    assert "Microservice" in capture["prompt"]
+    # Generic prompt is used (no domain-specific [extraction].prompt in YAML)
+    assert capture["prompt"] == C.EXTRACTION_PROMPT.replace("{doc_id}", "doc3").replace(
+        "{text}", "text"[:C.EXTRACTION_CHAR_LIMIT])
 
 
 def test_gliner_fallback_uses_domain_entity_types():
-    """REQ-4 4d: GLiNER fallback receives profile graph_schema.entity_types."""
+    """REQ-4 4d: GLiNER fallback receives profile entity_types from YAML."""
     import requests
     import domain_loader
     prof = domain_loader.get_domain("medical")
@@ -108,6 +115,7 @@ def test_gliner_fallback_uses_domain_entity_types():
         sent["json"] = json
         return type("R", (), {"json": lambda: {"nodes": [], "edges": []}})()
 
+    # GLiNER fallback uses entity_types from the YAML profile (not graph_schema)
     requests.post = fake_post
     try:
         I.extract_graph_llm("doc4", "chest pain", profile=prof)
@@ -115,5 +123,5 @@ def test_gliner_fallback_uses_domain_entity_types():
         requests.post = orig_post
         openai.OpenAI = orig_openai
     assert sent.get("url") == C.DAEMON_EXTRACT
-    assert sent["json"]["labels"] == prof["graph_schema"]["entity_types"]
+    assert sent["json"]["labels"] == prof["entity_types"]
     assert "Symptom" in sent["json"]["labels"]

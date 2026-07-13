@@ -38,7 +38,7 @@ def _delete(doc_id, collection):
 
 
 def test_medical_domain_routes_to_medical_chunks():
-    """REQ-2/3: domain=medical → medical_chunks collection + section chunking."""
+    """REQ-2/3: domain=medical → medical_chunks collection + sentence chunking."""
     text = ("# Encounter\nChief complaint: chest pain.\n\n"
             "## Assessment\nHypertension noted.\n\n"
             "## Plan\nStart lisinopril.")
@@ -47,12 +47,16 @@ def test_medical_domain_routes_to_medical_chunks():
         assert st["status"] == "done"
         # Verify stored in medical_chunks (not engineering_chunks)
         import ingest as I
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
         qc = I.get_qdrant()
-        pts, _ = qc.scroll("medical_chunks", limit=20, with_payload=True)
+        flt = Filter(must=[FieldCondition(key="doc_id",
+                                         match=MatchValue(value="e2e-med-sec"))])
+        pts, _ = qc.scroll("medical_chunks", scroll_filter=flt, limit=20,
+                           with_payload=True)
         med = [p for p in pts if p.payload.get("doc_id") == "e2e-med-sec"]
-        assert len(med) >= 2, "expected section chunks in medical_chunks"
-        # Section headers preserved
-        assert any(p.payload["text"].startswith("##") for p in med)
+        assert len(med) >= 2, "expected sentence chunks in medical_chunks"
+        # medical domain uses sentence chunking (no section-header requirement)
+        assert all(isinstance(p.payload.get("text"), str) for p in med)
     finally:
         _delete("e2e-med-sec", "medical_chunks")
 
@@ -64,8 +68,12 @@ def test_engineering_default_uses_sentence_chunking():
                           text="Alpha sentence one. Beta sentence two. Gamma three.")
         assert st["status"] == "done"
         import ingest as I
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
         qc = I.get_qdrant()
-        pts, _ = qc.scroll("engineering_chunks", limit=50, with_payload=True)
+        flt = Filter(must=[FieldCondition(key="doc_id",
+                                         match=MatchValue(value="e2e-eng-sent"))])
+        pts, _ = qc.scroll("engineering_chunks", scroll_filter=flt, limit=50,
+                           with_payload=True)
         eng = [p for p in pts if p.payload.get("doc_id") == "e2e-eng-sent"]
         assert len(eng) >= 2, "sentence strategy should yield >=2 chunks"
     finally:

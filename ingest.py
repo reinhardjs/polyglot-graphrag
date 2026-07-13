@@ -119,7 +119,7 @@ def write_vectors(doc_id: str, chunks: list, meta: dict, checksum: str = "",
     return len(chunks)
 
 
-def validate_metadata(profile: dict, metadata: dict) -> tuple[dict, list]:
+def validate_metadata(profile: dict, metadata: dict, domain: str = None) -> tuple[dict, list]:
     """Validate caller-supplied metadata against a domain profile schema.
 
     Returns (accepted, warnings).
@@ -134,13 +134,14 @@ def validate_metadata(profile: dict, metadata: dict) -> tuple[dict, list]:
     warnings = []
     if not profile:
         return accepted, warnings
+    domain_name = profile.get("name") or domain or "unknown"
     allowed = set(profile.get("metadata_schema", {}).get("fields", []))
     if allowed:
         for k in metadata or {}:
             if k not in allowed:
                 warnings.append(
                     f"metadata field '{k}' not in profile schema for domain "
-                    f"'{profile['domain']['name']}'")
+                    f"'{domain_name}'")
     return accepted, warnings
 
 
@@ -547,8 +548,8 @@ def extract_graph_llm(doc_id: str, text: str, chunk_size: int = 512,
     print("[extract] falling back to GLiNER", flush=True)
     # GLiNER fallback: use domain entity labels when profile provides them.
     gliner_labels = None
-    if profile and profile.get("graph_schema", {}).get("entity_types"):
-        gliner_labels = profile["graph_schema"]["entity_types"]
+    if profile and profile.get("entity_types"):
+        gliner_labels = profile["entity_types"]
     gl_body = {"text": text}
     if gliner_labels:
         gl_body["labels"] = gliner_labels
@@ -596,11 +597,11 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
     meta = dict(meta or {"doc_type": "eng", "author": "unknown"})
     # Domain profile enriches meta (collection name + default doc_type).
     if profile:
-        meta.setdefault("doc_type", (profile["domain"].get("name") or "eng")[:3])
-        meta["domain"] = profile["domain"]["name"]
+        meta.setdefault("doc_type", (domain or "eng")[:3])
+        meta["domain"] = domain
     # REQ-7: validate caller metadata against profile.metadata_schema.fields.
     if profile and metadata:
-        accepted, warnings = validate_metadata(profile, metadata)
+        accepted, warnings = validate_metadata(profile, metadata, domain=domain)
         for w in warnings:
             print(f"[ingest] WARNING: {w}", flush=True)
         for k, v in accepted.items():
