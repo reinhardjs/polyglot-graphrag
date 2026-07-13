@@ -1,10 +1,52 @@
 # BENCHMARKS — polyglot-graphrag v3.0.8
 
-**Date:** 2026-07-12  
+**Date:** 2026-07-13 (corpus-scale run) · 2026-07-12 (micro-benchmarks)  
 **Hardware:** NVIDIA GeForce RTX 3060 12GB · Intel i5-11400F · 48GB RAM  
 **Test document (engineering):** `/tmp/prove_extraction.md` (648 chars, PR-482)  
 **Test document (journal):** arxiv 2401.18059 (RAPTOR, 77K chars, 19K tokens)  
 **Key:** All numbers measured live — no estimates, no simulations.
+
+---
+
+## 0. FULL CORPUS INGEST — production scale (measured 2026-07-13)
+
+End-to-end run of the whole cleaned engineering corpus through the
+`sliding_window` pipeline (GLiNER entities + Gemma-4-E2B QAT relations,
+`--reasoning off`), project-local `./data/test-docs`, via `run_sync_loop.sh`.
+
+| Metric | Value |
+|--------|-------|
+| **Documents ingested** | **283** (100% of cleaned corpus) |
+| **Corpus size on disk** | 161 MB |
+| **Entities in Neo4j** | **717** |
+| **Typed edges in Neo4j** | **795** |
+| **Vector chunks in Qdrant** | **82,237** (dim 1024, jina-v3) |
+| **Wall-clock (full run)** | ~43 min |
+| **Avg throughput** | ~9.0 s/doc |
+| **Extraction mode** | `sliding_window` (GLiNER + E2B QAT) |
+| **Domain** | engineering (single) |
+
+**Edge-type distribution (all 6 schema types populated):**
+
+| Relation | Count |
+|----------|-------|
+| DEPENDS_ON | 254 |
+| REFERENCES | 226 |
+| IMPACTS | 192 |
+| AUTHORED | 68 |
+| FIXES | 50 |
+| REVIEWED | 5 |
+
+**`/ask` end-to-end (verified on this corpus):** hybrid retrieval returns
+10 Qdrant + 3–11 graph hits per query; E4B (QAT, `--reasoning off`)
+synthesizes grounded answers with `[N]` citations. `source: llm` on cold
+queries, `source: cache` on repeats.
+
+Reliability fixes landed for this run: GLiNER made thread-safe (lock) and
+crash-tolerant (predict wrapped in try/except → empty instead of HTTP 500),
+`write_graph` persists on the success path for all extraction modes, and
+`.syncignore` excludes non-text noise (`.class/.jar/.jpeg/.java/.py/.txt`,
+`IMPORT_*.md`) + the sync bookkeeping files.
 
 ---
 
