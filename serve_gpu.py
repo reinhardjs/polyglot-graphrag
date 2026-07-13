@@ -677,7 +677,7 @@ def ingest_status(task_id: str):
         }
 
 
-@app.delete("/ingest/{doc_id}")
+@app.delete("/ingest/{doc_id:path}")
 def delete_ingest(doc_id: str, collection: str = C.COLL_CHUNKS):
     """Remove a document from Qdrant + Neo4j in one call.
 
