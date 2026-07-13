@@ -11,8 +11,12 @@ rag-env/
 venv/
 env/
 
+# Model weights (GGUF) — large, download separately
+models/
+
 # HuggingFace cache (large, ephemeral)
 hf_cache/
+.cache/
 
 # Runtime logs
 logs/

@@ -13,7 +13,7 @@ Stages:
   TOTAL      - embed -> (qdrant || neo4j) -> rerank -> synth
 """
 import os
-os.environ.setdefault("HF_HOME", "/mnt/data-970-plus/hf_cache")
+os.environ.setdefault("HF_HOME", os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache", "hf"))
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import time

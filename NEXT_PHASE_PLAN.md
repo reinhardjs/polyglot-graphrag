@@ -3,7 +3,7 @@
 **Status:** WS1-4 COMPLETE (2026-07-12). Next: Dynamic Label Injection.  
 **Author:** Hermes Agent · **Date:** 2026-07-12  
 **Handoff target:** hy3:free (OpenRouter) — self-contained, no parent context needed  
-**Repo:** `/mnt/data-970-plus/rag-system/`
+**Repo:** `<project-root>/`
 
 ---
 
@@ -192,8 +192,8 @@ elif mode == "hybrid":
 #### Step 4: Benchmark (same doc as baseline)
 
 ```bash
-cd /mnt/data-970-plus/rag-system
-/mnt/data-970-plus/rag-env/bin/python -c "
+cd <project-root>
+<project-root>/venv/bin/python -c "
 import ingest, time
 text=open('/tmp/prove_extraction.md').read()
 t0=time.time(); r=ingest.ingest_text(text,'hybrid-bench',domain='engineering',extract_graph=True)
@@ -268,11 +268,11 @@ Expected: Fastest generation, very long docs, ~8.5 GB VRAM. Stop GLiNER first.
 ```bash
 fuser -k 8082/tcp
 LD_LIBRARY_PATH=... llama-server \
-  -m /mnt/data-970-plus/models/gemma-4-E2B_q4_0-it.gguf \
+  -m <project-root>/models/gemma-4-E2B_q4_0-it.gguf \
   <OPTION_FLAGS> --host 0.0.0.0 --port 8082 2>/tmp/e2b-tune.log &
 sleep 15
 
-/mnt/data-970-plus/rag-env/bin/python -c "
+<project-root>/venv/bin/python -c "
 import ingest, time
 text=open('/tmp/benchmark_doc.txt').read()  # test with BOTH short (~648 chars) and long (~15K chars)
 t0=time.time()
@@ -552,8 +552,8 @@ In config.py:
 ```bash
 # Short doc (must equal current precision)
 text=$(cat /tmp/prove_extraction.md)
-cd /mnt/data-970-plus/rag-system
-/mnt/data-970-plus/rag-env/bin/python -c "
+cd <project-root>
+<project-root>/venv/bin/python -c "
 import ingest, time
 t0=time.time(); r=ingest.ingest_text(open('/tmp/prove_extraction.md').read(),'sw-short',domain='engineering',extract_graph=True)
 print(f'short: {r[\"extraction_method\"]} entities={r[\"entities\"]} time={time.time()-t0:.1f}s')
@@ -591,8 +591,8 @@ print(f'long: entities={r[\"entities\"]} time={time.time()-t0:.1f}s')
 ### Spacy Install
 
 ```bash
-/mnt/data-970-plus/rag-env/bin/pip install spacy
-/mnt/data-970-plus/rag-env/bin/python -m spacy download en_core_web_sm
+<project-root>/venv/bin/pip install spacy
+<project-root>/venv/bin/python -m spacy download en_core_web_sm
 ```
 
 ### WS3 Fixes Applied (2026-07-12, measured)
@@ -712,7 +712,7 @@ Phase 5 — Documentation
 - **Long test doc:** create at `/tmp/long_test_doc.md` (~15K chars, e.g. repeated PR descriptions).
 - **Neo4j:** `neo4j / ragpassword123` at `bolt://localhost:7687`
 - **Qdrant:** `localhost:6333`
-- **Python venv:** `/mnt/data-970-plus/rag-env/bin/python`
+- **Python venv:** `<project-root>/venv/bin/python`
 - **llama-server:** `/home/reinhard/.lmstudio/extensions/backends/llama.cpp-linux-x86_64-nvidia-cuda-avx2-2.23.1/llama-server`
 - **LD_LIBRARY_PATH:** As above
 - **Test suite:** 18 tests in `test_index_router.py` must pass.

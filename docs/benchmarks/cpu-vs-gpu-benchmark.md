@@ -16,7 +16,7 @@ curl -s http://127.0.0.1:8000/health  # wait for ready
 CPU daemon (`serve_cpu.py`) — models lazy-loaded on first use in fp32, forced CPU:
 ```
 sudo systemctl stop rag-gpu-daemon
-CUDA_VISIBLE_DEVICES="" /mnt/data-970-plus/rag-env/bin/python serve_cpu.py &
+CUDA_VISIBLE_DEVICES="" <project-root>/venv/bin/python serve_cpu.py &
 curl -s http://127.0.0.1:8000/health  # wait for ready
 ```
 

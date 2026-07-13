@@ -22,9 +22,14 @@ server-side (embed → Qdrant||Neo4j → rerank → E4B synthesis) in ONE HTTP c
 import os
 
 # ── Paths ──────────────────────────────────────────────────────────────────
-# All heavy artifacts live on the 458 GB NVMe.
+# All runtime paths are anchored to the project root (this file's directory) so
+# the project is portable and does not depend on a machine-specific absolute prefix.
+# Override via environment variables if needed.
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
-HF_HOME    = "/mnt/data-970-plus/hf_cache"
+# Model directory: place GGUF files here (./models) or set MODELS_DIR.
+MODELS_DIR = os.environ.get("MODELS_DIR", os.path.join(BASE_DIR, "models"))
+# HuggingFace cache: local to the project so it travels with the repo layout.
+HF_HOME    = os.environ.get("HF_HOME", os.path.join(BASE_DIR, ".cache", "hf"))
 DATA_DIR   = os.path.join(BASE_DIR, "sample_data")
 
 # ── Databases (Docker) ──────────────────────────────────────────────────────

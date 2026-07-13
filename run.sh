@@ -14,11 +14,15 @@
 #   bash run.sh health        check all services
 #   bash run.sh stop          stop daemon + LLMs
 set -e
-cd "$(dirname "$0")"
-ENV=/mnt/data-970-plus/rag-env
-export HF_HOME=/mnt/data-970-plus/hf_cache
+# Anchor all paths to the project root (this script's directory) so the project
+# is portable and does not depend on a machine-specific prefix (/mnt/data-970-plus).
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT"
+ENV="$ROOT/venv"
+export HF_HOME="${HF_HOME:-$ROOT/.cache/hf}"
 PY="$ENV/bin/python"
-DAEMON_PID=/tmp/rag_gpu_daemon.pid
+DAEMON_PID="$ROOT/.run/rag_gpu_daemon.pid"
+mkdir -p "$ROOT/.run" "$ROOT/logs"
 
 start_llms() {
   echo "Starting GPU LLMs via systemd..."
@@ -42,7 +46,7 @@ start_daemon() {
     return
   fi
   echo "Starting GPU daemon (Jina/MiniLM/BGE on GPU, GLiNER lazy)..."
-  nohup "$PY" serve_gpu.py > /mnt/data-970-plus/rag-system/logs/daemon_gpu.log 2>&1 &
+  nohup "$PY" serve_gpu.py > "$ROOT/logs/daemon_gpu.log" 2>&1 &
   echo $! > "$DAEMON_PID"
   for i in $(seq 1 200); do
     curl -s --max-time 2 http://127.0.0.1:8000/health >/dev/null 2>&1 && { echo "GPU daemon ready (${i}s)"; return; }

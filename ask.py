@@ -13,7 +13,8 @@ Flow:
   4. Synthesize with Gemma 4 E4B (streamed), context capped to MAX_TOKENS_CONTEXT
 """
 import os
-os.environ["HF_HOME"] = "/mnt/data-970-plus/hf_cache"
+os.environ["HF_HOME"] = os.environ.get(
+    "HF_HOME", os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache", "hf"))
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 

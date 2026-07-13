@@ -40,9 +40,16 @@ Supported domains: `engineering` (default), `journal`, `legal`, `medical`,
 
 ## Prerequisites
 
-- Python 3.11+ · RTX 3060 12GB (or equivalent CUDA GPU) · Linux
-- [llama.cpp](https://github.com/ggml-org/llama.cpp) (for E2B extraction model)
-- Neo4j 5.x · Qdrant 1.10+
+- **NVIDIA GPU** (RTX 3060 12 GB tested). ~8 GB VRAM used by default; E4B
+  synthesis adds ~3 GB. See [RUN.md → Requirements](RUN.md#1-requirements-read-before-you-start).
+- **Docker + docker compose** (runs Neo4j + Qdrant — the only stateful deps).
+- **Python 3.11** venv for the FastAPI daemon + ingest scripts.
+- **Two GGUF model files you download yourself** (not in repo): Gemma 4 E2B
+  (extraction) + Gemma 4 E4B (optional synthesis). See [RUN.md §1](RUN.md#1-requirements-read-before-you-start).
+
+> **New here?** Read [RUN.md](RUN.md) first — it explains Gemma/E2B/llama.cpp in
+> plain terms and gives the all-in-one startup. For how to evolve the data model
+> without wiping Neo4j/Qdrant, read [MIGRATION.md](MIGRATION.md).
 
 ### Setup
 
@@ -52,42 +59,57 @@ cd polyglot-graphrag
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# Start supporting services
-sudo systemctl start neo4j qdrant
+# Start supporting services (Neo4j :7687/:7474, Qdrant :6333) via Docker
+docker compose up -d
 ```
 
-## Quick Start
+> **Full all-in-one walkthrough** (model download, systemd units, data flow,
+> limitations) is in **[RUN.md](RUN.md)**. The short version:
 
 ```bash
-# Start GPU daemon
-sudo systemctl start rag-gpu-daemon
+# 1) Start GPU LLMs (Gemma E2B :8082, E4B :8084) + FastAPI daemon (:8000)
+bash run.sh serve
 
-# Start E2B extraction model (Option B flags)
-LD_LIBRARY_PATH=.../llama.cpp-linux-x86_64-nvidia-cuda-avx2-2.23.1 \
-  /home/reinhard/.lmstudio/.../llama-server \
-  -m /mnt/data-970-plus/models/gemma-4-E2B_q4_0-it.gguf \
-  --host 0.0.0.0 --port 8082 --ctx-size 8192 --cache-type-k f16 \
-  --n-gpu-layers 99 --parallel 1 --cont-batching &
+# 2) Ingest bundled sample docs (engineering domain)
+bash run.sh ingest sample_data
 
-# Ingest sample engineering docs
-cd /mnt/data-970-plus/rag-system
-/mnt/data-970-plus/rag-env/bin/python -c "
-import ingest, config as C
-C.EXTRACTION_MODE='hybrid'
-text=open('sample_data/pr-482-checkout-events.md').read()
-r=ingest.ingest_text(text,'pr-482',domain='engineering',extract_graph=True)
-print('entities:',r['entities'])
-"
-
-# Query via API
-curl -s -X POST http://127.0.0.1:8000/ask \
-  -H "Content-Type: application/json" \
-  -d '{"query":"who reported BUG-204?","synthesize":false}'
-
-# Query via Hermes (auto-invokes rag_query tool)
-hermes
-> who authored PR-482?
+# 3) Ask (retrieval + synthesis — needs E4B; use synthesize:false if E4B down)
+bash run.sh ask "who reported BUG-204?"
 ```
+
+Or the raw systemd path:
+
+```bash
+sudo systemctl start gemma-4-e2b.service      # extraction LLM (:8082)
+sudo systemctl start gemma-4-e4b.service      # synthesis LLM (:8084, optional)
+sudo systemctl start rag-gpu-daemon           # pipeline daemon (:8000)
+```
+
+---
+
+## Data Flow (how ingest & ask work)
+
+**Ingest** — `POST /ingest` (async, poll `/ingest/status/{task_id}`):
+
+```
+text → chunk (per-domain strategy)
+     → embed (Jina v3, GPU) ───────────────► Qdrant  <domain>_chunks  (vectors)
+     → extract graph (Gemma E2B :8082) ───► Neo4j   :Entity nodes + edges
+           (entity name embedded + vector-matched ≥0.88 → merge, not duplicate)
+```
+
+**Ask** — `POST /ask`:
+
+```
+query → embed (Jina) → Qdrant (top-K vectors)  ┐
+                     → Neo4j (entity subgraph)  ├─► BGE rerank ─► (Gemma E4B :8084) answer
+                                                ┘   synth:true  (synthesize:false → contexts only)
+```
+
+Re-ingesting the same `doc_id` **merges** into the existing graph/vectors — your
+data is never reset by normal operation. See [MIGRATION.md](MIGRATION.md) for the
+full forward-compatibility contract (what's safe vs. what requires a flagged
+breaking-change migration).
 
 ---
 
@@ -245,10 +267,13 @@ hermes
 
 | Document | Covers |
 |----------|--------|
+| `RUN.md` | **Start here** — all-in-one run guide, Gemma/E2B explained, requirements, limits |
+| `MIGRATION.md` | Forward-compat contract: enhance without resetting Neo4j/Qdrant |
 | `ARCHITECTURE.md` | Full architecture, extraction modes, design decisions |
 | `BENCHMARKS.md` | All benchmarks (WS1-4, journal, bugfix impact) |
 | `NEXT_PHASE_PLAN.md` | Completed work + dynamic-label roadmap |
 | `MODEL_SWITCHING.md` | How to swap any model component |
+| `benchmark_report.md` | Lighter E2B (mobile QAT) evaluation — verdict: not a replacement |
 | `plans/dynamic-label-injection.md` | Plan for fixing GLiNER entity drift |
 
 ---

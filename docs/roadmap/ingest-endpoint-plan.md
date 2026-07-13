@@ -335,7 +335,7 @@ done
 ### File-watcher cron script
 
 A Hermes cron job or a simple bash script that:
-1. Watches `/mnt/data-970-plus/rag-system/sample_data/` (or a configurable dir)
+1. Watches `<project-root>/sample_data/` (or a configurable dir)
 2. On file change → compute checksum → compare with stored → POST /ingest if changed
 3. Runs every 5 minutes or on inotify trigger
 

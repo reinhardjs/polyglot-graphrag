@@ -9,7 +9,7 @@ rate, label churn, and latency delta.
                          exercises the dynamic code path with empty state).
 
 Usage:
-  /mnt/data-970-plus/rag-env/bin/python scripts/validate_dynamic_labels.py \
+  <project-root>/venv/bin/python scripts/validate_dynamic_labels.py \
       --domain journal --docs /tmp/arxiv_2401.18059.txt --repeat 3
 
 Exit code 0 if acceptance criteria met (recall improvement >= 15% OR no
