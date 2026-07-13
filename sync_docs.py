@@ -101,6 +101,9 @@ _DOMAIN_FOLDER_RULES = [
     ("journal/", "journal"),
     ("papers/", "journal"),
     ("legal/", "legal"),
+    ("medical/", "medical"),
+    ("accounting/", "accounting"),
+    ("hospitality/", "hospitality"),
 ]
 _DEFAULT_DOMAIN = "engineering"
 
