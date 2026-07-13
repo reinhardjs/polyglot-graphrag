@@ -24,20 +24,41 @@ PY="$ENV/bin/python"
 DAEMON_PID="$ROOT/.run/rag_gpu_daemon.pid"
 mkdir -p "$ROOT/.run" "$ROOT/logs"
 
-start_llms() {
-  echo "Starting GPU LLMs via systemd..."
-  # Only start if not already running (idempotent)
-  curl -s --max-time 2 "http://localhost:8082/v1/models" >/dev/null 2>&1 || \
-    sudo systemctl start gemma-4-e2b.service
-  curl -s --max-time 2 "http://localhost:8084/v1/models" >/dev/null 2>&1 || \
-    sudo systemctl start gemma-4-e4b.service
-  for p in 8082 8084; do
-    for i in $(seq 1 60); do
-      curl -s --max-time 2 "http://localhost:$p/v1/models" >/dev/null 2>&1 && break
-      sleep 1
-    done
-    echo "  :$p ready"
+# Model directory: GGUF files go here (default <root>/models). Override with
+# MODELS_DIR if your weights live elsewhere. This is the single source of truth
+# for model paths — no machine-specific absolute prefixes.
+MODELS_DIR="${MODELS_DIR:-$ROOT/models}"
+LLAMA_BIN="${LLAMA_BIN:-/home/reinhard/.lmstudio/extensions/backends/llama.cpp-linux-x86_64-nvidia-cuda-avx2-2.23.1/llama-server}"
+
+e2b_model="${E2B_MODEL:-$MODELS_DIR/gemma-4-E2B_q4_0-it.gguf}"
+e4b_model="${E4B_MODEL:-$MODELS_DIR/gemma-4-E4B-it-QAT-Q4_0.gguf}"
+
+start_llm() {
+  # $1 = port, $2 = model path, $3 = log file
+  local port="$1" model="$2" log="$3"
+  if curl -s --max-time 2 "http://localhost:$port/v1/models" >/dev/null 2>&1; then
+    echo "  :$port already up"
+    return
+  fi
+  if [ ! -f "$model" ]; then
+    echo "  :$port SKIP — model not found: $model" >&2
+    echo "       set E2B_MODEL / E4B_MODEL or place the GGUF in $MODELS_DIR" >&2
+    return
+  fi
+  echo "  starting llama-server on :$port with $(basename "$model")"
+  nohup "$LLAMA_BIN" --model "$model" --host 127.0.0.1 --port "$port" \
+    --gpu-layers 999 --ctx-size 8192 > "$log" 2>&1 &
+  for i in $(seq 1 90); do
+    curl -s --max-time 2 "http://localhost:$port/v1/models" >/dev/null 2>&1 && { echo "  :$port ready (${i}s)"; return; }
+    sleep 1
   done
+  echo "  :$port FAILED — see $log" >&2
+}
+
+start_llms() {
+  echo "Starting GPU LLMs (extraction E2B :8082, synthesis E4B :8084)..."
+  start_llm 8082 "$e2b_model" "$ROOT/logs/llm_e2b.log"
+  start_llm 8084 "$e4b_model" "$ROOT/logs/llm_e4b.log"
 }
 
 start_daemon() {
@@ -85,7 +106,9 @@ case "$1" in
   retrieve) shift; cmd_retrieve "$@" ;;
   health)  cmd_health ;;
   stop)    [ -f "$DAEMON_PID" ] && kill "$(cat "$DAEMON_PID")" 2>/dev/null && rm -f "$DAEMON_PID"
-           sudo systemctl stop gemma-4-e2b.service gemma-4-e4b.service
+           # Stop llama-server processes we started (extraction E2B / synthesis E4B)
+           pkill -f "llama-server.*--port 8082" 2>/dev/null || true
+           pkill -f "llama-server.*--port 8084" 2>/dev/null || true
            echo "Stopped daemon + LLMs" ;;
   *)       echo "Usage: bash run.sh {llms|serve|ingest [dir]|ask \"query\"|retrieve \"query\"|health|stop}" ;;
 esac
