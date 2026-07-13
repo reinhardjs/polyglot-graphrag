@@ -669,3 +669,13 @@ are re-extracted so the previously-dropped edges are captured.
 adds 1 E2B classification call (+ optionally 1 re-extraction call). When no
 drops, the cost is zero (early return). Default `enabled: false` — opt-in per
 domain by setting `llm_fallback.enabled: true` in `domain_config.yaml`.
+
+### Bug fixed during continued verification (post-v3.1.2)
+`sliding_window._parse_and_validate` wrapper did NOT forward `domain_name`
+to the underlying `hybrid_extraction._parse_and_validate`. This silently
+broke drop-recording (and therefore Strategy 3 + dynamic-label promotion) in
+the **sliding-window** path — drops were never recorded because the provider
+lookup fell back to the wrong/None domain. Fixed by adding `domain_name` to
+the wrapper signature and forwarding it. Verified: with the fix, both `hybrid`
+and `sliding_window` ingest paths recover typed nodes (e.g. `gpt-4`→`Framework`,
+`raptor`→`Framework`, `quality benchmark`→`Metric`) and land them in Neo4j.

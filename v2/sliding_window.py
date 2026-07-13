@@ -186,9 +186,11 @@ def _call_e2b(system_prompt: str, user_prompt: str, timeout: int = 120) -> str:
 
 
 def _parse_and_validate(content: str, entities: list, valid_types: list,
-                        doc_id: str = None, domain: dict = None) -> list:
+                        doc_id: str = None, domain: dict = None,
+                        domain_name: str = None) -> list:
     from hybrid_extraction import _parse_and_validate as _p
-    return _p(content, entities, valid_types, doc_id=doc_id, domain=domain)
+    return _p(content, entities, valid_types, doc_id=doc_id, domain=domain,
+              domain_name=domain_name)
 
 
 # ---------------------------------------------------------------------------
