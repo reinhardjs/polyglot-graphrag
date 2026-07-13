@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![release-please](https://img.shields.io/badge/version-0.1.0--beta.1-orange)](.release-please-manifest.json)
+[![release-please](https://img.shields.io/badge/version-1.0.0-green)](.release-please-manifest.json)
 
 Production-grade, 100% local GraphRAG with domain-agnostic extraction.
 All models on GPU (RTX 3060, 12 GB). Python 3.11.
@@ -291,21 +291,22 @@ hermes
 
 ## Version
 
-**v0.1.0-beta.1** — current development (beta). The earlier v3.1.x line
-(neuro-symbolic pipeline) has been **reset to 0.x.x** to signal the
-beginning of a structured release process. All future releases are
-beta pre-releases toward a final **v1.0.0** stable.
+**v1.0.0** — first stable release (2026-07-13). The earlier v3.1.x line
+(neuro-symbolic pipeline) was **reset to 0.x.x** to begin a structured
+release process; **v1.0.0** is the first stable milestone.
 
-- GLiNER+E2B hybrid extraction (100% precision, engineering domain)
-- Sliding window for arbitrary-length documents
-- Journal domain (academic literature extraction)
-- **Dynamic Label Injection** — `label_provider.py` auto-expands GLiNER's
-  vocabulary with entity names E2B discovers that GLiNER missed. Candidates are
-  promoted after `promotion_threshold` documents (default 3) and evicted via LRU
-  when `max_per_domain` (default 20) is exceeded. Zero-latency in-memory merge
-  on the hot path. State persists to `<project>/labels/{domain}_dynamic.json`
-  (override location via `LABEL_STATE_DIR` env var).
-  See `plans/dynamic-label-injection.md` for design + validation.
+Highlights of the path to v1.0.0:
+- GLiNER+E2B hybrid extraction (sliding_window), engineering domain
+- Sliding window for arbitrary-length documents (spaCy sentence tokenization)
+- E2B/E4B on **llama.cpp** (Gemma-4 QAT Q4_0, `--reasoning off`) for unified VRAM
+- GLiNER made thread-safe (lock) + crash-tolerant (graceful empty on KeyError)
+- `write_graph` persists on the success path for all extraction modes
+- Project-relative layout (`run.sh`/`run_sync_loop.sh`), corpus at `./data/test-docs`
+- `requirements.txt` added (torch pinned to cu121); `en_core_web_sm` spaCy model
+- Full corpus verified: 283 docs → 894 entities, 971 typed edges, 82,237 chunks
+- Dynamic Label Injection (`label_provider.py`) auto-expands GLiNER's vocab;
+  state persists to `<project>/labels/{domain}_dynamic.json`
+  (override via `LABEL_STATE_DIR`). See `plans/dynamic-label-injection.md`.
 
   Enable/configure in `domain_config.yaml`:
   ```yaml
@@ -349,10 +350,12 @@ every release is a **Git tag** cut from `main`.
 3. Merge the release PR → release-please creates the **Git tag** (e.g. `v0.2.0-beta.1`)
    and the **GitHub Release**. The eventual **stable** will be `v1.0.0`.
 
-**Current version** is seeded in `.release-please-manifest.json` (`"0.1.0-beta.1"`).
-The project is currently on a **beta channel** (`prerelease-type: beta`), so
-release-please tags pre-releases like `v0.1.0-beta.1`, `v0.1.0-beta.2`, … and
-the GitHub Release is marked **Pre-release**. To cut the first **stable**
+**Current version** is seeded in `.release-please-manifest.json` (`"1.0.0"`).
+The **first stable release `v1.0.0`** has been cut (2026-07-13): the manifest
+is set to `1.0.0` and tagged `v1.0.0`. Future patch/minor work resumes on the
+`1.0.x` line (or a `2.0.0` for breaking changes). To cut another **stable**
+instead of a beta, set `prerelease-type` to `""` in `release-please-config.json`
+or merge a `release-as: X.Y.Z` commit.
 release, remove `prerelease-type` from `release-please-config.json` (or set the
 next version via a `release-as:` commit) and merge the resulting release PR —
 the tag becomes `v1.0.0` (non-prerelease).

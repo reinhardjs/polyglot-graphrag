@@ -1,4 +1,4 @@
-# polyglot-graphrag v3.0.8 — Neuro-Symbolic GraphRAG
+# polyglot-graphrag v1.0.0 — Neuro-Symbolic GraphRAG
 
 **Status:** Production (2026-07-12)  
 **Extraction:** GLiNER + Gemma-4-E2B Q4_0 (hybrid / sliding_window)  

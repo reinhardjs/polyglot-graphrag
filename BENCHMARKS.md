@@ -1,4 +1,4 @@
-# BENCHMARKS — polyglot-graphrag v3.0.8
+# BENCHMARKS — polyglot-graphrag v1.0.0
 
 **Date:** 2026-07-13 (corpus-scale run) · 2026-07-12 (micro-benchmarks)  
 **Hardware:** NVIDIA GeForce RTX 3060 12GB · Intel i5-11400F · 48GB RAM  
@@ -18,10 +18,9 @@ End-to-end run of the whole cleaned engineering corpus through the
 |--------|-------|
 | **Documents ingested** | **283** (100% of cleaned corpus) |
 | **Corpus size on disk** | 161 MB |
-| **Entities in Neo4j** | **717** |
-| **Typed edges in Neo4j** | **795** |
+| **Entities in Neo4j** | **894** |
+| **Typed edges in Neo4j** | **971** |
 | **Vector chunks in Qdrant** | **82,237** (dim 1024, jina-v3) |
-| **Wall-clock (full run)** | ~43 min |
 | **Avg throughput** | ~9.0 s/doc |
 | **Extraction mode** | `sliding_window` (GLiNER + E2B QAT) |
 | **Domain** | engineering (single) |
@@ -30,17 +29,22 @@ End-to-end run of the whole cleaned engineering corpus through the
 
 | Relation | Count |
 |----------|-------|
-| DEPENDS_ON | 254 |
-| REFERENCES | 226 |
-| IMPACTS | 192 |
-| AUTHORED | 68 |
-| FIXES | 50 |
-| REVIEWED | 5 |
+| REFERENCES | 302 |
+| DEPENDS_ON | 293 |
+| IMPACTS | 202 |
+| FIXES | 83 |
+| AUTHORED | 82 |
+| REVIEWED | 9 |
 
-**`/ask` end-to-end (verified on this corpus):** hybrid retrieval returns
-10 Qdrant + 3–11 graph hits per query; E4B (QAT, `--reasoning off`)
-synthesizes grounded answers with `[N]` citations. `source: llm` on cold
-queries, `source: cache` on repeats.
+**Top entity types:** API 127, Framework 74, Bug 60, Database 59, Developer 58,
+Component 47, Metric 43.
+
+**`/ask` retrieval (verified, `synthesize:false`):** hybrid path returns
+10 Qdrant + 10–11 graph hits across diverse queries (incident root-cause,
+settlement process, runbook, PR authorship, architecture). Graph traversal
+correctly links incident entities (e.g. `Cassandra` → `ALLOW FILTERING` →
+`nodetool repair` → `INC-2026-01-30`). With `synthesize:true`, E4B (QAT,
+`--reasoning off`) writes grounded answers with `[N]` citations.
 
 Reliability fixes landed for this run: GLiNER made thread-safe (lock) and
 crash-tolerant (predict wrapped in try/except → empty instead of HTTP 500),
