@@ -189,10 +189,11 @@ GLINER_THRESHOLD = 0.4
 ENTITY_RESOLUTION_THRESHOLD = 0.88   # cosine similarity for entity merger
 ENTITY_VECTOR_INDEX = "entity_vector_idx"
 
-# ── Domain profiles (v2.6.0) ────────────────────────────────────────────────
-# Each domain has a TOML profile in v2/domains/ controlling chunking, prompts,
-# graph schema, metadata, and Neo4j entry strategy. Swap a profile to re-target
-# the whole pipeline at a new domain — no code changes.
+# ── Domain profiles (v3.1.x) ────────────────────────────────────────────────
+# Domain schemas now live in `domain_config.yaml` (YAML), consumed by
+# `domain_loader.py`. The legacy TOML `load_domain_profile()` below is retained
+# for backward-compat only. Swap a domain in `domain_config.yaml` to re-target
+# the pipeline — no code changes.
 import tomllib
 from functools import lru_cache
 

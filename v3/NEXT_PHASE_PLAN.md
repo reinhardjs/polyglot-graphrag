@@ -3,7 +3,7 @@
 **Status:** WS1-4 COMPLETE (2026-07-12). Next: Dynamic Label Injection.  
 **Author:** Hermes Agent · **Date:** 2026-07-12  
 **Handoff target:** hy3:free (OpenRouter) — self-contained, no parent context needed  
-**Repo:** `/mnt/data-970-plus/rag-system/v2/`
+**Repo:** `/mnt/data-970-plus/rag-system/v3/`
 
 ---
 
@@ -192,7 +192,7 @@ elif mode == "hybrid":
 #### Step 4: Benchmark (same doc as baseline)
 
 ```bash
-cd /mnt/data-970-plus/rag-system/v2
+cd /mnt/data-970-plus/rag-system/v3
 /mnt/data-970-plus/rag-env/bin/python -c "
 import ingest, time
 text=open('/tmp/prove_extraction.md').read()
@@ -552,7 +552,7 @@ In config.py:
 ```bash
 # Short doc (must equal current precision)
 text=$(cat /tmp/prove_extraction.md)
-cd /mnt/data-970-plus/rag-system/v2
+cd /mnt/data-970-plus/rag-system/v3
 /mnt/data-970-plus/rag-env/bin/python -c "
 import ingest, time
 t0=time.time(); r=ingest.ingest_text(open('/tmp/prove_extraction.md').read(),'sw-short',domain='engineering',extract_graph=True)

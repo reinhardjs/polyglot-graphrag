@@ -794,8 +794,9 @@ def list_collections():
 def list_profiles():
     """List all loaded domain profiles (name, collection, label, description).
 
-    v2.6.0 REQ-8 — surfaces the TOML profiles from v2/domains/ so callers can
-    discover available domains without reading files.
+    v3.x — surfaces the domain schemas from `domain_config.yaml` (loaded by
+    `domain_loader.py`) so callers can discover available domains without
+    reading files.
     """
     import config as cfg
     import glob as _glob

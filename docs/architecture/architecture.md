@@ -159,4 +159,4 @@ Cache hit (synthesize=true): <0.01s — 50× faster than cold.
 
 - ~~**No incremental ingest**~~ — DONE. `POST /ingest` (non-blocking, task_id + status polling) ships single-doc updates + optional `if_checksum` incremental guard + `DELETE /ingest/{doc_id}` (v2.5.0).
 - ~~**Single-domain only**~~ — DONE. Namespace collections (`engineering_chunks`, `medical_chunks`, …) + Neo4j `:Entity:<Domain>` labels give per-domain isolation and cross-domain queries via `collection: [...]` (v2.6.0 REQ-1/2).
-- ~~**Domain-agnostic gaps (11 hardcoded assumptions)**~~ — DONE. Domain profile system (`v2/domains/*.toml`) drives chunking (REQ-3), extraction prompt (REQ-4), synthesis prompt (REQ-5), Neo4j entry strategy (REQ-6), and metadata schema (REQ-7). See `docs/domains/README.md`.
+- ~~**Domain-agnostic gaps (11 hardcoded assumptions)**~~ — DONE. Domain profile system (`v3/domains/*.toml`) drives chunking (REQ-3), extraction prompt (REQ-4), synthesis prompt (REQ-5), Neo4j entry strategy (REQ-6), and metadata schema (REQ-7). See `docs/domains/README.md`.

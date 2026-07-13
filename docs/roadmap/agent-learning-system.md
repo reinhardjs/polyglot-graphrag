@@ -359,12 +359,12 @@ During `/ask`, the lessons + corrections search adds one extra Qdrant query
 
 | File | Action |
 |------|--------|
-| `v2/feedback.py` | New: feedback handling, learn ingestion, analytics queries |
-| `v2/serve_gpu.py` | Add `/feedback`, `/learn`, `/analytics` endpoints, modify `/ask` to include query_id, confidence, multi-source search |
-| `v2/config.py` | Add `COLL_QUERY_LOG`, `COLL_LESSONS`, `COLL_CORRECTIONS`, authority weights |
+| `v3/feedback.py` | New: feedback handling, learn ingestion, analytics queries |
+| `v3/serve_gpu.py` | Add `/feedback`, `/learn`, `/analytics` endpoints, modify `/ask` to include query_id, confidence, multi-source search |
+| `v3/config.py` | Add `COLL_QUERY_LOG`, `COLL_LESSONS`, `COLL_CORRECTIONS`, authority weights |
 | `docs/agent-learning-system.md` | This document |
 | `CHANGELOG.md` | v3.0.0 entry |
-| `v2/README.md` | New endpoints, updated architecture diagram |
+| `v3/README.md` | New endpoints, updated architecture diagram |
 
 ## Dependencies
 

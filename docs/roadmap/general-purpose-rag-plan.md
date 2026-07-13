@@ -40,7 +40,7 @@ Every one of these must be configurable for the system to work on ANY domain:
 Each domain gets a profile file that overrides ALL the hardcoded assumptions:
 
 ```
-v2/domains/
+v3/domains/
 ├── engineering.toml     # current defaults
 ├── medical.toml
 ├── legal.toml
@@ -340,7 +340,7 @@ NEO4J_ENTRY_STRATEGY = "hybrid"  # keyword | vector | hybrid
 ## Implementation Phases
 
 ### Phase 1 — Domain profile system (v2.5.0, ~2 hours)
-1. Create `v2/domains/` directory with `engineering.toml` (extracted from current config)
+1. Create `v3/domains/` directory with `engineering.toml` (extracted from current config)
 2. `load_domain_profile()` function in config.py
 3. Port existing constants to engineering.toml defaults
 4. Backward compatible — no API changes

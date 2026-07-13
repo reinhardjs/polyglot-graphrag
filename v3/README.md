@@ -47,7 +47,7 @@ LD_LIBRARY_PATH=.../llama.cpp-linux-x86_64-nvidia-cuda-avx2-2.23.1 \
   --n-gpu-layers 99 --parallel 1 --cont-batching &
 
 # Ingest sample engineering docs
-cd /mnt/data-970-plus/rag-system/v2
+cd /mnt/data-970-plus/rag-system/v3
 /mnt/data-970-plus/rag-env/bin/python -c "
 import ingest, config as C
 C.EXTRACTION_MODE='hybrid'
@@ -169,13 +169,11 @@ hermes
 
 ## Version
 
-**v3.1.0** — production. Key features:
+**v3.1.5** — current production. Key features:
 
 - GLiNER+E2B hybrid extraction (100% precision, engineering domain)
 - Sliding window for arbitrary-length documents
 - Journal domain (academic literature extraction)
-- 5 production bug fixes (Qdrant batch cap, sparse collision, label routing,
-  domain passthrough, collection isolation)
 - **Dynamic Label Injection** — `label_provider.py` auto-expands GLiNER's
   vocabulary with entity names E2B discovers that GLiNER missed. Candidates are
   promoted after `promotion_threshold` documents (default 3) and evicted via LRU
@@ -204,3 +202,17 @@ hermes
   (e.g. `Kubernetes`→`Component` rather than `type="Kubernetes"`). Recovered
   entities become typed graph nodes; `second_pass: true` re-extracts the
   dropped edges. Triggers only when drops occur (zero cost otherwise).
+
+### Changelog (v3.0 → v3.1.5)
+
+| Version | Date | Highlights |
+|---------|------|-----------|
+| v3.0.8 | 2026-07-12 | Neuro-symbolic base: GLiNER+E2B hybrid, sliding window, journal domain |
+| v3.1.0 | 2026-07-12 | Dynamic Label Injection (`label_provider.py`) — auto-expand GLiNER vocab |
+| v3.1.1 | 2026-07-12 | Dynamic-label promotion/eviction/LRU/TTL hardening |
+| v3.1.2 | 2026-07-13 | Strategy 3: LLM Fallback NER (semantic typing of dropped entities) |
+| v3.1.3 | 2026-07-13 | Fix: forward `domain_name` in `sliding_window._parse_and_validate` |
+| v3.1.4 | 2026-07-13 | Strategy 3 traceability: `:Discovered` label, audit `inferred_type`, provenance |
+| v3.1.5 | 2026-07-13 | Default dynamic-label state to `<project>/labels/` (was `~/.hermes/labels`) |
+
+> Pre-v3 history (v1/v2 eras) is archived in `../archive/legacy-v1/CHANGELOG_v1.md`.

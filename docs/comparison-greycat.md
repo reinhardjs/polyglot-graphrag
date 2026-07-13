@@ -60,7 +60,7 @@ where the comparison page oversimplifies.
    These are SOTA open-weight models you can audit, quantize, and run offline.
    GreyCat's built-in embeddings are not separately tunable per task.
 3. **Domain profiles.** Our entire v2.6.0 is built around
-   `v2/domains/*.toml` — chunking, extraction prompt, synthesis prompt, graph
+   `v3/domains/*.toml` — chunking, extraction prompt, synthesis prompt, graph
    schema, metadata, and entry strategy per domain, hot-swappable without code
    changes. GreyCat's "one query model" doesn't expose this level of
    per-domain behavioral configuration out of the box.

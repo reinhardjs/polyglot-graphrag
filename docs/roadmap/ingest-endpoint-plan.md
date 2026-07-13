@@ -1,6 +1,6 @@
 # Plan: `/ingest` Endpoint — Incremental Knowledge Base Updates
 
-**Status:** ✅ SHIPPED in v2.5.0 (see CHANGELOG.md [2.5.0] and v2/README.md for the live API). This file is the original design doc — kept for rationale.
+**Status:** ✅ SHIPPED in v2.5.0 (see CHANGELOG.md [2.5.0] and v3/README.md for the live API). This file is the original design doc — kept for rationale.
 **Target:** v2.5.0
 **Created:** 2026-07-10, updated 2026-07-11
 
@@ -263,9 +263,9 @@ The impact is ≤1 retrieval result being stale for <100ms during the write wind
 
 | File | Action |
 |------|--------|
-| `v2/ingest.py` | Extract `ingest_text()`, `delete_doc()`, `list_docs()` functions |
-| `v2/serve_gpu.py` | Add `IngestReq` model, `POST /ingest`, `DELETE /ingest/{id}`, `GET /ingest` |
-| `v2/run.sh` | Optionally add `ingest_via_api` helper or deprecate |
+| `v3/ingest.py` | Extract `ingest_text()`, `delete_doc()`, `list_docs()` functions |
+| `v3/serve_gpu.py` | Add `IngestReq` model, `POST /ingest`, `DELETE /ingest/{id}`, `GET /ingest` |
+| `v3/run.sh` | Optionally add `ingest_via_api` helper or deprecate |
 
 ## Dependencies
 
@@ -335,7 +335,7 @@ done
 ### File-watcher cron script
 
 A Hermes cron job or a simple bash script that:
-1. Watches `/mnt/data-970-plus/rag-system/v2/sample_data/` (or a configurable dir)
+1. Watches `/mnt/data-970-plus/rag-system/v3/sample_data/` (or a configurable dir)
 2. On file change → compute checksum → compare with stored → POST /ingest if changed
 3. Runs every 5 minutes or on inotify trigger
 

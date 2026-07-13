@@ -1,6 +1,12 @@
-# GraphRAG v2 — Documentation Index
+# Polyglot GraphRAG — Documentation Index
 
-**Last updated:** 2026-07-11
+> Design & planning docs. The **live codebase is `../v3/`** (v3.1.x
+> neuro-symbolic line). These docs are historical design references — feature
+> versions noted (v2.5.0, v2.6.0, v2.7.0) describe the evolution that led to
+> the current `v3/` architecture. Directory paths in older docs may read `v2/`
+> but now map to `v3/`.
+
+**Last updated:** 2026-07-13 (restructured: `v2/` → `v3/`, legacy archived)
 
 ---
 

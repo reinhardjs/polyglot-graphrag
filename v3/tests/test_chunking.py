@@ -1,7 +1,7 @@
 """Unit tests for pluggable chunking strategies (v2.6.0 REQ-3).
 
 Pure, no GPU / daemon needed. Run:
-    cd /mnt/data-970-plus/rag-system/v2
+    cd /mnt/data-970-plus/rag-system/v3
     /mnt/data-970-plus/rag-env/bin/python -m pytest tests/test_chunking.py -q
 """
 import sys, os

@@ -166,11 +166,11 @@ cd /mnt/data-970-plus/rag-system
   --host 0.0.0.0 --port 8084 --n-gpu-layers -1
 
 # Terminal 3: GPU daemon
-cd /mnt/data-970-plus/rag-system/v2
+cd /mnt/data-970-plus/rag-system/v3
 /mnt/data-970-plus/rag-env/bin/python serve_gpu.py
 
 # Terminal 4: (optional) CPU daemon fallback
-cd /mnt/data-970-plus/rag-system/v2
+cd /mnt/data-970-plus/rag-system/v3
 /mnt/data-970-plus/rag-env/bin/python serve_cpu.py
 ```
 
@@ -297,7 +297,7 @@ Service startup (cold, sequential):
 
 ## Phase 1 — Query Modulation (Symbolic Pre-Filtering)
 
-**File:** `v2/query_modulator.py`
+**File:** `v3/query_modulator.py`
 **Wired into:** `/ask` and `/embed_query` in both daemons.
 **Cost:** ~5ms per query (Neo4j alias lookup, cached after first call).
 
@@ -394,7 +394,7 @@ See [improvement items](#1-enrich-alias-data-phase-1-activation).
 
 ## Phase 2 — Subgraph Pruning (Context Window Protection)
 
-**File:** `v2/graph_prune.py`
+**File:** `v3/graph_prune.py`
 **Wired into:** `ask.neo4j_subgraph()`
 **Cost:** ~2ms for degree centrality on <100 nodes.
 
@@ -492,7 +492,7 @@ The entry node (the one matched to the query) gets score ∞ — never pruned.
 
 ## Phase 3 — CRAG (Corrective RAG + Adaptive Routing)
 
-**File:** `v2/crag_pipeline.py`
+**File:** `v3/crag_pipeline.py`
 **Wired into:** `/ask` with `crag: true` in both daemons.
 **Cost:** heuristic-only path ~0ms overhead. E4B router+rewrite adds ~1-2s.
 
@@ -606,8 +606,8 @@ CRAG extends the standard `/ask` response. These fields are ALWAYS present:
 
 ## Phase 4 — Evaluation Harness
 
-**File:** `v2/evaluate_pipeline.py`
-**Golden datasets:** `v2/sample_data/golden/{engineering,medical}.json`
+**File:** `v3/evaluate_pipeline.py`
+**Golden datasets:** `v3/sample_data/golden/{engineering,medical}.json`
 
 ### Flow
 

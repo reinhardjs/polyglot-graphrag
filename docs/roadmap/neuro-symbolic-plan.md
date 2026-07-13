@@ -8,7 +8,7 @@ This plan upgrades `polyglot-graphrag` from a vector+graph RAG into a
 **Neuro-Symbolic** system: symbolic pre-filtering and graph pruning guard the
 neural retrieval/synthesis steps, improving accuracy and protecting the context
 window. Every phase is **domain-agnostic** — behavior is driven by the existing
-`v2/domains/*.toml` profile system + the live Neo4j graph, never hardcoded
+`v3/domains/*.toml` profile system + the live Neo4j graph, never hardcoded
 terms.
 
 ## Design invariant (read before implementing)
@@ -27,7 +27,7 @@ Phase 1 was adapted to this real schema — see the schema notes in each phase.
 **Goal:** expand domain slang/abbreviations before the query is embedded, so
 Jina v3 grounds ambiguous terms correctly (e.g. `N/V` → `nausea`).
 
-**Deliverable:** `v2/query_modulator.py`
+**Deliverable:** `v3/query_modulator.py`
 - `build_alias_map(domain, driver)` — reads `:Entity` nodes that carry an
   `aliases` list (and name→type pairs) from Neo4j. Builds
   `{lower_alias: canonical_name}`. Longest alias wins on token overlap.
@@ -56,7 +56,7 @@ retrieval (collection level).
 **Goal:** prevent Neo4j "neighborhood explosion" from overflowing the LLM
 context window.
 
-**Deliverable:** `v2/graph_prune.py`
+**Deliverable:** `v3/graph_prune.py`
 - `rank_node_ids(entry_id, node_ids, edges, strategy, top_n)` — ranks
   neighbourhood nodes by centrality; entry node always kept first.
 - `prune_records(entry_id, records, edges, strategy, top_n)` — prunes node
@@ -84,7 +84,7 @@ first, central nodes beat isolated leaves, `none` disables pruning.
 **Goal:** route queries to save compute + evaluate context quality with a
 corrective fallback.
 
-**Deliverable:** `v2/crag_pipeline.py` — a dependency-free Python state machine:
+**Deliverable:** `v3/crag_pipeline.py` — a dependency-free Python state machine:
 1. **Router** (`route()`) — ID/short-factual → `graph`; analytical → `hybrid`.
    Optional E4B confirmation via `config.CRAG_USE_LLM_ROUTER`.
 2. **Evaluator** (`evaluate_context()`) — grades context CORRECT / AMBIGUOUS /
@@ -112,7 +112,7 @@ first pass.
 
 **Goal:** rigorous, domain-segmented accuracy measurement.
 
-**Deliverable:** `v2/evaluate_pipeline.py` — computes Faithfulness,
+**Deliverable:** `v3/evaluate_pipeline.py` — computes Faithfulness,
 AnswerRelevancy, ContextPrecision, ContextRecall over a golden JSON dataset.
 Two backends, auto-selected:
 - **ragas** — real ragas framework wired to the LOCAL E4B LLM + Jina embeddings
@@ -123,7 +123,7 @@ Two backends, auto-selected:
 `--live` fills answer+contexts by calling the running daemon `/ask` (supports
 `--domain` and `--crag`).
 
-**Golden templates:** `v2/sample_data/golden/{engineering,medical}.json`.
+**Golden templates:** `v3/sample_data/golden/{engineering,medical}.json`.
 
 **Verified live:** engineering set → faithfulness 0.90, context_precision 1.0,
 answer_relevancy 0.75, context_recall 0.57 (local backend).
@@ -138,7 +138,7 @@ the ragas backend; otherwise the local backend runs with no extra deps.
 
 ## Test runner
 
-`v2/run_tests.sh` — one entry point for everything:
+`v3/run_tests.sh` — one entry point for everything:
 - `bash run_tests.sh unit` — fast, no daemon (51 tests)
 - `bash run_tests.sh e2e` — live daemon tests
 - `bash run_tests.sh eval` — Phase 4 eval smoke on golden datasets

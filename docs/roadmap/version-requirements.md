@@ -12,7 +12,7 @@
 > [!NOTE]
 > **v2.6.0 shipped 2026-07-11.** REQ-2.6.0-1 through REQ-2.6.0-8 implemented,
 > unit + e2e tested (33 pytest tests), and committed (`9afc35e` → `7b545bf`).
-> Domain profiles in `v2/domains/*.toml`; canonical schema in
+> Domain profiles in `v3/domains/*.toml`; canonical schema in
 > `docs/domains/README.md`. serve_cpu.py retains full endpoint parity.
 
 > [!IMPORTANT]
@@ -248,7 +248,7 @@ before extraction.
 | 6b | Update `docs/development.md` with single-doc ingest examples | 10 min |
 | 6c | Update `CHANGELOG.md` with v2.5.0 entries | 5 min |
 | 6d | Mark `docs/ingest-endpoint-plan.md` as implemented | 2 min |
-| 6e | Update `v2/README.md` with API reference | 10 min |
+| 6e | Update `v3/README.md` with API reference | 10 min |
 
 ---
 
@@ -271,7 +271,7 @@ before extraction.
 
 > [!NOTE]
 > **SHIPPED 2026-07-11.** All REQ-2.6.0-1 … REQ-2.6.0-8 are implemented and
-> tested. Profiles in `v2/domains/*.toml`; canonical schema + field reference in
+> tested. Profiles in `v3/domains/*.toml`; canonical schema + field reference in
 > `docs/domains/README.md`. Commit range `9afc35e` → `7b545bf`.
 
 **Goal:** Eliminate ALL domain-specific hardcoded assumptions. A `.toml` profile
@@ -343,7 +343,7 @@ max_k_hops = 2                             # traversal depth from entry node
 
 | Step | Description | Effort |
 |------|-------------|--------|
-| 1a | Create `v2/domains/` directory | 2 min |
+| 1a | Create `v3/domains/` directory | 2 min |
 | 1b | Define TOML schema with validation (all required fields) | 20 min |
 | 1c | Create `engineering.toml` — captures ALL current behavior as defaults | 25 min |
 | 1d | Create `medical.toml` — full medical schema (symptoms, diagnoses, medications) | 20 min |
@@ -547,7 +547,7 @@ carry `patient_id`, `encounter_date`. Legal docs carry `jurisdiction`, `court`.
 | 8b | Update `docs/development.md` with TOML profile creation guide | 15 min |
 | 8c | Update `docs/general-purpose-rag-plan.md` mark as implemented | 5 min |
 | 8d | Update `docs/multi-domain-plan.md` mark as implemented | 5 min |
-| 8e | Create `v2/domains/README.md` — how to create a new domain | 15 min |
+| 8e | Create `v3/domains/README.md` — how to create a new domain | 15 min |
 | 8f | Update `CHANGELOG.md` with v2.6.0 entries | 10 min |
 | 8g | Migration guide: old config → engineering.toml | 15 min |
 

@@ -28,44 +28,34 @@ $RAG_ENV/bin/pip install transformers==4.49.0
 
 ```
 rag-system/
-├── v1/                          # Original CPU-daemon architecture
-│   ├── ingest.py, ask.py, config.py, router.py, retrieve.py
-│   └── ...                      # (superseded, kept for reference)
-├── v2/                          # CURRENT baseline — all-GPU
-│   ├── config.py                # All constants + load_domain_profile()
+├── v3/                          # CURRENT baseline (v3.1.x neuro-symbolic, all-GPU)
+│   ├── config.py                # All constants + domain_config loader
 │   ├── serve_gpu.py             # Primary GPU daemon (:8000)
 │   ├── serve_cpu.py             # CPU fallback daemon
 │   ├── ingest.py                # Doc ingestion
 │   ├── ask.py                   # CLI client + shared library
-│   ├── chunking.py              # Pluggable chunkers (REQ-3)
-│   ├── prompts.py               # Shared synthesis-prompt builder (REQ-5)
+│   ├── chunking.py              # Pluggable chunkers
+│   ├── hybrid_extraction.py    # GLiNER+E2B hybrid extraction (primary)
+│   ├── sliding_window.py        # Long-doc sentence-chunk extraction
+│   ├── label_provider.py        # Dynamic-label injection (L3 persistence)
+│   ├── domain_config.yaml       # Domain schemas (YAML, not TOML)
+│   ├── prompts.py               # Shared synthesis-prompt builder
 │   ├── retrieve_json.py         # Headless retrieval bridge
 │   ├── bench_rag.py             # Latency benchmark
 │   ├── run.sh                   # Orchestrator
-│   ├── domains/                 # Domain profiles (*.toml) — see docs/domains/README.md
+│   ├── plans/                   # Architecture proposals
 │   ├── tests/                   # Unit + e2e tests (pytest)
 │   ├── README.md                # Project README
 │   └── sample_data/             # 5 engineering docs
-├── docs/
-│   ├── README.md                   # Docs index
-│   ├── architecture/               # architecture.md, full-architecture.md, hermes-integration.md
-│   ├── benchmarks/                 # cpu-vs-gpu-benchmark.md, full-benchmark-history.md
-│   ├── guides/                     # development.md (this file)
-│   └── roadmap/                    # version-requirements.md, multi-domain-plan.md,
-│                                   # ingest-endpoint-plan.md, general-purpose-rag-plan.md,
-│                                   # agent-learning-system.md
-├── v2/
-│   ├── MODEL_SWITCHING.md          # Ready-made config snippets for 5 model families
-│   └── ...
-├── logs/                        # Runtime logs (gitignored)
-├── CHANGELOG.md                 # Version history
+├── docs/                        # Design + planning docs (historical)
+├── archive/legacy-v1/           # Dead v1-era code + superseded docs
 └── docker-compose.yml           # Qdrant + Neo4j
 ```
 
 ## Running the dev stack
 
 ```bash
-cd /mnt/data-970-plus/rag-system/v2
+cd /mnt/data-970-plus/rag-system/v3
 
 # 1. Start DBs
 docker compose -f ../docker-compose.yml up -d
@@ -96,10 +86,10 @@ bash run.sh stop           # stop daemon + LLMs
 
 ## Testing
 
-The codebase ships a pytest suite under `v2/tests/`:
+The codebase ships a pytest suite under `v3/tests/`:
 
 ```bash
-cd /mnt/data-970-plus/rag-system/v2
+cd /mnt/data-970-plus/rag-system/v3
 
 # Unit tests (no daemon / GPU needed — pure logic)
 /mnt/data-970-plus/rag-env/bin/python -m pytest tests/test_chunking.py tests/test_prompts.py \
@@ -196,13 +186,13 @@ hermes chat --yolo -q "who reported BUG-204?"
 
 ## Making changes
 
-1. **Code**: edit files in `v2/`. The daemon auto-reloads Python modules on each request (imports are inside endpoint functions).
+1. **Code**: edit files in `v3/`. The daemon auto-reloads Python modules on each request (imports are inside endpoint functions).
 
 2. **Re-ingest after ingest.py changes**: `bash run.sh ingest sample_data` (delete-before-reingest is automatic).
 
 3. **Verify**: run smoke tests above. Check `bash run.sh health`.
 
-4. **Document**: update CHANGELOG.md + relevant docs/ file.
+4. **Document**: update `v3/README.md` (Version/Changelog section) + relevant `docs/` file.
 
 ## Common issues
 

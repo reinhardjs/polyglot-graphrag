@@ -1,6 +1,6 @@
 # Domain Profiles — GraphRAG v2.6.0
 
-Domain profiles are TOML files in `v2/domains/` (one per domain). They make the
+Domain profiles are TOML files in `v3/domains/` (one per domain). They make the
 system drop-in usable for any knowledge domain without code changes — chunking
 strategy, entity/edge vocabulary, extraction & synthesis prompts, Neo4j labels,
 entry strategy, and metadata schema are all declared here and read at runtime by
@@ -112,7 +112,7 @@ max_k_hops = 2
 
 ## Adding a new domain
 
-1. Copy `v2/domains/engineering.toml` to `v2/domains/<name>.toml`.
+1. Copy `v3/domains/engineering.toml` to `v3/domains/<name>.toml`.
 2. Set `name`, `collection`, `neo4j_label` (unique per domain).
 3. Tune `[chunking]`, `[extraction]`, `[synthesis]`, `[metadata_schema]`, `[neo4j_entry]`.
 4. Create the Qdrant collection (auto-created on first ingest) — or pre-create via `docker compose exec qdrant ...`.

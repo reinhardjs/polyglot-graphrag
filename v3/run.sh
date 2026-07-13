@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run.sh — orchestrates the GraphRAG v2 pipeline.
+# run.sh — orchestrates the GraphRAG v3 pipeline.
 #
 # GPU LLMs (Gemma 4 family, on the RTX 3060):
 #   Extraction  -> Gemma 4 E2B QAT on :8082  (systemd gemma-4-e2b.service)
@@ -42,13 +42,13 @@ start_daemon() {
     return
   fi
   echo "Starting GPU daemon (Jina/MiniLM/BGE on GPU, GLiNER lazy)..."
-  nohup "$PY" serve_gpu.py > /mnt/data-970-plus/rag-system/logs/daemon_gpu_v2.log 2>&1 &
+  nohup "$PY" serve_gpu.py > /mnt/data-970-plus/rag-system/logs/daemon_gpu.log 2>&1 &
   echo $! > "$DAEMON_PID"
   for i in $(seq 1 200); do
     curl -s --max-time 2 http://127.0.0.1:8000/health >/dev/null 2>&1 && { echo "GPU daemon ready (${i}s)"; return; }
     sleep 1
   done
-  echo "Daemon failed — see logs/daemon_gpu_v2.log"; exit 1
+  echo "Daemon failed — see logs/daemon_gpu.log"; exit 1
 }
 
 cmd_health() {
