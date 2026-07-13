@@ -16,8 +16,8 @@ All models on GPU (RTX 3060, 12 GB). Python 3.11.
 | Embeddings | jina-embeddings-v3 (fp16) | :8000 | ~3.9 GB | Dense vectors + entity resolution |
 | Reranker | bge-reranker-v2-m3 (fp16) | :8000 | shared | Result ranking |
 | Entity NER | gliner_multi-v2.1 (fp16) | :8000 | ~0.6 GB | Zero-shot entity detection |
-| Extraction LLM | gemma-4-E2B Q4_0 | :8082 | ~2.3 GB | Relation classification (per window) |
-| Synthesis LLM | gemma-4-E4B Q4_0 | :8084 | ~3.6 GB | Answer writing (/ask) |
+| Extraction LLM | gemma-4-E2B-it-QAT Q4_0 (`--reasoning off`) | :8082 | ~2.3 GB | Relation classification (per window) |
+| Synthesis LLM | gemma-4-E4B-it-QAT Q4_0 (`--reasoning off`) | :8084 | ~3.6 GB | Answer writing (/ask) |
 | Neo4j | — | :7687 | — | Entity graph |
 | Qdrant | — | :6333 | — | Vector store |
 
