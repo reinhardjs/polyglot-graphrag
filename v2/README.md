@@ -180,7 +180,8 @@ hermes
   vocabulary with entity names E2B discovers that GLiNER missed. Candidates are
   promoted after `promotion_threshold` documents (default 3) and evicted via LRU
   when `max_per_domain` (default 20) is exceeded. Zero-latency in-memory merge
-  on the hot path. State persists to `~/.hermes/labels/{domain}_dynamic.json`.
+  on the hot path. State persists to `<project>/labels/{domain}_dynamic.json`
+  (override location via `LABEL_STATE_DIR` env var).
   See `plans/dynamic-label-injection.md` for design + validation.
 
   Enable/configure in `domain_config.yaml`:

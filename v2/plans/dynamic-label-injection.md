@@ -300,11 +300,11 @@ def _reload_daemon(self) -> None:
 
 ### 5.5 Persistence
 
-File: `~/.hermes/labels/{domain}_dynamic.json`
+File: `<project>/labels/{domain}_dynamic.json` (override via `LABEL_STATE_DIR` env var)
 
 ```python
 def _save_state(self) -> None:
-    path = os.path.expanduser(f"~/.hermes/labels/{self.domain}_dynamic.json")
+    path = os.path.join(_STATE_DIR, f"{self.domain}_dynamic.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     state = {
         "domain": self.domain,
@@ -326,7 +326,7 @@ def _save_state(self) -> None:
         json.dump(state, f, indent=2)
 
 def _load_state(self) -> None:
-    path = os.path.expanduser(f"~/.hermes/labels/{self.domain}_dynamic.json")
+    path = os.path.join(_STATE_DIR, f"{self.domain}_dynamic.json")
     if not os.path.exists(path):
         return
     with open(path) as f:
@@ -358,7 +358,7 @@ Called in `__init__()`: load on cold start.
 
 ┌─ Persistence (crash recovery) ───────┐
 │                                       │
-│  ~/.hermes/labels/{domain}_dynamic.json│  ← L3: candidate state
+│  <project>/labels/{domain}_dynamic.json     │  ← L3: candidate state
 │                                       │
 └───────────────────────────────────────┘
 ```
@@ -491,8 +491,8 @@ IMPLEMENTATION CONSTRAINTS
    - Class LabelProvider with exact API from Section 5.
    - Per-domain singleton (keyed by domain name string).
    - Thread-safe: threading.Lock for _candidates / _active.
-   - Persistence: JSON to ~/.hermes/labels/{domain}_dynamic.json
-     on step_document(). Load on cold start.
+   - Persistence: JSON to <project>/labels/{domain}_dynamic.json
+     (override via LABEL_STATE_DIR env var) on step_document(). Load on cold start.
    - Logging: use Python `logging` module, level INFO for promotions,
      DEBUG for records.
 
@@ -531,7 +531,7 @@ IMPLEMENTATION CONSTRAINTS
     Do NOT create new endpoints. Do NOT restart the daemon process.
 
 11. Revert procedure:
-    Delete ~/.hermes/labels/{domain}_dynamic.json
+    Delete <project>/labels/{domain}_dynamic.json
     POST /admin/reload
     No code rollback required.
 
@@ -571,7 +571,7 @@ the LabelProvider.
   `LabelProvider` class (singleton per domain) with `get_active()` (O(1)
   in-memory), `record_unknown()`, `step_document()` (promotion/eviction/TTL/
   persist/reload), `_is_plausible_entity()` filter, JSON persistence to
-  `~/.hermes/labels/{domain}_dynamic.json`, and `get_provider()`/`reset_provider()`.
+ `<project>/labels/{domain}_dynamic.json` (override via `LABEL_STATE_DIR`), and `get_provider()`/`reset_provider()`.
 - **`hybrid_extraction.py`**: `_parse_and_validate` now accepts `doc_id`/`domain`
   kwargs; on a dropped entity it calls `provider.record_unknown()` + `_record_dropped()`
   (audit buffer flushed to `logs/dropped_entities.jsonl`). `extract_hybrid`
@@ -696,7 +696,7 @@ surfaces, so it is never a black box:
 3. **Promotion provenance.** `LabelProvider` tracks
    `type_origins: {type -> [source names]}` (e.g.
    `{"Framework": ["gpt-4","kubernetes","llama"]}`), persisted to
-   `~/.hermes/labels/<domain>_dynamic.json` and exposed via
+   `<project>/labels/<domain>_dynamic.json` (or `$LABEL_STATE_DIR`) and exposed via
    `get_type_origins()`. Trace a learned type back to its sources.
 
 All three paths verified: `:Discovered` label applied correctly

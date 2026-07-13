@@ -3,3 +3,9 @@
 /data/
 *.pdf
 SNOMED_BENCHMARK.md
+
+# Runtime state (auto-generated, not source-controlled)
+/labels/
+/logs/
+__pycache__/
+*.pyc

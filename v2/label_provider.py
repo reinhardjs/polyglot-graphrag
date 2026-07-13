@@ -21,8 +21,8 @@ that phrase detectable. This directly raises recall for entities the static
 schema missed, at the cost of a slightly larger label list (bounded by
 ``max_per_domain`` + LRU eviction + TTL).
 
-State is persisted to ``~/.hermes/labels/{domain}_dynamic.json`` for crash
-recovery and survives process restarts.
+State is persisted to ``<project>/labels/{domain}_dynamic.json`` for crash
+recovery and survives process restarts (override location via LABEL_STATE_DIR).
 """
 
 from __future__ import annotations
@@ -41,7 +41,14 @@ logger = logging.getLogger("label_provider")
 
 
 # Where dynamic-label state lives (L3 persistence in the caching architecture).
-_STATE_DIR = os.path.expanduser("~/.hermes/labels")
+# Defaults to <project>/labels/ so state stays inside the repo and is not
+# scattered into the user home. Override with the LABEL_STATE_DIR env var if a
+# different location is desired (e.g. a shared volume).
+_PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+_STATE_DIR = os.environ.get(
+    "LABEL_STATE_DIR",
+    os.path.join(_PROJECT_DIR, "labels"),
+)
 
 
 # Relation-phrase fragments E2B emits as bogus source/target values.
