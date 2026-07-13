@@ -80,33 +80,62 @@ If you do any of these, you MUST:
 
 Breaking examples:
 - **Changing the embedding model to a different dimension** (e.g. Jina 1024-d →
-  a 768-d model). Existing Qdrant points become unqueryable. Requires
-  re-embedding all chunks (script provided) — or a parallel collection +
-  dual-read during transition.
-- **Renaming/removing a Neo4j node property** that queries depend on.
+  a 768-d model). Existing Qdrant points become unqueryable, and Neo4j
+  `name_vector`s no longer match. **Migration exists:** `migrations/reembed.py`
+  re-embeds all Qdrant chunks + Neo4j names. Run after changing
+  `EMBED_MODEL_NAME`/`VECTOR_DIM`.
+- **Renaming/removing a Neo4j node property** that queries depend on. Add
+  `COALESCE(..., '')` fallbacks in queries, or a Cypher migration in `migrations/`.
 - **Changing the edge `type` vocabulary** in a way old edges can't be read.
 - **Changing the entity resolution threshold** (e.g. 0.88 → 0.70) in a way that
   would re-merge previously-distinct nodes (data-dependent; test on a sample
   first).
 - **Swapping the graph DB or vector DB engine** (Neo4j → …, Qdrant → …).
 
+### Blast-radius matrix (what breaks which store)
+
+| Change | Qdrant vectors | Neo4j graph | Mitigation |
+|--------|---------------|-------------|------------|
+| New domain | ✅ none (new collection) | ✅ none | — |
+| New entity `type` value | ✅ none | ✅ additive | — |
+| Prompt / extractor tweak | ✅ none | ✅ future-only | — |
+| **Swap extraction LLM** (same JSON shape) | ✅ none | ✅ none | `normalize_graph` maps key variants |
+| **Swap extraction LLM (different JSON keys)** | ✅ none | ⚠️ empty graph if unnormalized | `normalize_graph` (already applied in `extract_graph_llm`) |
+| **Change embed model (same dim)** | ⚠️ stale vectors (lower quality) | ⚠️ stale `name_vector` | `migrations/reembed.py --apply` |
+| **Change embed model (different dim)** | ❌ unqueryable | ❌ resolution broken | `migrations/reembed.py --apply` (recreates collections) |
+| Rename Neo4j property | ✅ none | ⚠️ queries return null | `COALESCE` + Cypher migration |
+| Change resolution threshold | ✅ none | ⚠️ possible re-merge | test on sample first |
+
+Legend: ✅ safe · ⚠️ degraded but recoverable · ❌ broken until migrated.
+
 ---
 
 ## 5. Migration log
 
-### (none yet — first release on this contract)
+### 2026-07-13 — Added infra-robustness safety net (non-breaking)
+- `ingest.normalize_graph()` normalizes extractor JSON to the canonical schema
+  (`{id,type}` / `{source,target,type}`), mapping common variants
+  (`name`/`entity`/`label`, `from`/`to`/`relation`, …). Applied inside
+  `extract_graph_llm`, so swapping the extraction model can no longer silently
+  zero the graph. No data change; additive.
+- `migrations/reembed.py` added — the missing re-embed migration for embedding-
+  model swaps (Qdrant chunks + Neo4j `name_vector`). Dry-run by default; pass
+  `--apply` to write. This satisfies the MIGRATION.md contract for the
+  "embedding model swap" breaking change.
+- Tests: `tests/test_normalize_graph.py` (7 cases).
 
-> When a breaking change ships, record it here, e.g.:
-> ```
+> When a future breaking change ships, append a section here, e.g.:
+> ```bash
 > ### 2026-MM-DD — Embedding dimension 1024 → 768 (MAJOR)
-> Affected: all Qdrant collections.
-> Migration: `python migrations/reembed_1024_to_768.py` (re-embedds all chunks,
->           preserves doc_id + Neo4j graph). Verify: `pytest tests/test_e2e_*`.
+> Affected: all Qdrant collections + Neo4j name_vector.
+> Migration: python migrations/reembed.py --apply
+> Verify: pytest tests/test_e2e_chunking.py tests/test_normalize_graph.py
 > ```
 
 ---
 
 ## 6. How to verify a non-breaking change didn't reset data
+
 
 ```bash
 # Before & after an upgrade, node/point counts should be stable (or grow):

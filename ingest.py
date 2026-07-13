@@ -508,6 +508,61 @@ def extract_graph_index_routing(doc_id: str, text: str,
             "meta": result.get("meta", {})}
 
 
+def normalize_graph(data: dict) -> dict:
+    """Normalize an extractor's JSON into the canonical schema consumed by
+    write_graph, so swapping the extraction LLM (which may emit different key
+    names) does NOT silently produce an empty graph.
+
+    Canonical schema (what write_graph reads):
+      nodes: [{id, type?, discovered_by?}]
+      edges: [{source, target, type?}]
+
+    Maps common variant keys:
+      node name:  id | name | entity | label | text        -> id
+      node type:  type | entity_type | node_type          -> type
+      edge src:    source | from | head | subject          -> source
+      edge tgt:    target | to | tail | object            -> target
+      edge rel:    type | relation | label | relationship  -> type
+    """
+    if not isinstance(data, dict):
+        return data
+    nodes = data.get("nodes")
+    edges = data.get("edges")
+    if isinstance(nodes, list):
+        norm_nodes = []
+        for n in nodes:
+            if not isinstance(n, dict):
+                continue
+            name = (n.get("id") or n.get("name") or n.get("entity")
+                    or n.get("label") or n.get("text"))
+            if not name:
+                continue  # skip entities with no resolvable name
+            ntype = (n.get("type") or n.get("entity_type")
+                     or n.get("node_type") or "Unknown")
+            item = {"id": str(name), "type": str(ntype)}
+            if n.get("discovered_by"):
+                item["discovered_by"] = n["discovered_by"]
+            norm_nodes.append(item)
+        data["nodes"] = norm_nodes
+    if isinstance(edges, list):
+        norm_edges = []
+        for e in edges:
+            if not isinstance(e, dict):
+                continue
+            src = (e.get("source") or e.get("from") or e.get("head")
+                   or e.get("subject"))
+            tgt = (e.get("target") or e.get("to") or e.get("tail")
+                   or e.get("object"))
+            if not src or not tgt:
+                continue  # skip edges missing an endpoint
+            rel = (e.get("type") or e.get("relation") or e.get("label")
+                   or e.get("relationship") or "RELATED")
+            norm_edges.append({"source": str(src), "target": str(tgt),
+                                "type": str(rel)})
+        data["edges"] = norm_edges
+    return data
+
+
 def extract_graph_llm(doc_id: str, text: str, chunk_size: int = 512,
                       profile: dict = None) -> dict:
     """LLM-based graph extraction via the configured extraction model.
@@ -543,7 +598,7 @@ def extract_graph_llm(doc_id: str, text: str, chunk_size: int = 512,
         if m:
             data = json.loads(m.group(0))
             if "nodes" in data and "edges" in data:
-                return data
+                return normalize_graph(data)
     except Exception as e:
         print(f"[extract] LLM extraction failed: {e}", flush=True)
     print("[extract] falling back to GLiNER", flush=True)
