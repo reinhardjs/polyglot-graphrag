@@ -511,6 +511,7 @@ def run_once(root: Path, daemon: DaemonClient, config: dict,
                     res = daemon.delete(doc_id, collection)
                     _ColorLog.ok(f"  removed from stores: {res}")
                     state.remove(rel_path)
+                    state.save()  # persist incremental progress
                 except requests.HTTPError as e:
                     failure = True
                     _ColorLog.err(f"  delete failed for {doc_id}: {e}")
@@ -579,6 +580,9 @@ def run_once(root: Path, daemon: DaemonClient, config: dict,
                         "doc_id": doc_id, "domain": domain,
                         "collection": collection or prev_coll,
                     })
+                # Persist incrementally so a killed run (e.g. background
+                # timeout) still leaves progress on disk for the next resume.
+                state.save()
             except requests.HTTPError as e:
                 failure = True
                 _ColorLog.err(f"  ingest failed for {doc_id}: {e}")
