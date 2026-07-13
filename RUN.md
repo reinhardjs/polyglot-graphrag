@@ -51,7 +51,11 @@ large, and license/distribution constraints):
 
 1. **Gemma 4 E2B** (extraction) — `gemma-4-E2B-it-QAT-Q4_0.gguf`
    - Source: HuggingFace `lmstudio-community/gemma-4-E2B-it-QAT-GGUF`
-   - Place at: `<project-root>/models/gemma-4-E2B_q4_0-it.gguf`
+   - Place at: `<project-root>/models/gemma-4-E2B-it-QAT-Q4_0.gguf`
+   - **Required launch flag:** `--reasoning off`. Gemma-4 routes answers to
+     `reasoning_content` (the `<|channel>thought` token) by default, leaving
+     `message.content` EMPTY — extraction would get nothing. `run.sh` sets this
+     automatically.
 2. **Gemma 4 E4B** (answer synthesis, *optional*) — `gemma-4-E4B-it-QAT-Q4_0.gguf`
    - Source: HuggingFace `lmstudio-community/gemma-4-E4B-it-QAT-GGUF`
    - Place at: `<project-root>/models/gemma-4-E4B-it-QAT-Q4_0.gguf`

@@ -6,7 +6,7 @@ in [RUN.md](RUN.md); sync-daemon detail in [SYNC.md](SYNC.md).
 ## 0. One-time: get the model files
 
 Download two GGUFs into `<project-root>/models/` (they're NOT in the repo):
-- `gemma-4-E2B_q4_0-it.gguf` ← extraction (HuggingFace `lmstudio-community/gemma-4-E2B-it-QAT-GGUF`)
+- `gemma-4-E2B-it-QAT-Q4_0.gguf` ← extraction (HuggingFace `lmstudio-community/gemma-4-E2B-it-QAT-GGUF`)
 - `gemma-4-E4B-it-QAT-Q4_0.gguf` ← answer writing (HuggingFace `lmstudio-community/gemma-4-E4B-it-QAT-GGUF`)
 
 Everything else (Neo4j, Qdrant, Jina embed, BGE rerank, llama.cpp server)
