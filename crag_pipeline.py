@@ -181,17 +181,17 @@ def run_crag(query: str,
     deps = deps or CragDeps()
     trace: List[str] = []
 
-    # 0. Domain profile → collections + entry strategy + neo4j label
+    # 0. Domain profile (v0.x YAML) — resolves collection/label/entry strategy
     profile = None
     collections = None
     entry_strategy = "keyword"
     try:
         if domain:
-            profile = C.load_domain_profile(domain)
-            coll = profile.get("domain", {}).get("collection")
+            import domain_loader
+            profile = domain_loader.get_domain(domain)
+            coll = profile.get("collection")
             collections = [coll] if coll else None
-            entry_strategy = (profile.get("retrieval", {})
-                              .get("entry_strategy", "keyword"))
+            entry_strategy = profile.get("entry_strategy", "keyword")
     except Exception:
         profile = None
 

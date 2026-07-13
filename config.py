@@ -189,50 +189,7 @@ GLINER_THRESHOLD = 0.4
 ENTITY_RESOLUTION_THRESHOLD = 0.88   # cosine similarity for entity merger
 ENTITY_VECTOR_INDEX = "entity_vector_idx"
 
-# ── Domain profiles (v3.1.x) ────────────────────────────────────────────────
-# Domain schemas now live in `domain_config.yaml` (YAML), consumed by
-# `domain_loader.py`. The legacy TOML `load_domain_profile()` below is retained
-# for backward-compat only. Swap a domain in `domain_config.yaml` to re-target
-# the pipeline — no code changes.
-import tomllib
-from functools import lru_cache
-
-DOMAIN_PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                  "domains")
-DOMAIN_PROFILE_DEFAULT = "engineering"   # fallback for unknown domains
-
-
-@lru_cache(maxsize=32)
-def load_domain_profile(name: str) -> dict:
-    """Load a domain profile TOML (parsed once, then cached).
-
-    Falls back to engineering.toml for unknown/empty names. Returns the raw
-    parsed dict (caller picks the sections it needs).
-    """
-    if not name:
-        name = DOMAIN_PROFILE_DEFAULT
-    path = os.path.join(DOMAIN_PROFILE_DIR, f"{name}.toml")
-    if not os.path.exists(path):
-        # Fallback to engineering defaults (non-fatal — keeps /ask working)
-        path = os.path.join(DOMAIN_PROFILE_DIR,
-                            f"{DOMAIN_PROFILE_DEFAULT}.toml")
-    if not os.path.exists(path):
-        # V3.0: TOML profiles archived — domain config now lives in
-        # domain_config.yaml (consumed by domain_loader). Return None so
-        # callers fall back to YAML-driven defaults instead of crashing.
-        return None
-    with open(path, "rb") as f:
-        return tomllib.load(f)
-
-
-def domain_collection(name: str) -> str:
-    """Qdrant collection name for a domain (from its profile, else default)."""
-    return load_domain_profile(name).get("domain", {}) \
-        .get("collection", QDRANT_COLLECTION_DEFAULT)
-
-
-def domain_neo4j_label(name: str) -> str:
-    """Neo4j :Entity:<Label> for a domain."""
-    return load_domain_profile(name).get("domain", {}) \
-        .get("neo4j_label", DOMAIN_PROFILE_DEFAULT.capitalize())
+# ── Domain config (v0.x) ──────────────────────────────────────────────────────
+# Domain schemas live in `domain_config.yaml` (YAML), consumed by
+# `domain_loader.py`. All callers use `domain_loader.get_domain(name)`.
 

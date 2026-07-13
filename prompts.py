@@ -16,7 +16,7 @@ def build_synthesis_prompt(query: str, contexts: list,
     """Build the E4B synthesis prompt.
 
     contexts: list of retrieved text blocks (already in order).
-    profile:  domain profile dict (load_domain_profile result) or None.
+    profile:  domain profile dict (domain_loader.get_domain result) or None.
 
     Returns the full prompt string for the chat completion.
     """

@@ -11,7 +11,8 @@ import prompts as P
 
 
 def test_medical_prompt_mentions_clinical_documents():
-    prof = C.load_domain_profile("medical")
+    import domain_loader
+    prof = domain_loader.get_domain("medical")
     p = P.build_synthesis_prompt("what treats hypertension?",
                                  ["Lisinopril treats hypertension."], profile=prof)
     assert "clinical documents" in p.lower(), p
@@ -19,7 +20,8 @@ def test_medical_prompt_mentions_clinical_documents():
 
 
 def test_legal_prompt_mentions_statutes():
-    prof = C.load_domain_profile("legal")
+    import domain_loader
+    prof = domain_loader.get_domain("legal")
     p = P.build_synthesis_prompt("what does section 5 say?",
                                  ["Section 5 covers jurisdiction."], profile=prof)
     assert "statute" in p.lower() or "legal" in p.lower(), p

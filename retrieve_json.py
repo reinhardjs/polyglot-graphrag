@@ -55,10 +55,11 @@ def main():
         print(json.dumps({"error": "empty query"}))
         sys.exit(2)
 
-    profile = C.load_domain_profile(domain) if domain else None
+    import domain_loader
+    profile = domain_loader.get_domain(domain) if domain else None
     # Derive collection from profile when a domain is given (mirrors /ask).
-    collections = [profile["domain"]["collection"]] if profile else None
-    entry_strategy = (profile["neo4j_entry"]["strategy"]
+    collections = [profile["collection"]] if profile else None
+    entry_strategy = (profile.get("entry_strategy", "keyword")
                       if profile else "keyword")
 
     try:

@@ -581,22 +581,13 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
     """
     import time
     import config as C
-    # Resolve domain profile (v2.6.0) — drives chunking + extraction + metadata.
-    profile = C.load_domain_profile(domain) if domain else None
+    # Resolve domain profile (v0.x YAML) — drives chunking + extraction + metadata.
+    import domain_loader
+    profile = domain_loader.get_domain(domain) if domain else None
     if profile:
         chunk_cfg = profile.get("chunking", {})
     else:
-        # V3.0: no TOML profile — pull chunking from domain_config.yaml
-        try:
-            import domain_loader
-            _dom = domain_loader.get_domain(domain)
-            chunk_cfg = _dom.get("chunking", {})
-            # Route vectors to the domain's own Qdrant collection
-            # (multi-domain isolation) instead of the hardcoded default.
-            if domain and _dom.get("collection"):
-                collection = _dom["collection"]
-        except Exception:
-            chunk_cfg = {}
+        chunk_cfg = {}
     strategy = chunk_cfg.get("strategy", "sentence")
     chunk_size = chunk_cfg.get("chunk_size", 512)
     overlap = chunk_cfg.get("overlap", 64)

@@ -360,8 +360,9 @@ def ask(req: AskReq):
     from qdrant_client import QdrantClient
     from qdrant_client.models import PointStruct
 
-    # 0. Domain profile (v2.6.0) — resolves chunking/prompts/collection/label
-    profile = C.load_domain_profile(req.domain) if req.domain else None
+    # 0. Domain profile (v0.x YAML) — resolves collection/label/entry strategy
+    import domain_loader
+    profile = domain_loader.get_domain(req.domain) if req.domain else None
 
     # 1. Embed query in-process (resident model on GPU)
     #    Phase 1: modulate first (expand domain aliases) so embedding is grounded.
@@ -437,7 +438,7 @@ def ask(req: AskReq):
     # Resolve collection(s) → list of Qdrant collection names.
     # If no explicit collection given, derive from the domain profile.
     if req.collection is None and profile is not None:
-        req_collection = profile["domain"]["collection"]
+        req_collection = profile["collection"]
     else:
         req_collection = req.collection
     collections = _resolve_collections(req_collection)
@@ -446,8 +447,8 @@ def ask(req: AskReq):
         target=lambda: q_res.extend(rag.qdrant_search_multi(vec, req.query, collections)))
     t2 = threading.Thread(target=lambda: g_res.extend(
         rag.neo4j_subgraph(req.query,
-                          label=(profile["domain"]["neo4j_label"] if profile else None),
-                          entry_strategy=(profile["neo4j_entry"]["strategy"]
+                          label=(profile["neo4j_label"] if profile else None),
+                          entry_strategy=(profile.get("entry_strategy", "keyword")
                                           if profile else "keyword"))))
     t1.start(); t2.start(); t1.join(); t2.join()
 
@@ -584,17 +585,13 @@ def ingest(req: IngestReq, background_tasks: BackgroundTasks, response: Response
         raise HTTPException(status_code=400, detail="doc_id is required")
 
     # Derive collection from domain config when not explicitly given.
-    # V3.0: domain schema comes from domain_config.yaml (domain_loader), with
-    # a fallback to the legacy TOML profile if one still exists.
     target_collection = req.collection
     if target_collection is None and req.domain:
         try:
             import domain_loader
             target_collection = domain_loader.get_domain(req.domain).get("collection")
         except Exception:
-            prof = C.load_domain_profile(req.domain)
-            if prof:
-                target_collection = prof["domain"]["collection"]
+            target_collection = None
     target_collection = target_collection or C.COLL_CHUNKS
 
     # ── Synchronous incremental guard: skip if unchanged ──
@@ -792,30 +789,19 @@ def list_collections():
 
 @app.get("/profiles")
 def list_profiles():
-    """List all loaded domain profiles (name, collection, label, description).
-
-    v3.x — surfaces the domain schemas from `domain_config.yaml` (loaded by
-    `domain_loader.py`) so callers can discover available domains without
-    reading files.
-    """
-    import config as cfg
-    import glob as _glob
-    import os as _os
+    """List all loaded domain profiles from domain_config.yaml (YAML)."""
+    import domain_loader
     out = []
-    ddir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "domains")
-    for path in sorted(_glob.glob(_os.path.join(ddir, "*.toml"))):
-        try:
-            p = cfg.load_domain_profile(_os.path.splitext(_os.path.basename(path))[0])
-            out.append({
-                "domain": p["domain"]["name"],
-                "collection": p["domain"]["collection"],
-                "neo4j_label": p["domain"]["neo4j_label"],
-                "description": p["domain"].get("description", ""),
-                "chunking": p.get("chunking", {}).get("strategy", "sentence"),
-                "entry_strategy": p.get("neo4j_entry", {}).get("strategy", "keyword"),
-            })
-        except Exception as e:
-            out.append({"file": _os.path.basename(path), "error": str(e)})
+    for name in domain_loader.list_domains():
+        d = domain_loader.get_domain(name)
+        out.append({
+            "domain": name,
+            "collection": d.get("collection"),
+            "neo4j_label": d.get("neo4j_label"),
+            "description": d.get("description", ""),
+            "chunking": (d.get("chunking", {}) or {}).get("strategy", "sentence"),
+            "entry_strategy": d.get("entry_strategy", "keyword"),
+        })
     return {"profiles": out}
 
 

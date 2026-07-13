@@ -239,8 +239,9 @@ def ask(req: AskReq):
     import ask as rag
     import threading
 
-    # 0. Domain profile (v2.6.0)
-    profile = C.load_domain_profile(req.domain) if req.domain else None
+    # 0. Domain profile (v0.x YAML) — resolves collection/label/entry strategy
+    import domain_loader
+    profile = domain_loader.get_domain(req.domain) if req.domain else None
 
     # 0b. CRAG mode (Phase 3): adaptive routing + corrective retrieval.
     if req.crag:
@@ -274,9 +275,9 @@ def ask(req: AskReq):
     query_text = QueryModulator.moderate(req.query, domain=req.domain)
     vec = _embed_encode([query_text], passage=False)[0].tolist()
 
-    # 2. Parallel retrieval: Qdrant (multi-collection) + Neo4j
+    # If no explicit collection given, derive from the domain profile.
     if req.collection is None and profile is not None:
-        req_collection = profile["domain"]["collection"]
+        req_collection = profile["collection"]
     else:
         req_collection = req.collection
     collections = _resolve_collections(req_collection)
@@ -284,9 +285,9 @@ def ask(req: AskReq):
     t1 = threading.Thread(
         target=lambda: q_res.extend(rag.qdrant_search_multi(vec, req.query, collections)))
     t2 = threading.Thread(target=lambda: g_res.extend(
-        rag.neo4j_subgraph(req.query,
-                          label=(profile["domain"]["neo4j_label"] if profile else None),
-                          entry_strategy=(profile["neo4j_entry"]["strategy"]
+        rag.neo4j_subgraph(rag.process_query(req.query, profile),
+                          label=(profile["neo4j_label"] if profile else None),
+                          entry_strategy=(profile.get("entry_strategy", "keyword")
                                           if profile else "keyword"))))
     t1.start(); t2.start(); t1.join(); t2.join()
 
@@ -352,8 +353,8 @@ def _run_ingest(task_id: str, req: "IngestReq", target_collection: str = None):
     if target_collection is None:
         target_collection = req.collection
         if target_collection is None and req.domain:
-            prof = C.load_domain_profile(req.domain)
-            target_collection = prof["domain"]["collection"]
+            import domain_loader
+            target_collection = domain_loader.get_domain(req.domain).get("collection")
     try:
         with _ingest_tasks_lock:
             _ingest_tasks[task_id]["status"] = "running"
@@ -387,8 +388,8 @@ def ingest(req: IngestReq, background_tasks: BackgroundTasks, response: Response
     # Derive collection from domain profile when not explicitly given.
     target_collection = req.collection
     if target_collection is None and req.domain:
-        prof = C.load_domain_profile(req.domain)
-        target_collection = prof["domain"]["collection"]
+        import domain_loader
+        target_collection = domain_loader.get_domain(req.domain).get("collection")
     target_collection = target_collection or C.COLL_CHUNKS
 
     # ── Synchronous incremental guard: skip if unchanged ──
@@ -512,25 +513,19 @@ def list_collections():
 
 @app.get("/profiles")
 def list_profiles():
-    """List all loaded domain profiles (parity with serve_gpu.py, v2.6.0)."""
-    import config as cfg
-    import glob as _glob
-    import os as _os
+    """List all loaded domain profiles from domain_config.yaml (YAML)."""
+    import domain_loader
     out = []
-    ddir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "domains")
-    for path in sorted(_glob.glob(_os.path.join(ddir, "*.toml"))):
-        try:
-            p = cfg.load_domain_profile(_os.path.splitext(_os.path.basename(path))[0])
-            out.append({
-                "domain": p["domain"]["name"],
-                "collection": p["domain"]["collection"],
-                "neo4j_label": p["domain"]["neo4j_label"],
-                "description": p["domain"].get("description", ""),
-                "chunking": p.get("chunking", {}).get("strategy", "sentence"),
-                "entry_strategy": p.get("neo4j_entry", {}).get("strategy", "keyword"),
-            })
-        except Exception as e:
-            out.append({"file": _os.path.basename(path), "error": str(e)})
+    for name in domain_loader.list_domains():
+        d = domain_loader.get_domain(name)
+        out.append({
+            "domain": name,
+            "collection": d.get("collection"),
+            "neo4j_label": d.get("neo4j_label"),
+            "description": d.get("description", ""),
+            "chunking": (d.get("chunking", {}) or {}).get("strategy", "sentence"),
+            "entry_strategy": d.get("entry_strategy", "keyword"),
+        })
     return {"profiles": out}
 
 

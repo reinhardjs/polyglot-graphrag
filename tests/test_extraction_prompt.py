@@ -36,7 +36,8 @@ class _FakeClient:
 
 
 def test_engineering_profile_uses_engineering_prompt():
-    prof = C.load_domain_profile("engineering")
+    import domain_loader
+    prof = domain_loader.get_domain("engineering")
     capture = {}
     # monkeypatch OpenAI used inside extract_graph_llm
     import openai
@@ -51,7 +52,8 @@ def test_engineering_profile_uses_engineering_prompt():
 
 
 def test_medical_profile_uses_medical_prompt():
-    prof = C.load_domain_profile("medical")
+    import domain_loader
+    prof = domain_loader.get_domain("medical")
     capture = {}
     import openai
     orig = openai.OpenAI
@@ -67,7 +69,8 @@ def test_medical_profile_uses_medical_prompt():
 
 def test_unknown_domain_falls_back_to_config_prompt():
     # unknown domain -> engineering defaults -> config.EXTRACTION_PROMPT
-    prof = C.load_domain_profile("nonexistent")
+    import domain_loader
+    prof = domain_loader.get_domain("nonexistent")
     capture = {}
     import openai
     orig = openai.OpenAI
@@ -83,7 +86,8 @@ def test_unknown_domain_falls_back_to_config_prompt():
 def test_gliner_fallback_uses_domain_entity_types():
     """REQ-4 4d: GLiNER fallback receives profile graph_schema.entity_types."""
     import requests
-    prof = C.load_domain_profile("medical")
+    import domain_loader
+    prof = domain_loader.get_domain("medical")
     sent = {}
     orig_post = requests.post
 

@@ -10,10 +10,11 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config as C
+import domain_loader
 import ingest as I
 
 
-ENG_PROFILE = C.load_domain_profile("engineering")
+ENG_PROFILE = domain_loader.get_domain("engineering")
 
 
 def test_validate_metadata_unknown_field_warns_kept():
