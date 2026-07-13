@@ -122,9 +122,9 @@ will not bump correctly.
 
 | Prefix | Effect on version |
 |--------|------------------|
-| `feat:` | Minor bump (e.g. `3.1.6-beta.1` → `3.1.6-beta.2` until stable `3.2.0`) |
-| `fix:` | Patch bump (e.g. `3.1.6-beta.1` → `3.1.6-beta.2`) |
-| `feat!:` / `fix!:` / `BREAKING CHANGE:` | Major bump (e.g. `3.1.6-beta.1` → `4.0.0`) |
+| `feat:` | Minor bump (e.g. `0.1.0-beta.1` → `0.2.0-beta.1`; pre-1.0 beta) |
+| `fix:` | Patch bump (e.g. `0.1.0-beta.1` → `0.1.0-beta.2`) |
+| `feat!:` / `fix!:` / `BREAKING CHANGE:` | Minor bump (pre-1.0: e.g. `0.1.0-beta.1` → `0.2.0-beta.1`) |
 | `docs:`, `chore:`, `refactor:`, `test:`, `ci:` | No release (changelog only) |
 
 **Examples:**

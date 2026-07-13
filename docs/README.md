@@ -1,6 +1,6 @@
 # Polyglot GraphRAG — Documentation Index
 
-> Design & planning docs. The **live codebase is `../v3/`** (v3.1.x
+> Design & planning docs. The **live codebase is the repository root** (v3.1.x
 > neuro-symbolic line). These docs are historical design references — feature
 > versions noted (v2.5.0, v2.6.0, v2.7.0) describe the evolution that led to
 > the current `v3/` architecture. Directory paths in older docs may read `v2/`

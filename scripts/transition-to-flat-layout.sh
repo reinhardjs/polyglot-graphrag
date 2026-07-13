@@ -75,4 +75,4 @@ echo
 echo "==> Next: add release-please files, then run from repo root:"
 echo "    git add -A && git commit -m 'refactor: flatten versioned folder to root; adopt release-please'"
 echo "    git push origin main"
-echo "    git tag v3.1.6 && git push origin v3.1.6   # or let release-please cut it"
+echo "    git tag v0.1.0-beta.1 && git push origin v0.1.0-beta.1   # or let release-please cut it"

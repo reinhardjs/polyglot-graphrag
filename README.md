@@ -193,8 +193,10 @@ hermes
 
 ## Version
 
-**v3.1.5** — current stable feature line (shipped). The ongoing release
-track is **`3.1.6-beta.1`** (beta channel — see "Releases & Versioning").
+**v0.1.0-beta.1** — current development (beta). The earlier v3.1.x line
+(neuro-symbolic pipeline) has been **reset to 0.x.x** to signal the
+beginning of a structured release process. All future releases are
+beta pre-releases toward a final **v1.0.0** stable.
 
 - GLiNER+E2B hybrid extraction (100% precision, engineering domain)
 - Sliding window for arbitrary-length documents
@@ -246,21 +248,21 @@ every release is a **Git tag** cut from `main`.
 2. On push to `main`, `.github/workflows/release-please.yml` opens/updates a
    **release PR** that bumps the version in `.release-please-manifest.json` and
    regenerates the changelog.
-3. Merge the release PR → release-please creates the **Git tag** (e.g. `v3.2.0`)
-   and the **GitHub Release**.
+3. Merge the release PR → release-please creates the **Git tag** (e.g. `v0.2.0-beta.1`)
+   and the **GitHub Release**. The eventual **stable** will be `v1.0.0`.
 
-**Current version** is seeded in `.release-please-manifest.json` (`"3.1.6-beta.1"`).
+**Current version** is seeded in `.release-please-manifest.json` (`"0.1.0-beta.1"`).
 The project is currently on a **beta channel** (`prerelease-type: beta`), so
-release-please tags pre-releases like `v3.1.6-beta.1`, `v3.1.6-beta.2`, … and
+release-please tags pre-releases like `v0.1.0-beta.1`, `v0.1.0-beta.2`, … and
 the GitHub Release is marked **Pre-release**. To cut the first **stable**
 release, remove `prerelease-type` from `release-please-config.json` (or set the
 next version via a `release-as:` commit) and merge the resulting release PR —
-the tag becomes `v3.2.0` (non-prerelease).
+the tag becomes `v1.0.0` (non-prerelease).
 
 > To force a specific version once: merge a commit with `release-as: X.Y.Z` in
 > its body, or set `release-as` in `release-please-config.json`.
 
-### Changelog (v3.0 → v3.1.5)
+### Changelog (v3.0 → v3.1.5 — historical; version reset to 0.x.x)
 
 | Version | Date | Highlights |
 |---------|------|-----------|
@@ -270,6 +272,6 @@ the tag becomes `v3.2.0` (non-prerelease).
 | v3.1.2 | 2026-07-13 | Strategy 3: LLM Fallback NER (semantic typing of dropped entities) |
 | v3.1.3 | 2026-07-13 | Fix: forward `domain_name` in `sliding_window._parse_and_validate` |
 | v3.1.4 | 2026-07-13 | Strategy 3 traceability: `:Discovered` label, audit `inferred_type`, provenance |
-| v3.1.5 | 2026-07-13 | Default dynamic-label state to `<project>/labels/` (was `~/.hermes/labels`) — last *stable* line; **beta channel begins at v3.1.6-beta.1** |
+| v3.1.5 | 2026-07-13 | Default dynamic-label state to `<project>/labels/` (was `~/.hermes/labels`) — **end of v3.x line; version reset to 0.x.x beta begins** |
 
 > Pre-v3 history (v1/v2 eras) is archived in `archive/legacy-v1/CHANGELOG_v1.md`.

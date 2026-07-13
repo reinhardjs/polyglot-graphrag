@@ -3,7 +3,7 @@
 Hits /ask on :8000. Skips automatically if the daemon is unreachable so the
 unit suite stays green on machines without a running stack.
 
-    cd /mnt/data-970-plus/rag-system/v3
+    cd /mnt/data-970-plus/rag-system
     /mnt/data-970-plus/rag-env/bin/python -m pytest tests/test_e2e_neuro_symbolic.py -q
 """
 import sys, os, time, requests

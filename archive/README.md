@@ -3,9 +3,9 @@
 This directory contains **dead v1-era code and superseded documentation** that
 is **NOT used by the running system**.
 
-The live pipeline is `../v3/` (v3.1.x neuro-symbolic line). The production
-GPU daemon (`rag-gpu-daemon.service`) runs `../v3/serve_gpu.py` with
-`WorkingDirectory=/mnt/data-970-plus/rag-system/v3`.
+The live pipeline now operates from the repository root. The production
+GPU daemon (`rag-gpu-daemon.service`) runs `serve_gpu.py` with
+`WorkingDirectory=/mnt/data-970-plus/rag-system`.
 
 ## Contents
 
