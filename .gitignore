@@ -51,3 +51,14 @@ Thumbs.db
 # Benchmark outputs
 *.bench
 .pytest_cache/
+
+# User-provided data files (not part of pipeline)
+/data/
+*.pdf
+SNOMED_BENCHMARK.md
+
+# Runtime state (auto-generated, not source-controlled)
+/labels/
+/logs/
+__pycache__/
+*.pyc

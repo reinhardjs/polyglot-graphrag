@@ -103,6 +103,43 @@ v2/
 4. Update the relevant docs if your change affects documented behaviour.
 5. Open a PR against `main` with a clear description.
 
+## Commit Message Convention (Conventional Commits)
+
+This repo uses **release-please**, which derives the version number
+**automatically from commit messages**. All commits to `main` MUST follow the
+[Conventional Commits](https://www.conventionalcommits.org/) spec, or releases
+will not bump correctly.
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+**Types → version impact:**
+
+| Prefix | Effect on version |
+|--------|------------------|
+| `feat:` | Minor bump (e.g. `3.1.5` → `3.2.0`) |
+| `fix:` | Patch bump (e.g. `3.1.5` → `3.1.6`) |
+| `feat!:` / `fix!:` / `BREAKING CHANGE:` | Major bump (e.g. `3.1.5` → `4.0.0`) |
+| `docs:`, `chore:`, `refactor:`, `test:`, `ci:` | No release (changelog only) |
+
+**Examples:**
+```
+feat(extraction): add streaming mode to serve_gpu
+fix(label-provider): evict LRU on TTL expiry
+docs: refresh README repository layout
+refactor(ingest): split late-chunk vector builder
+feat!: change Neo4j schema labels (breaking)
+```
+
+After you merge to `main`, the release-please workflow opens/updates a release
+PR. **Merge that PR** to cut the Git tag + GitHub Release. Do not create tags
+by hand. See `README.md` → "Releases & Versioning" for the full flow.
+
 ## Questions?
 
 Open an issue on the repository. Include your environment details (GPU, VRAM,

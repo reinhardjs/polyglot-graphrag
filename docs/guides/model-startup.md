@@ -215,7 +215,7 @@ Same code, identical API, runs on CPU:
 
 ```bash
 # Start manually (no systemd service):
-cd /mnt/data-970-plus/rag-system/v3
+cd /mnt/data-970-plus/rag-system
 /mnt/data-970-plus/rag-env/bin/python serve_cpu.py
 ```
 

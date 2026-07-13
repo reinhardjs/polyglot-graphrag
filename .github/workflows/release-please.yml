@@ -1,0 +1,31 @@
+# Automates releases from `main` using release-please + Conventional Commits.
+#
+# How it works:
+#   1. Every push to `main` runs release-please.
+#   2. release-please scans Conventional Commit messages since the last release
+#      (e.g. `feat:`, `fix:`, `feat!:`, `docs:`) and computes the next SemVer.
+#   3. If a release is warranted, it opens/updates a "release PR" that bumps the
+#      version in `.release-please-manifest.json` and updates CHANGELOG.
+#   4. When that PR is merged, release-please creates the Git tag + GitHub Release.
+#
+# The `main` branch always holds the latest code; releases are cut from it.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+name: release-please
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

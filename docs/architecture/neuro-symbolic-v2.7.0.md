@@ -166,11 +166,11 @@ cd /mnt/data-970-plus/rag-system
   --host 0.0.0.0 --port 8084 --n-gpu-layers -1
 
 # Terminal 3: GPU daemon
-cd /mnt/data-970-plus/rag-system/v3
+cd /mnt/data-970-plus/rag-system
 /mnt/data-970-plus/rag-env/bin/python serve_gpu.py
 
 # Terminal 4: (optional) CPU daemon fallback
-cd /mnt/data-970-plus/rag-system/v3
+cd /mnt/data-970-plus/rag-system
 /mnt/data-970-plus/rag-env/bin/python serve_cpu.py
 ```
 

@@ -55,7 +55,7 @@ rag-system/
 ## Running the dev stack
 
 ```bash
-cd /mnt/data-970-plus/rag-system/v3
+cd /mnt/data-970-plus/rag-system
 
 # 1. Start DBs
 docker compose -f ../docker-compose.yml up -d
@@ -89,7 +89,7 @@ bash run.sh stop           # stop daemon + LLMs
 The codebase ships a pytest suite under `v3/tests/`:
 
 ```bash
-cd /mnt/data-970-plus/rag-system/v3
+cd /mnt/data-970-plus/rag-system
 
 # Unit tests (no daemon / GPU needed — pure logic)
 /mnt/data-970-plus/rag-env/bin/python -m pytest tests/test_chunking.py tests/test_prompts.py \
