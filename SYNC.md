@@ -31,6 +31,47 @@ cd <project-root>
 ./venv/bin/python sync_docs.py /path/to/your/docs --force
 ```
 
+## Autonomous loop: `run_sync_loop.sh`
+
+For a **large corpus** where a single `sync_docs.py` run may exceed the
+terminal's 900s background-task cap, use the loop wrapper. It re-invokes
+`sync_docs.py` once per pass and resumes from `.sync_state.json`, so it can
+run for hours unattended and survives the cap by spawning a fresh process
+each iteration.
+
+```bash
+cd <project-root>
+
+# Default: ingests ./data/engineering (folder name maps to the
+# "engineering" domain via _DOMAIN_FOLDER_RULES in sync_docs.py).
+bash run_sync_loop.sh
+
+# Or point it at any corpus folder (must contain a .syncignore):
+bash run_sync_loop.sh /path/to/your/docs
+```
+
+What it does:
+1. Computes the ingestable file TOTAL (respecting `.syncignore`).
+2. Loops up to 100 passes. Each pass runs `sync_docs.py <root>`; files already
+   in `.sync_state.json` are skipped (SHA256 unchanged), so only new/changed
+   files are sent.
+3. Stops when `state entries == TOTAL` (all files ingested) and prints
+   `LOOP COMPLETE`.
+
+Notes:
+- The **default root `data/engineering`** is a domain-named folder. Because
+  `engineering/` is a marker in `_DOMAIN_FOLDER_RULES`, the corpus is
+  automatically ingested as the `engineering` domain (no `--domain` flag
+  needed). Use `eng/`, `journal/`, `legal/`, `medical/`, `accounting/`, or
+  `hospitality/` folder names to target other configured domains.
+- The loop does NOT use `--watch`; it's poll-based (re-runs `sync_docs.py`
+  every ~2s until complete). Use plain `sync_docs.py --watch` for live
+  filesystem watching instead.
+- Logs go to `logs/sync_sliding_loop.log`.
+- **Prerequisites:** the GPU daemon (`bash run.sh serve`) + Neo4j/Qdrant must
+  be up. If the daemon is down mid-loop, those files error; re-run the loop to
+  retry only the failures (state is preserved).
+
 The state file `.sync_state.json` is written **next to the watched root**
 (e.g. `/tmp/testdocs/.sync_state.json`). It records each file's SHA256, the
 `doc_id`, domain, and Qdrant collection. It is only updated *after* the server
@@ -45,12 +86,15 @@ domain, so two folders with the same bare filename would otherwise collide.
 
 ## Domain inference (and overrides)
 
-| Path / extension            | Domain      |
-|-----------------------------|-------------|
-| `eng/`, `engineering/`      | engineering |
-| `journal/`, `papers/`, *.pdf| journal     |
-| `legal/`                    | legal       |
-| anything else               | engineering |
+| Path / extension              | Domain      |
+|-------------------------------|-------------|
+| `eng/`, `engineering/`        | engineering |
+| `journal/`, `papers/`, *.pdf  | journal     |
+| `legal/`                      | legal       |
+| `medical/`                    | medical     |
+| `accounting/`                 | accounting  |
+| `hospitality/`                | hospitality |
+| anything else                 | engineering (default) |
 
 Override per-file via `sync_config.yaml` (see that file).
 
