@@ -205,7 +205,17 @@ def sliding_window_extract(text: str, domain: dict, doc_id: str = None,
     Returns write_graph-compatible dict:
         {"nodes": [...], "edges": [...]}
     so ingest.ingest_text() can feed it directly to write_graph().
+
+    Parallelism: the per-window work is I/O-bound (GLiNER + E2B HTTP calls).
+    Windows are independent given their PREVIOUS-window summary, so:
+      Phase 1 — summaries computed in parallel (cheap, independent).
+      Phase 2 — GLiNER + E2B extraction run in parallel (ThreadPoolExecutor,
+                bounded by SW_EXTRACT_WORKERS; E2B server has n_parallel=4).
+    Merging + validation happen in the main thread (shared state safety).
     """
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+
     if domain is None:
         import domain_loader
         domain = domain_loader.get_domain("engineering")
@@ -221,41 +231,56 @@ def sliding_window_extract(text: str, domain: dict, doc_id: str = None,
     all_labels = static_labels + dynamic
 
     chunks = sentence_chunk(text, max_words=1400, overlap_sentences=2)
+    relation_types = domain.get("relation_types", [])
+    workers = int(os.environ.get("SW_EXTRACT_WORKERS", "4"))
+    workers = max(1, min(workers, len(chunks) or 1))
 
+    # ── Phase 1: previous-window summaries (independent, cheap) ───────────
+    summaries = ["" for _ in chunks]
+    if chunks:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {ex.submit(generate_summary, chunks[i]["text"]): i
+                    for i in range(len(chunks))}
+            for fut in futs:
+                i = futs[fut]
+                try:
+                    summaries[i] = fut.result()
+                except Exception:
+                    summaries[i] = ""
+
+    # ── Phase 2: GLiNER + E2B extraction (independent given summaries) ─────
+    # Each future returns (window_index, gliner_entities, raw_e2b_response).
+    window_work = {}
+    if chunks:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {}
+            for i, chunk in enumerate(chunks):
+                fut = ex.submit(
+                    _extract_window, chunk["text"], all_labels,
+                    relation_types, summaries[i],
+                )
+                futs[fut] = i
+            for fut in futs:
+                i = futs[fut]
+                try:
+                    window_work[i] = fut.result()
+                except Exception as e:
+                    print(f"[sliding_window] window {i} failed: {e}", flush=True)
+                    window_work[i] = (i, [], "")
+
+    # ── Merge + validate in main thread (shared-state safe) ────────────────
     all_entities = {}
     all_edges = {}
-    prev_summary = ""
-
-    for chunk in chunks:
-        chunk_text = chunk["text"]
-
-        # 1. GLiNER on this chunk (entities with spans) — enriched label set
-        entities = _call_gliner(chunk_text, all_labels)
-
-        # 2. Build prompt with prev_summary for coref
-        prompt = build_sliding_prompt(
-            chunk_text, entities, domain.get("relation_types", []),
-            prev_summary,
-        )
-
-        # 3. E2B extraction
-        response = _call_e2b(SYSTEM_PROMPT_SLIDING, prompt)
-
-        # 4. Parse + validate (strict entity check, records dropped for dynamic)
+    for i in sorted(window_work.keys()):
+        _, entities, raw_response = window_work[i]
         relations = _parse_and_validate(
-            response, entities, domain.get("relation_types", []),
+            raw_response, entities, relation_types,
             doc_id=doc_id, domain=domain, domain_name=domain_name,
         )
-
-        # 5. Merge entities (dedup by name, first occurrence wins)
         for e in entities:
             key = e["name"].lower()
             if key not in all_entities:
                 all_entities[key] = e
-
-        # 6. Merge edges (union across windows by src-type-tgt).
-        #    Track ORIGINAL-case names (for write_graph resolver lookup)
-        #    but dedup by lowercase to avoid case-variant duplicates.
         for rel in relations:
             src = rel["source_name"]
             tgt = rel["target_name"]
@@ -263,9 +288,6 @@ def sliding_window_extract(text: str, domain: dict, doc_id: str = None,
             key = (src.lower(), rtype.lower(), tgt.lower())
             if key not in all_edges:
                 all_edges[key] = {"source": src, "type": rtype, "target": tgt}
-
-        # 7. Generate summary for NEXT window (Gemini coref mechanism)
-        prev_summary = generate_summary(chunk_text)
 
     # Strategy 3 — LLM Fallback NER for entities dropped across all windows.
     # Runs once after the loop (drops are buffered per doc in hybrid_extraction).
@@ -301,3 +323,16 @@ def sliding_window_extract(text: str, domain: dict, doc_id: str = None,
             for v in all_edges.values()
         ],
     }
+
+
+def _extract_window(chunk_text: str, all_labels: list, relation_types: list,
+                   prev_summary: str) -> tuple:
+    """Single-window I/O work (GLiNER + E2B). Returns
+    (idx_placeholder, gliner_entities, raw_e2b_response). Runs in a worker
+    thread — no shared-state mutation here.
+    """
+    entities = _call_gliner(chunk_text, all_labels)
+    prompt = build_sliding_prompt(
+        chunk_text, entities, relation_types, prev_summary)
+    response = _call_e2b(SYSTEM_PROMPT_SLIDING, prompt)
+    return (0, entities, response)

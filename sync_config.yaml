@@ -1,0 +1,25 @@
+# sync_config.yaml — optional overrides for sync_docs.py
+#
+# All keys are OPTIONAL. Delete any you don't need. Values here take precedence
+# over auto-inference. Pass a different file with:  sync_docs.py ROOT --config X
+#
+# Also overridable at runtime:
+#   --daemon-url URL        (or env RAG_DAEMON_URL) overrides `daemon_url` below
+#   --state-file NAME       name of the state file written under ROOT
+
+# Base URL of the GPU ingestion daemon (serve_gpu.py).
+# Default if omitted: http://127.0.0.1:8000
+daemon_url: http://127.0.0.1:8000
+
+# Map a relative file path (from the watched root) to a custom, stable doc_id.
+# Useful when you want human-friendly ids instead of full relative paths.
+# The server treats doc_id as GLOBAL (not namespaced by domain), so keep these
+# unique across the whole corpus.
+doc_id_map:
+  # eng/runbooks/service-catalog.md: svc-catalog
+  # papers/attention.pdf: paper-attention
+
+# Map a relative file path to an explicit domain (overrides path inference).
+# Valid domains: engineering, journal, legal, medical, accounting, hospitality
+domain_map:
+  # eng/runbooks/svc1.md: legal

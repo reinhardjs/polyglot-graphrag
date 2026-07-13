@@ -65,3 +65,8 @@ SNOMED_BENCHMARK.md
 # Runtime state (auto-generated, not source-controlled)
 /labels/
 /logs/
+
+# File-sync-daemon state (per watched root)
+.sync_state.json
+.sync_state.json.lock
+.sync_state.json.tmp

@@ -81,7 +81,18 @@ EXTRACTION_LLM_MODEL    = "gemma-4-E2B_q4_0-it.gguf"
 #   "hybrid"        — GLiNER (entities) → E2B (relation class, 100% precision) [RECOMMENDED]
 #   "sliding_window" — sentence-boundary chunked extraction with coref
 #                     resolution for documents >4096 tokens
-EXTRACTION_MODE = "llm"
+# Override at runtime: EXTRACTION_MODE=sliding_window (richer extraction for
+# long docs) | hybrid | index_routing | llm (single-pass).
+# Default is "sliding_window" — richest extraction (per-window LLM + GLiNER,
+# parallelized). For speed on huge corpora, set EXTRACTION_MODE=llm.
+EXTRACTION_MODE = os.environ.get("EXTRACTION_MODE", "sliding_window")
+
+# Parallel sliding-window extraction: number of windows processed concurrently.
+# Each window does GLiNER + E2B calls; E2B shares ONE KV cache across parallel
+# slots, so this MUST stay within E2B's context budget. With E2B launched at
+# --ctx-size 32768, 4 workers gives ~2x faster extraction than sequential without
+# KV overflow (HTTP 500). Lower to 1 if you hit 500s; raise on bigger GPUs.
+SW_EXTRACT_WORKERS = int(os.environ.get("SW_EXTRACT_WORKERS", "4"))
 
 # Extraction context — how much document text to feed the LLM at once.
 # The E2B model supports 128K context, so 32K chars (~8K tokens) is safe

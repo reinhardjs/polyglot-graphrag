@@ -289,32 +289,43 @@ def delete_doc_neo4j(doc_id: str, driver):
     With vector-driven resolution, entities can be shared across documents
     (e.g. "Database" appears in both ADR-014 and BUG-204). This function:
       - Removes doc_id from each entity's `source_docs` list.
+      - Removes doc_id from each relationship's `source_docs` list, and
+        deletes relationships whose `source_docs` becomes empty (orphaned) —
+        i.e. no remaining document asserts that specific relation.
       - Deletes entities whose `source_docs` list becomes empty (orphaned).
-      - Cleans up edges: an edge is deleted only if removing `doc_id` from
-        BOTH endpoints leaves at least one endpoint orphaned (i.e. the edge
-        has no remaining source document keeping it alive). Edges between two
-        still-shared nodes are preserved.
 
-    NOTE: this is the safe approximation. For perfectly accurate edge
-    attribution, track `source_docs` on the relationships themselves.
+    Edge attribution is now tracked on the relationship itself (V3.1), so a
+    relation is removed exactly when the last doc asserting it is gone — not
+    merely when an endpoint node happens to be orphaned. This fixes the prior
+    approximation where a stale edge could linger if its endpoints survived
+    via other documents.
+
+    NOTE: relationships that merge two resolved entities keep a single
+    source_docs list; idempotent append on write means re-ingest of the same
+    doc does not duplicate the doc_id on the edge.
     """
     with driver.session() as s:
-        # First: remove doc_id from source_docs on all matching nodes, and
-        # compute whether each endpoint will be orphaned.
+        # First: remove doc_id from source_docs on all matching nodes.
         s.run(
             "MATCH (n:Entity) WHERE $doc IN n.source_docs "
             "SET n.source_docs = [d IN n.source_docs WHERE d <> $doc]",
             doc=doc_id,
         )
-        # Second: delete edges where BOTH endpoints lose all source_docs
-        # (will be orphaned by the step below) — i.e. edges with no surviving
-        # source doc after removal. Edges connecting still-shared nodes stay.
+        # Second: remove doc_id from source_docs on all matching relationships,
+        # then delete edges that are now fully orphaned (no surviving source).
+        s.run(
+            "MATCH (a:Entity)-[r]->(b:Entity) WHERE $doc IN r.source_docs "
+            "SET r.source_docs = [d IN r.source_docs WHERE d <> $doc]",
+            doc=doc_id,
+        )
         s.run(
             "MATCH (a:Entity)-[r]->(b:Entity) "
-            "WHERE size(a.source_docs) = 0 OR size(b.source_docs) = 0 "
+            "WHERE size(r.source_docs) = 0 "
             "DELETE r",
         )
-        # Third: delete entities that now have empty source_docs (orphaned)
+        # Third: delete entities that are now fully orphaned (empty source_docs).
+        # (Kept as a safety net; edges were already pruned by their own
+        # source_docs above, so endpoint-orphaning no longer drives edge deletion.)
         s.run(
             "MATCH (n:Entity) WHERE size(n.source_docs) = 0 "
             "DETACH DELETE n",
@@ -452,18 +463,28 @@ def write_graph(doc_id: str, graph: dict, source_text: str, driver,
             continue
         seen_edges.add(dedup_key)
         edges_by_type.setdefault(safe_type, []).append(
-            {"source_id": src_id, "target_id": tgt_id}
+            {"source_id": src_id, "target_id": tgt_id, "doc": doc_id}
         )
 
     edge_count = 0
     with driver.session() as s:
         for rel_type, batch in edges_by_type.items():
             # Relationship type is validated/sanitized above; safe to interpolate.
+            # V3.1: edges carry source_docs (like nodes) so delete_doc_neo4j can
+            # remove a relation when the LAST doc asserting it is re-ingested or
+            # deleted — not only when an endpoint node is orphaned. This closes
+            # the edge-staleness gap noted in delete_doc_neo4j's docstring.
             s.run(
                 "UNWIND $edges AS edge "
                 "MATCH (a:Entity {id: edge.source_id}) "
                 "MATCH (b:Entity {id: edge.target_id}) "
-                f"MERGE (a)-[:{rel_type}]->(b)",
+                f"MERGE (a)-[r:{rel_type}]->(b) "
+                "ON CREATE SET r.source_docs = [edge.doc] "
+                "ON MATCH SET "
+                "  r.source_docs = CASE "
+                "    WHEN edge.doc IN COALESCE(r.source_docs, []) THEN r.source_docs "
+                "    ELSE COALESCE(r.source_docs, []) + edge.doc "
+                "  END",
                 edges=batch,
             )
             edge_count += len(batch)
@@ -506,6 +527,49 @@ def extract_graph_index_routing(doc_id: str, text: str,
         })
     return {"nodes": nodes, "edges": edges,
             "meta": result.get("meta", {})}
+
+
+def _extract_json_object(content: str):
+    """Extract the first balanced JSON object from LLM output that may be
+    wrapped in prose / markdown / multiple objects.
+
+    The naive `re.search(r'{.*}', content, re.DOTALL)` is GREEDY and grabs from
+    the first '{' to the last '}', so any trailing text after the JSON makes
+    json.loads raise 'Extra data' and the whole extraction fails (falling back
+    to GLiNER with far fewer entities). This walks brace depth to find the first
+    complete, parseable JSON object.
+    """
+    if not content:
+        return None
+    start = content.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(content)):
+        ch = content[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = content[start:i + 1]
+                try:
+                    return json.loads(candidate)
+                except Exception:
+                    return None
+    return None
 
 
 def normalize_graph(data: dict) -> dict:
@@ -594,11 +658,9 @@ def extract_graph_llm(doc_id: str, text: str, chunk_size: int = 512,
             max_tokens=C.EXTRACTION_MAX_TOKENS, temperature=0.0,
         )
         content = resp.choices[0].message.content or ""
-        m = re.search(r"\{.*\}", content, re.DOTALL)
-        if m:
-            data = json.loads(m.group(0))
-            if "nodes" in data and "edges" in data:
-                return normalize_graph(data)
+        data = _extract_json_object(content)
+        if data is not None and "nodes" in data and "edges" in data:
+            return normalize_graph(data)
     except Exception as e:
         print(f"[extract] LLM extraction failed: {e}", flush=True)
     print("[extract] falling back to GLiNER", flush=True)
