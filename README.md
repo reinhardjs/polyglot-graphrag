@@ -1,9 +1,15 @@
-# GraphRAG v3 — Neuro-Symbolic Knowledge Graph Pipeline
+# GraphRAG — Neuro-Symbolic Knowledge Graph Pipeline
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![release-please](https://img.shields.io/badge/version-0.1.0--beta.1-orange)](.release-please-manifest.json)
 
 Production-grade, 100% local GraphRAG with domain-agnostic extraction.
 All models on GPU (RTX 3060, 12 GB). Python 3.11.
 
-## Architecture (verified 2026-07-12)
+> **Status:** Beta pre-release toward v1.0.0 stable. See [Releases & Versioning](#releases--versioning-release-please--conventional-commits).
+
+## Architecture (verified 2026-07-13)
 
 | Component | Model | Port | VRAM | Role |
 |-----------|-------|------|------|------|
@@ -26,18 +32,35 @@ except the extraction LLM which runs as a separate llama-server process.
 | `hybrid` | GLiNER entities → E2B relation classify | 100% | 10-15s | Default (≤4K tokens) |
 | `sliding_window` | Sentence-chunk + coref summaries | 100% (short) / high-recall | 21-323s | Long documents |
 | `llm` | E2B full-doc single-pass | 89% | 11.8s | Fallback |
-| `index_routing` | GLiNER → Qwen 1.5B | ~20% | 1.2s | ❌ Deprecated |
 
 Supported domains: `engineering` (default), `journal`, `legal`, `medical`,
 `accounting`, `hospitality`. Schema in `domain_config.yaml`.
 
 ---
 
+## Prerequisites
+
+- Python 3.11+ · RTX 3060 12GB (or equivalent CUDA GPU) · Linux
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) (for E2B extraction model)
+- Neo4j 5.x · Qdrant 1.10+
+
+### Setup
+
+```bash
+git clone https://github.com/reinhardjs/polyglot-graphrag.git
+cd polyglot-graphrag
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+
+# Start supporting services
+sudo systemctl start neo4j qdrant
+```
+
 ## Quick Start
 
 ```bash
-# Start services
-sudo systemctl start neo4j qdrant rag-gpu-daemon
+# Start GPU daemon
+sudo systemctl start rag-gpu-daemon
 
 # Start E2B extraction model (Option B flags)
 LD_LIBRARY_PATH=.../llama.cpp-linux-x86_64-nvidia-cuda-avx2-2.23.1 \
@@ -65,6 +88,39 @@ curl -s -X POST http://127.0.0.1:8000/ask \
 hermes
 > who authored PR-482?
 ```
+
+---
+
+## Running Tests
+
+```bash
+# Unit tests
+cd tests && pytest -v
+
+# End-to-end (requires running daemon)
+cd tests && pytest -v test_e2e_*
+
+# A/B validation harness for Dynamic Labels
+cd scripts && python validate_dynamic_labels.py
+```
+
+---
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for:
+
+- Conventional Commit prefixes (`feat:`, `fix:`, `feat!:`, `docs:`, etc.)
+- Release workflow via release-please
+- Semantic versioning rules (pre-1.0 beta → feat bumps minor)
+
+**Quick checklist for a contribution:**
+
+1. Fork the repo, create a feature branch
+2. Follow Conventional Commits (this drives versioning)
+3. Add/update tests — run `pytest -v tests/`
+4. If changing extraction logic, benchmark with `scripts/bench_drift.py`
+5. Open a PR to `main`
 
 ---
 
@@ -101,10 +157,14 @@ Run `python bench_rag.py` for per-stage breakdown.
 | `ingest.py` | Late-chunk vectors → Qdrant, graph extraction → Neo4j |
 | `hybrid_extraction.py` | GLiNER+E2B hybrid extraction (primary path) |
 | `sliding_window.py` | Long-doc sentence-chunk extraction |
+| `label_provider.py` | Dynamic Label Injection — auto-expand GLiNER vocab |
 | `domain_config.yaml` | Domain schemas (entity/relation types, chunking) |
 | `domain_loader.py` | Config loader with validation |
+| `query_modulator.py` | Domain-aware query expansion |
+| `serve_cpu.py` | CPU-only daemon for benchmarking |
+| `crag_pipeline.py` | Corrective RAG (adaptive routing) |
 | `ask.py` | CLI client for /ask |
-| `bench_rag.py` | Stage-by-stage latency benchmark |
+| `bench_rag.py`, `bench_ws2.py` | Stage-by-stage latency benchmarks |
 | `sample_data/` | Engineering docs (PR, ADR, bug, wiki) |
 | `tests/` | Unit + e2e test suite (pytest) |
 | `plans/` | Architecture proposals |
@@ -122,9 +182,11 @@ Run `python bench_rag.py` for per-stage breakdown.
 polyglot-graphrag/            (git repo root = latest code on `main`)
 ├── config.py  serve_gpu.py  ingest.py  hybrid_extraction.py  ...
 ├── domain_config.yaml  run.sh  run_tests.sh
-├── domains/  sample_data/  tests/  plans/  scripts/
+├── sample_data/  tests/  plans/  scripts/
+├── archive/
+│   ├── legacy-v1/       historical v1 code (not used)
+│   └── domains/         old TOML profiles (superseded by domain_config.yaml)
 ├── docs/                    design & planning docs
-├── archive/legacy-v1/       historical v1 code (not used)
 ├── labels/  logs/           runtime state (gitignored)
 └── release-please-config.json  .release-please-manifest.json  .github/
 ```
@@ -169,7 +231,7 @@ Vectors go to `{domain}_collection` (Qdrant). Nodes carry a secondary label
 
 ## Hermes Integration
 
-The `rag_query` tool calls `POST /ask`. Plugin at `~/.hermes/plugins/rag/`.
+The `rag_query` tool calls `POST /ask`. Enable it in your Hermes profile:
 
 ```bash
 hermes plugins enable rag
