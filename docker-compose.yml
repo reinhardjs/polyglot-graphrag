@@ -1,0 +1,43 @@
+# docker-compose.yml — GraphRAG supporting services
+#
+# Starts Neo4j (graph store) + Qdrant (vector store).
+# These are the ONLY external stateful dependencies. The GPU LLMs (Gemma E2B/E4B)
+# and the FastAPI daemon (serve_gpu.py) are started separately — see RUN.md.
+#
+# Data is persisted on the host at:
+#   /mnt/data-970-plus/neo4j_data   (Neo4j graph + indexes)
+#   /mnt/data-970-plus/qdrant_storage  (Qdrant vectors)
+#
+# Reconstructed from the running containers (rag-system-neo4j-1 / rag-system-qdrant-1).
+# NOTE: if you already have data in those host dirs, `docker compose up` will
+# REUSE it — no reset. See MIGRATION.md before changing the data model.
+
+services:
+  neo4j:
+    image: neo4j:5.23
+    container_name: rag-system-neo4j-1
+    ports:
+      - "7474:7474"   # HTTP browser UI
+      - "7687:7687"   # Bolt protocol (used by the pipeline)
+    environment:
+      NEO4J_AUTH: neo4j/ragpassword123
+      NEO4J_server_memory_heap_initial__size: 1G
+      NEO4J_server_memory_heap_max__size: 2G
+      NEO4J_server_memory_pagecache_size: 512M
+    volumes:
+      - /mnt/data-970-plus/neo4j_data/data:/data
+      - /mnt/data-970-plus/neo4j_data/logs:/logs
+      - /mnt/data-970-plus/neo4j_data/plugins:/plugins
+      - /mnt/data-970-plus/neo4j_data/import:/import
+      - /mnt/data-970-plus/neo4j_data/licenses:/licenses
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: rag-system-qdrant-1
+    ports:
+      - "6333:6333"   # REST API (used by the pipeline)
+      - "6334:6334"   # gRPC
+    volumes:
+      - /mnt/data-970-plus/qdrant_storage:/qdrant/storage
+    restart: unless-stopped
