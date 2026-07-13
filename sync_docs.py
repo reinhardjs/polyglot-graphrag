@@ -369,7 +369,11 @@ class StateStore:
 class DaemonClient:
     """Thin wrapper over the GPU daemon's ingest/delete/status endpoints."""
 
-    def __init__(self, base_url: str, timeout: int = 120):
+    def __init__(self, base_url: str,
+                 timeout: int = int(os.environ.get("SYNC_INGEST_TIMEOUT", "600"))):
+        """Per-ingest timeout (seconds). Large files (e.g. 89 KB logs under
+        sliding_window extraction) can exceed the old 120 s default; raise via
+        SYNC_INGEST_TIMEOUT if you see 'did not finish' timeouts."""
         self.base = base_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
