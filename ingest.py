@@ -508,6 +508,49 @@ def extract_graph_index_routing(doc_id: str, text: str,
             "meta": result.get("meta", {})}
 
 
+def _extract_json_object(content: str):
+    """Extract the first balanced JSON object from LLM output that may be
+    wrapped in prose / markdown / multiple objects.
+
+    The naive `re.search(r'{.*}', content, re.DOTALL)` is GREEDY and grabs from
+    the first '{' to the last '}', so any trailing text after the JSON makes
+    json.loads raise 'Extra data' and the whole extraction fails (falling back
+    to GLiNER with far fewer entities). This walks brace depth to find the first
+    complete, parseable JSON object.
+    """
+    if not content:
+        return None
+    start = content.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(content)):
+        ch = content[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = content[start:i + 1]
+                try:
+                    return json.loads(candidate)
+                except Exception:
+                    return None
+    return None
+
+
 def normalize_graph(data: dict) -> dict:
     """Normalize an extractor's JSON into the canonical schema consumed by
     write_graph, so swapping the extraction LLM (which may emit different key
@@ -594,11 +637,9 @@ def extract_graph_llm(doc_id: str, text: str, chunk_size: int = 512,
             max_tokens=C.EXTRACTION_MAX_TOKENS, temperature=0.0,
         )
         content = resp.choices[0].message.content or ""
-        m = re.search(r"\{.*\}", content, re.DOTALL)
-        if m:
-            data = json.loads(m.group(0))
-            if "nodes" in data and "edges" in data:
-                return normalize_graph(data)
+        data = _extract_json_object(content)
+        if data is not None and "nodes" in data and "edges" in data:
+            return normalize_graph(data)
     except Exception as e:
         print(f"[extract] LLM extraction failed: {e}", flush=True)
     print("[extract] falling back to GLiNER", flush=True)

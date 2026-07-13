@@ -81,7 +81,9 @@ EXTRACTION_LLM_MODEL    = "gemma-4-E2B_q4_0-it.gguf"
 #   "hybrid"        — GLiNER (entities) → E2B (relation class, 100% precision) [RECOMMENDED]
 #   "sliding_window" — sentence-boundary chunked extraction with coref
 #                     resolution for documents >4096 tokens
-EXTRACTION_MODE = "llm"
+# Override at runtime: EXTRACTION_MODE=sliding_window (richer extraction for
+# long docs) | hybrid | index_routing | llm (single-pass, default).
+EXTRACTION_MODE = os.environ.get("EXTRACTION_MODE", "llm")
 
 # Extraction context — how much document text to feed the LLM at once.
 # The E2B model supports 128K context, so 32K chars (~8K tokens) is safe

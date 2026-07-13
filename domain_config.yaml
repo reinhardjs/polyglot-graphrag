@@ -169,6 +169,27 @@ domains:
   journal:
     collection: journal_chunks
     neo4j_label: Journal
+    extraction:
+      prompt: |
+        Extract a knowledge graph from the academic paper below. This is a
+        research article, not software engineering — extract scholarly entities
+        EXACTLY as they appear in the text (do NOT translate or generalize).
+        Entity types to extract:
+          Person, Organization, Model, Dataset, Method, Algorithm, Framework,
+          Metric, Theory, Institution, Author
+        Relationship types to extract:
+          PROPOSES, EVALUATES, OUTPERFORMS, USES, REPORTS, SUPPORTS,
+          CONTRADICTS, CITES, TRAINED_ON, INTRODUCES
+        Examples of GOOD entities: "RAPTOR", "recursive summarization",
+        "GPT-4", "QASPER", "BM25", "DPR", "Stanford University", "cluster",
+        "tree structure", "abstractive summarization", "bilevel optimization".
+        Extract concrete concepts, methods, models, datasets, and algorithms —
+        not just authors. Aim for breadth: a methods/results section should
+        yield many entities.
+        Return ONLY valid JSON, no prose, no markdown:
+        {{"nodes":[{{"id":"ExactEntityName","type":"Person|Organization|Model|Dataset|Method|Algorithm|Framework|Metric|Theory|Institution|Author"}}],"edges":[{{"source":"entity_a","target":"entity_b","type":"PROPOSES|EVALUATES|OUTPERFORMS|USES|REPORTS|SUPPORTS|CONTRADICTS|CITES|TRAINED_ON|INTRODUCES"}}]}}
+        Document ({doc_id}):
+        {text}
     entity_types:
     - Person
     - Organization
