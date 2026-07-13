@@ -14,6 +14,8 @@ is pulled or installed automatically. **You do need a Python venv:**
 ```bash
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
+# spaCy model for sliding-window sentence tokenization (one-time):
+python -m spacy download en_core_web_sm
 ```
 
 ## 1. Start the stack

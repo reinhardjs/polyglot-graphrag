@@ -44,10 +44,25 @@ and (optionally) asks a language model to write a natural-language answer.
 | **Docker + docker compose** | Runs Neo4j + Qdrant | any recent version |
 | **Python 3.11 venv** | Runs the FastAPI daemon + ingest | 3.11 |
 | **~25 GB disk** | models (E2B 3.3 GB, E4B 5.1 GB) + docker images + data | 30 GB |
-| **Linux** | llama.cpp CUDA build | Ubuntu 22.04 (tested) |
+- **Linux** | llama.cpp CUDA build | Ubuntu 22.04 (tested) |
 
-**You must download two model files yourself** (they are not in the repo — too
-large, and license/distribution constraints):
+### Install Python dependencies
+
+```bash
+cd <project-root>
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt          # fastapi, torch(cu121), gliner, spacy, …
+python -m spacy download en_core_web_sm  # sliding_window sentence tokenization
+```
+
+`requirements.txt` pins PyTorch to the CUDA 12.1 wheel (via
+`--extra-index-url https://download.pytorch.org/whl/cu121`); on a CPU-only
+host drop that line and use `torch==2.3.1`. `gliner`, `spacy`, `watchdog`
+(for `--watch`), `fastapi`/`uvicorn` are all required at runtime — they were
+previously undocumented.
+
+**You must download two model files yourself** (they are not in the repo —
+too large, and license/distribution constraints):
 
 1. **Gemma 4 E2B** (extraction) — `gemma-4-E2B-it-QAT-Q4_0.gguf`
    - Source: HuggingFace `lmstudio-community/gemma-4-E2B-it-QAT-GGUF`
