@@ -13,15 +13,16 @@ All models on GPU (RTX 3060, 12 GB). Python 3.11.
 
 | Component | Model | Port | VRAM | Role |
 |-----------|-------|------|------|------|
-| Embeddings | jina-embeddings-v3 (fp16) | :8000 | ~3.9 GB | Dense vectors |
+| Embeddings | jina-embeddings-v3 (fp16) | :8000 | ~3.9 GB | Dense vectors + entity resolution |
 | Reranker | bge-reranker-v2-m3 (fp16) | :8000 | shared | Result ranking |
-| Entity NER | gliner_multi-v2.1 (fp16) | :8000 | lazy-loaded | Zero-shot entity detection |
-| Extraction LLM | gemma-4-E2B Q4_0 | :8082 | ~2.3 GB | Relation classification |
+| Entity NER | gliner_multi-v2.1 (fp16) | :8000 | ~0.6 GB | Zero-shot entity detection |
+| Extraction LLM | gemma-4-E2B Q4_0 | :8082 | ~2.3 GB | Relation classification (per window) |
+| Synthesis LLM | gemma-4-E4B Q4_0 | :8084 | ~3.6 GB | Answer writing (/ask) |
 | Neo4j | — | :7687 | — | Entity graph |
 | Qdrant | — | :6333 | — | Vector store |
 
-**Total GPU: ~8.0 GB / 12 GB** (4 GB headroom). All models run on the GPU daemon
-except the extraction LLM which runs as a separate llama-server process.
+**~11 GB / 12 GB with all three GPU models** (E2B + daemon + E4B).
+Synthesis-only users can skip E4B → ~7.5 GB.
 
 ---
 
@@ -29,8 +30,8 @@ except the extraction LLM which runs as a separate llama-server process.
 
 | Mode | How | Precision | Latency | Use |
 |------|-----|-----------|----------|-----|
-| `hybrid` | GLiNER entities → E2B relation classify | 100% | 10-15s | Default (≤4K tokens) |
-| `sliding_window` | Sentence-chunk + coref summaries | 100% (short) / high-recall | 21-323s | Long documents |
+| `sliding_window` | GLiNER entities + E2B relations, parallel windows | high-recall | 21-323s | **Default** — all docs, arbitrary length |
+| `hybrid` | GLiNER entities → E2B relation classify | 100% | 10-15s | Fast single-pass (≤4K tokens) |
 | `llm` | E2B full-doc single-pass | 89% | 11.8s | Fallback |
 
 Supported domains: `engineering` (default), `journal`, `legal`, `medical`,
@@ -77,7 +78,7 @@ bash run.sh ingest sample_data
 bash run.sh ask "who reported BUG-204?"
 ```
 
-Or the raw systemd path:
+Or the legacy systemd path (deprecated; prefer `run.sh serve`):
 
 ```bash
 sudo systemctl start gemma-4-e2b.service      # extraction LLM (:8082)
@@ -106,10 +107,11 @@ query → embed (Jina) → Qdrant (top-K vectors)  ┐
                                                 ┘   synth:true  (synthesize:false → contexts only)
 ```
 
-Re-ingesting the same `doc_id` **merges** into the existing graph/vectors — your
-data is never reset by normal operation. See [MIGRATION.md](MIGRATION.md) for the
-full forward-compatibility contract (what's safe vs. what requires a flagged
-breaking-change migration).
+Re-ingesting the same `doc_id` **replaces** that doc's data cleanly (old chunks +
+that doc's Neo4j nodes/edges removed, new written). Entities shared across
+multiple documents are merged via vector resolution (≥0.88 cosine) and never
+duplicated. See [MIGRATION.md](MIGRATION.md) for the full forward-compatibility
+contract.
 
 ---
 
@@ -161,7 +163,10 @@ Run `python bench_rag.py` for per-stage breakdown.
 
 ---
 
-## Sample Queries (guaranteed answers)
+## Sample Queries (guaranteed answers with bundled sample_data/)
+
+Ingest the bundled sample docs first with `sync_docs.py sample_data/` (or `bash
+run.sh ingest sample_data`) before running these:
 
 - "who reported BUG-204 and what severity?" → bob, SEV-2
 - "what PR implemented ADR-014 and who reviewed it?" → PR-482, carol
@@ -175,10 +180,13 @@ Run `python bench_rag.py` for per-stage breakdown.
 | File | Purpose |
 |------|---------|
 | `config.py` | All ports, URIs, model names, extraction mode |
+| `sync_docs.py` | Git-style file→graph sync client (SHA256 change detection) |
+| `SYNC.md` | sync_docs.py usage guide |
+| `QUICKSTART.md` | 5-minute copy-paste path for first-time users |
+| `sliding_window.py` | Parallel sliding-window extraction (default ingest mode) |
 | `serve_gpu.py` | Primary daemon — embed, rerank, GLiNER, ingest, /ask |
 | `ingest.py` | Late-chunk vectors → Qdrant, graph extraction → Neo4j |
-| `hybrid_extraction.py` | GLiNER+E2B hybrid extraction (primary path) |
-| `sliding_window.py` | Long-doc sentence-chunk extraction |
+| `hybrid_extraction.py` | GLiNER+E2B hybrid extraction (fast path) |
 | `label_provider.py` | Dynamic Label Injection — auto-expand GLiNER vocab |
 | `domain_config.yaml` | Domain schemas (entity/relation types, chunking) |
 | `domain_loader.py` | Config loader with validation |
@@ -202,8 +210,9 @@ Run `python bench_rag.py` for per-stage breakdown.
 
 ```
 polyglot-graphrag/            (git repo root = latest code on `main`)
-├── config.py  serve_gpu.py  ingest.py  hybrid_extraction.py  ...
+├── config.py  serve_gpu.py  ingest.py  sync_docs.py  hybrid_extraction.py  ...
 ├── domain_config.yaml  run.sh  run_tests.sh
+├── QUICKSTART.md  RUN.md  SYNC.md  MIGRATION.md  ARCHITECTURE.md  ...
 ├── sample_data/  tests/  plans/  scripts/
 ├── archive/
 │   ├── legacy-v1/       historical v1 code (not used)
@@ -267,7 +276,9 @@ hermes
 
 | Document | Covers |
 |----------|--------|
+| `QUICKSTART.md` | **Fastest path** — 5-minute copy-paste from clone to query |
 | `RUN.md` | **Start here** — all-in-one run guide, Gemma/E2B explained, requirements, limits |
+| `SYNC.md` | File-sync daemon (`sync_docs.py`) — change tracking, --watch, config |
 | `MIGRATION.md` | Forward-compat contract: enhance without resetting Neo4j/Qdrant |
 | `ARCHITECTURE.md` | Full architecture, extraction modes, design decisions |
 | `BENCHMARKS.md` | All benchmarks (WS1-4, journal, bugfix impact) |

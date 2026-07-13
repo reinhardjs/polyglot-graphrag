@@ -13,7 +13,7 @@ file on disk ── rel path ──▶ doc_id ──POST /ingest──▶ Qdrant
 ## Quick start
 
 ```bash
-cd /mnt/data-970-plus/rag-system
+cd <project-root>
 
 # One-shot sync of a docs folder (defaults: daemon http://localhost:8000)
 ./venv/bin/python sync_docs.py /tmp/testdocs

@@ -44,7 +44,7 @@ and (optionally) asks a language model to write a natural-language answer.
 | **Docker + docker compose** | Runs Neo4j + Qdrant | any recent version |
 | **Python 3.11 venv** | Runs the FastAPI daemon + ingest | 3.11 |
 | **~25 GB disk** | models (E2B 3.3 GB, E4B 5.1 GB) + docker images + data | 30 GB |
-| **Linux** | systemd units + llama.cpp CUDA build | Ubuntu 22.04 (tested) |
+| **Linux** | llama.cpp CUDA build | Ubuntu 22.04 (tested) |
 
 **You must download two model files yourself** (they are not in the repo — too
 large, and license/distribution constraints):
@@ -251,7 +251,6 @@ n_contexts, contexts[], answer?}`.
 ```bash
 bash run.sh stop                 # daemon + LLMs
 docker compose down              # Neo4j + Qdrant (DATA IS PRESERVED on host)
-sudo systemctl stop rag-gpu-daemon
 ```
 
 Data in `<project-root>/data/neo4j` and `<project-root>/data/qdrant`
