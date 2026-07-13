@@ -30,7 +30,7 @@ mkdir -p "$ROOT/.run" "$ROOT/logs"
 MODELS_DIR="${MODELS_DIR:-$ROOT/models}"
 LLAMA_BIN="${LLAMA_BIN:-/home/reinhard/.lmstudio/extensions/backends/llama.cpp-linux-x86_64-nvidia-cuda-avx2-2.23.1/llama-server}"
 
-e2b_model="${E2B_MODEL:-$MODELS_DIR/gemma-4-E2B_q4_0-it.gguf}"
+e2b_model="${E2B_MODEL:-$MODELS_DIR/gemma-4-E2B-it-QAT-Q4_0.gguf}"
 e4b_model="${E4B_MODEL:-$MODELS_DIR/gemma-4-E4B-it-QAT-Q4_0.gguf}"
 
 start_llm() {
@@ -46,8 +46,11 @@ start_llm() {
     return
   fi
   echo "  starting llama-server on :$port with $(basename "$model") (ctx=$ctx)"
+  # --reasoning off: gemma-4 routes answers to reasoning_content (thinking
+  # channel) by default, leaving message.content EMPTY. Disabling reasoning
+  # puts the answer in content where the extraction code reads it.
   nohup "$LLAMA_BIN" --model "$model" --host 127.0.0.1 --port "$port" \
-    --gpu-layers 999 --ctx-size "$ctx" > "$log" 2>&1 &
+    --gpu-layers 999 --ctx-size "$ctx" --reasoning off > "$log" 2>&1 &
   for i in $(seq 1 90); do
     curl -s --max-time 2 "http://localhost:$port/v1/models" >/dev/null 2>&1 && { echo "  :$port ready (${i}s)"; return; }
     sleep 1

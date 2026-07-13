@@ -172,9 +172,9 @@ The `index_routing` mode (Qwen) stays deprecated.
 
 ### Current Flags
 ```
--m gemma-4-E2B_q4_0-it.gguf  (Q4_0, 3.2 GB on disk, ~2.3 GB VRAM loaded)
+-m gemma-4-E2B-it-QAT-Q4_0.gguf  (QAT Q4_0, 3.3 GB on disk, ~2.3 GB VRAM loaded)
 -c 4096  -t 12  -tb 12  --gpu-layers 999
---flash-attn on  --reasoning-format none  --parallel 2
+--flash-attn on  --reasoning off  --parallel 2
 --kv-unified  --host 0.0.0.0 --port 8082  --no-warmup
 ```
 

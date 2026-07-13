@@ -780,8 +780,15 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
     n_nodes = 0
     extraction_method = "none"
     if extract_graph:
+        n_nodes = 0
         mode = getattr(C, "EXTRACTION_MODE", "index_routing")
-        try:
+        # E2B-free bulk-load path: GLiNER + co-occurrence, no extraction LLM.
+        if os.environ.get("EXTRACT_WITHOUT_E2B", "").lower() in ("1", "true", "yes"):
+            from extractor_gliner import extract_gliner_graph
+            labels = (profile or {}).get("entity_types") or C.GLINER_LABELS
+            g = extract_gliner_graph(text, labels=labels)
+            extraction_method = "gliner_cooccurrence"
+        else:
             if mode == "index_routing":
                 g = extract_graph_index_routing(doc_id, text, domain=domain)
                 extraction_method = "index_routing"
@@ -805,27 +812,25 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
                 g = extract_graph_llm(doc_id, text, chunk_size=chunk_size,
                                       profile=profile)
                 extraction_method = "llm"
-            # Step 3 — vector-resolve entities + write to Neo4j (batched UNWIND)
-            driver = get_neo4j()
-            try:
-                # V3.0: pull the domain's Neo4j label from YAML so nodes are
-                # tagged (e.g. :Engineering) for domain-scoped graph retrieval.
-                neo4j_label = None
-                if domain:
-                    try:
-                        import domain_loader
-                        neo4j_label = domain_loader.get_domain(domain).get(
-                            "neo4j_label")
-                    except Exception:
-                        neo4j_label = None
-                n_nodes = write_graph(doc_id, g, text, driver,
-                                      chunk_size=chunk_size,
-                                      neo4j_label=neo4j_label)
-            finally:
-                driver.close()
-        except Exception as e:
-            print(f"[ingest] graph extraction failed for {doc_id}: {e}",
-                  flush=True)
+        # Step 3 — vector-resolve entities + write to Neo4j (batched UNWIND).
+        # Runs for ALL extraction modes; g is populated above.
+        driver = get_neo4j()
+        try:
+            # V3.0: pull the domain's Neo4j label from YAML so nodes are
+            # tagged (e.g. :Engineering) for domain-scoped graph retrieval.
+            neo4j_label = None
+            if domain:
+                try:
+                    import domain_loader
+                    neo4j_label = domain_loader.get_domain(domain).get(
+                        "neo4j_label")
+                except Exception:
+                    neo4j_label = None
+            n_nodes = write_graph(doc_id, g, text, driver,
+                                  chunk_size=chunk_size,
+                                  neo4j_label=neo4j_label)
+        finally:
+            driver.close()
     t_extract = time.time()
 
     return {
