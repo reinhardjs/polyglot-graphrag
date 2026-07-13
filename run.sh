@@ -34,8 +34,8 @@ e2b_model="${E2B_MODEL:-$MODELS_DIR/gemma-4-E2B_q4_0-it.gguf}"
 e4b_model="${E4B_MODEL:-$MODELS_DIR/gemma-4-E4B-it-QAT-Q4_0.gguf}"
 
 start_llm() {
-  # $1 = port, $2 = model path, $3 = log file
-  local port="$1" model="$2" log="$3"
+  # $1 = port, $2 = model path, $3 = log file, $4 = ctx-size
+  local port="$1" model="$2" log="$3" ctx="${4:-8192}"
   if curl -s --max-time 2 "http://localhost:$port/v1/models" >/dev/null 2>&1; then
     echo "  :$port already up"
     return
@@ -45,9 +45,9 @@ start_llm() {
     echo "       set E2B_MODEL / E4B_MODEL or place the GGUF in $MODELS_DIR" >&2
     return
   fi
-  echo "  starting llama-server on :$port with $(basename "$model")"
+  echo "  starting llama-server on :$port with $(basename "$model") (ctx=$ctx)"
   nohup "$LLAMA_BIN" --model "$model" --host 127.0.0.1 --port "$port" \
-    --gpu-layers 999 --ctx-size 8192 > "$log" 2>&1 &
+    --gpu-layers 999 --ctx-size "$ctx" > "$log" 2>&1 &
   for i in $(seq 1 90); do
     curl -s --max-time 2 "http://localhost:$port/v1/models" >/dev/null 2>&1 && { echo "  :$port ready (${i}s)"; return; }
     sleep 1
@@ -55,10 +55,21 @@ start_llm() {
   echo "  :$port FAILED — see $log" >&2
 }
 
+# E2B (extraction) needs a LARGE context: sliding_window sends several long
+# windows concurrently, and llama.cpp shares ONE KV cache across parallel slots.
+# With the default 8192 the concurrent windows overflow → HTTP 500. 32768 gives
+# headroom so SW_EXTRACT_WORKERS>1 actually parallelizes. E4B (synthesis) stays
+# at 8192 (single short prompt per /ask).
+E2B_CTX="${E2B_CTX:-32768}"
+E4B_CTX="${E4B_CTX:-8192}"
+# Parallel sliding-window extraction workers. Bound by E2B's shared KV cache;
+# 4 is the sweet spot on a 12GB card with E2B_CTX=32768 (~2x faster than seq).
+export SW_EXTRACT_WORKERS="${SW_EXTRACT_WORKERS:-4}"
+
 start_llms() {
   echo "Starting GPU LLMs (extraction E2B :8082, synthesis E4B :8084)..."
-  start_llm 8082 "$e2b_model" "$ROOT/logs/llm_e2b.log"
-  start_llm 8084 "$e4b_model" "$ROOT/logs/llm_e4b.log"
+  start_llm 8082 "$e2b_model" "$ROOT/logs/llm_e2b.log" "$E2B_CTX"
+  start_llm 8084 "$e4b_model" "$ROOT/logs/llm_e4b.log" "$E4B_CTX"
 }
 
 start_daemon() {
