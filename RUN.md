@@ -78,83 +78,117 @@ cd <project-root>
 # 1) Supporting stores (Neo4j + Qdrant) — Docker
 docker compose up -d
 
-# 2) GPU LLMs (Gemma E2B on :8082, E4B on :8084) — systemd
-sudo systemctl start gemma-4-e2b.service
-sudo systemctl start gemma-4-e4b.service        # optional, for synthesis
+# 2) GPU LLMs (Gemma E2B on :8082, E4B on :8084) + the FastAPI pipeline daemon
+#    in ONE command. This is the recommended path — it launches llama-server
+#    directly (no systemd/sudo needed) and waits for each service to be ready.
+bash run.sh serve
 
-# 3) The FastAPI pipeline daemon (embed/rerank/GLiNER + /ask + /ingest)
-sudo systemctl start rag-gpu-daemon
-
-# 4) Wait for health
-sleep 20
-curl -s http://localhost:8000/health            # → {"status":"ok",...}
-curl -s http://localhost:8082/v1/models >/dev/null && echo "E2B up"
+# 3) Health check (all three must be up)
+bash run.sh health
 ```
 
-That's the all-in-one. The `run.sh` helper wraps steps 2–3 with readiness waits:
+> The `run.sh` helper launches E2B with `--ctx-size 32768` (required so the
+> parallel sliding-window extractor doesn't overflow the shared KV cache — see
+> §3) and exports `SW_EXTRACT_WORKERS=4`. No sudo, no systemd units needed.
 
+Handy `run.sh` subcommands:
 ```bash
 bash run.sh serve      # start LLMs + daemon (idempotent)
-bash run.sh health     # check everything
-bash run.sh ingest sample_data   # load the bundled sample docs
-bash run.sh ask "who reported BUG-204?"   # full pipeline
+bash run.sh health     # check everything (LLMs + daemon + VRAM)
+bash run.sh ask "who reported BUG-204?"   # full pipeline (retrieve + synthesize)
+bash run.sh retrieve "who reported BUG-204?"  # retrieval only (no synthesis)
 bash run.sh stop       # stop daemon + LLMs
 ```
+
+> **Models:** place the two GGUF files in `<project-root>/models/` (see §1).
+> `run.sh` resolves them there automatically. The legacy systemd units point at
+> `/home/reinhard/.lmstudio/...` and are NOT used in the portable setup.
 
 ---
 
 ## 3. Ingest your data (the flow)
 
+There are two ways to ingest. **For real documents you'll edit over time, use
+`sync_docs.py`** (Option A) — it tracks file→`doc_id` and keeps Neo4j + Qdrant
+consistent with your files via SHA256 change detection (like git). For a
+one-off, use the raw API (Option B).
+
+### Option A — `sync_docs.py` (recommended for real docs)
+
 ```bash
-# Single document via the HTTP API (non-blocking — poll the status):
-curl -X POST http://localhost:8000/ingest \
+cd <project-root>
+
+# 1) Put your docs in a folder. Sub-path becomes the doc_id; eng/ → engineering.
+mkdir -p mydocs/eng
+cp /path/to/your-real-doc.md mydocs/eng/
+
+# 2) Sync the folder → POST /ingest for each new/changed file
+./venv/bin/python sync_docs.py mydocs
+
+# 3) (Optional) Watch the folder and auto-sync on every save:
+./venv/bin/python sync_docs.py mydocs --watch
+```
+
+- `doc_id` = relative path (`eng/your-real-doc.md`); `domain` inferred from the
+  path (`eng/`→engineering, `journal/` or `*.pdf`→journal, `legal/`→legal).
+- Re-running skips unchanged files; edits are re-ingested; deleted files are
+  removed from BOTH stores. State lives in `mydocs/.sync_state.json`.
+- **PDFs are auto-extracted** with `pdftotext` — just drop them in the folder.
+- See `SYNC.md` for full options (`.syncignore`, `--config`, `--force`, dry-run).
+
+### Option B — raw `/ingest` API (one-off)
+
+```bash
+curl -s -X POST http://localhost:8000/ingest \
   -H "Content-Type: application/json" \
   -d '{"text":"BUG-204 caused an outage in checkout. bob reported it.",
        "doc_id":"my-doc-1","domain":"engineering"}'
 
-# Poll until done:
-curl http://localhost:8000/ingest/status/<task_id_from_above>
-
-# Or bulk-ingest a folder of .md/.txt:
-<project-root>/venv/bin/python ingest.py /path/to/docs --domain engineering
+# Poll until done (ingest is async):
+curl http://localhost:8000/ingest/status/<task_id>
 ```
 
-> **PDFs are NOT ingested directly.** The pipeline consumes plain text / markdown
-> / txt. To ingest a PDF, extract its text first (system `pdftotext` works), then
-> send the text via the API:
+**PDF one-off** (extract text first, then send it):
+```bash
+pdftotext my-paper.pdf /tmp/my-paper.txt
+TID=$(curl -s -X POST http://localhost:8000/ingest \
+  -H "Content-Type: application/json" \
+  -d "{\"text\":$(python3 -c "import json;print(json.dumps(open('/tmp/my-paper.txt').read()))"),\
+       \"doc_id\":\"my-paper\",\"domain\":\"journal\"}" \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['task_id'])")
+curl http://localhost:8000/ingest/status/$TID
+```
+
+> **Verify it landed** (replace the doc_id with yours):
 > ```bash
-> # 1) PDF → text
-> pdftotext my-paper.pdf /tmp/my-paper.txt
-> # 2) Ingest the extracted text (journal domain example)
-> TID=$(curl -s -X POST http://localhost:8000/ingest \
+> docker exec rag-system-neo4j-1 cypher-shell -a bolt://localhost:7687 \
+>   -u neo4j -p ragpassword123 \
+>   "MATCH (n:Entity) WHERE 'eng/your-real-doc.md' IN n.source_docs \
+>    RETURN n.name, n.type LIMIT 20;"
+> curl -s "http://localhost:6333/collections/engineering_chunks/points/count" \
 >   -H "Content-Type: application/json" \
->   -d "{\"text\":$(python3 -c "import json;print(json.dumps(open('/tmp/my-paper.txt').read()))"),\
->        \"doc_id\":\"my-paper\",\"domain\":\"journal\"}" \
->   | grep -o '"task_id":"[^"]*"' | cut -d'"' -f4)
-> # 3) Poll until done
-> curl http://localhost:8000/ingest/status/$TID
+>   -d '{"filter":{"must":[{"key":"doc_id","match":{"value":"eng/your-real-doc.md"}}]}}'
 > ```
-> Verified walkthrough: the ICLR 2024 RAPTOR paper (`archive/legacy-v1/data/2401.18059v1.pdf`)
-> extracted to 1612 lines → 1882 chunks + 22 entities into `journal_chunks`, and
-> `POST /ask` (both `synthesize:false` and `synthesize:true`) returned answers.
 
 **What happens inside (so you can debug):**
 
-1. **Chunk** — text is split (late-chunking strategy per domain: `engineering`
-   & `medical` use sentence chunking; others may use fixed/section).
+1. **Chunk** — text is split (late-chunking strategy per domain).
 2. **Embed** — each chunk → 1024-d vector via **Jina v3** (multilingual) on GPU.
 3. **Store vectors** — upserted into the domain's Qdrant collection
-   (`engineering_chunks`, `legal_chunks`, …). A `doc_id` tag lets us delete later.
-4. **Extract graph** — the chunk (or whole doc) is sent to **Gemma E2B** over
-   `:8082`; it returns JSON `{nodes:[…], edges:[…]}`.
-5. **Resolve + write graph** — each entity name is **embedded with Jina** and
-   matched against existing Neo4j nodes (≥0.88 cosine → reuse, append alias;
-   else create). This *vector-resolution* is what makes re-ingestion safe (see
-   MIGRATION.md). Edges are MERGEd between resolved IDs. Domain label
-   (`:Engineering`) + optional `:Discovered` tag applied.
+   (`engineering_chunks`, `journal_chunks`, …), tagged with `doc_id`.
+4. **Extract graph** — default mode is **`sliding_window`**: the doc is split
+   into windows, each window's entities are found (GLiNER) and relationships
+   extracted (Gemma E2B) **in parallel** (`SW_EXTRACT_WORKERS=4`). This yields
+   far more entities than the old single-pass mode (~130 entities on the RAPTOR
+   paper vs ~22 before the fix).
+5. **Resolve + write graph** — each entity name is embedded with Jina and
+   matched against existing Neo4j nodes (≥0.88 cosine → reuse; else create).
+   Edges carry `source_docs` so deletes are exact (no stale edges). See
+   MIGRATION.md for the forward-compatibility contract.
 
-> Re-running ingest on the same `doc_id` **merges**, not duplicates — entities
-> accumulate aliases/source_docs, never overwrite your graph.
+> Re-running ingest on the same `doc_id` **replaces** that doc's data cleanly
+> (old chunks + that doc's nodes/edges removed, new written). Shared entities
+> across docs are merged, never duplicated.
 
 ---
 
@@ -189,24 +223,26 @@ n_contexts, contexts[], answer?}`.
 
 ## 5. Known limitations (must read)
 
-- **E4B synthesis is optional but not started by default** in this environment.
-  `synthesize:true` 500s unless `gemma-4-e4b.service` is running.
-- **Model paths are machine-specific.** `gemma-4-e2b.service` points at
-  `/home/reinhard/.lmstudio/...`; the live server here actually uses
-  `/project-root>/models/...`. Edit the `.service` `ExecStart -m` path to
-  match your download location.
-- **VRAM is tight on 12 GB.** E2B + daemon models ≈ 5 GB. E4B adds ~3 GB — if
-  you start all three on a 12 GB card, expect OOM. Run E4B only when you need
-  synthesis, or lower `--n-gpu-layers`.
+- **E4B synthesis needs E4B running.** `synthesize:true` 500s unless E4B
+  (`:8084`) is up. Use `synthesize:false` for retrieval-only. `bash run.sh
+  serve` starts E4B by default, so this is only an issue if you skipped it.
+- **VRAM is tight on 12 GB.** E2B (~2.3 GB) + daemon models (Jina/MiniLM/BGE
+  ~2.5 GB) + E4B (~3.6 GB) ≈ 11 GB. All three fit on a 12 GB card but leave
+  little headroom; avoid concurrent heavy ingest + many parallel queries. To
+  free VRAM, run E4B only when needed or offload the BGE reranker to CPU.
 - **Single-doc `/ingest` is async** — always poll `/ingest/status/{task_id}`.
+  `sync_docs.py` handles polling internally.
 - **Cross-lingual** matching uses Jina v3 alignment; very different scripts may
   not merge into one node.
 - **Edges may be 0 for some documents.** Relation extraction relies on the LLM
-  emitting typed relationships; dense narrative papers (e.g. some journal
-  articles) can yield entities but `edges:0`. Graph retrieval (`graph_hits`)
-  still works on the entity nodes — it just has fewer relationship paths. This is
-  a quality characteristic, not a failure; the doc is fully searchable via vectors.
-- **PDFs need pre-extraction** (see §3) — the pipeline ingests text, not PDF bytes.
+  emitting typed relationships; dense narrative papers can yield entities but
+  `edges:0`. Graph retrieval still works on the entity nodes. This is a quality
+  characteristic, not a failure.
+- **PDFs are auto-extracted** by `sync_docs.py` (needs `pdftotext` installed);
+  the raw API consumes text, so extract first for one-offs.
+- **Keep docs consistent with `sync_docs.py`.** Editing a file on disk WITHOUT
+  re-syncing leaves Neo4j/Qdrant stale. Re-run `sync_docs.py <folder>` (or use
+  `--watch`) after any change. The daemon does not watch the filesystem itself.
 
 ---
 
