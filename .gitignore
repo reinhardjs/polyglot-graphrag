@@ -9,6 +9,7 @@ build/
 # Environments
 rag-env/
 venv/
+venv
 env/
 
 # Model weights (GGUF) — large, download separately
