@@ -33,7 +33,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Set
+from typing import Dict, List, Optional, Set
 
 import requests
 
@@ -109,6 +109,7 @@ class LabelProvider:
         self.ttl_docs = dl.get("ttl_docs", 50)
         self._candidates: Dict[str, LabelCandidate] = {}
         self._active: Set[str] = set()
+        self._type_origins: Dict[str, List[str]] = {}  # promoted type -> source names
         self._doc_counter = 0
         self._current_doc = ""
         self._lock = threading.Lock()
@@ -122,6 +123,16 @@ class LabelProvider:
             return []
         with self._lock:
             return list(self._active)
+
+    def get_type_origins(self) -> dict:
+        """Return promoted-type -> [source names] provenance map.
+
+        Lets you trace a learned semantic type (Strategy 3) back to the
+        dropped entity names that produced it, e.g.
+        ``{"Framework": ["gpt-4", "kubernetes", "llama"]}``.
+        """
+        with self._lock:
+            return {k: list(v) for k, v in self._type_origins.items()}
 
     def record_unknown(self, name: str, inferred_type: str = "") -> None:
         """Record a dropped entity name after E2B parse.
@@ -176,6 +187,7 @@ class LabelProvider:
                     self._active.discard(cand.label)
                     del self._candidates[key]
             active_snapshot = list(self._active)
+            type_origins_snapshot = {k: list(v) for k, v in self._type_origins.items()}
             candidates_snapshot = {
                 k: {
                     "label": c.label,
@@ -189,7 +201,8 @@ class LabelProvider:
             }
             doc_counter = self._doc_counter
         # Persistence + daemon reload outside the lock (slow I/O).
-        self._save_state(doc_counter, active_snapshot, candidates_snapshot)
+        self._save_state(doc_counter, active_snapshot, candidates_snapshot,
+                         type_origins_snapshot)
         self._reload_daemon()
 
     # -- Internal -------------------------------------------------------------
@@ -202,6 +215,11 @@ class LabelProvider:
         label = cand.inferred_type if cand.inferred_type else cand.label
         if len(self._active) >= self.max_labels:
             self._evict_lru()
+        if label not in self._active:
+            # Record provenance: which source name(s) produced this type.
+            origins = self._type_origins.setdefault(label, [])
+            if cand.label not in origins:
+                origins.append(cand.label)
         self._active.add(label)
         logger.info("promoted dynamic label '%s' for domain '%s' "
                     "(active=%d)", label, self.domain, len(self._active))
@@ -235,7 +253,8 @@ class LabelProvider:
     def _state_path(self) -> str:
         return os.path.join(_STATE_DIR, f"{self.domain}_dynamic.json")
 
-    def _save_state(self, doc_counter, active_snapshot, candidates_snapshot) -> None:
+    def _save_state(self, doc_counter, active_snapshot, candidates_snapshot,
+                    type_origins_snapshot=None) -> None:
         try:
             os.makedirs(_STATE_DIR, exist_ok=True)
             state = {
@@ -243,6 +262,7 @@ class LabelProvider:
                 "doc_counter": doc_counter,
                 "active": active_snapshot,
                 "candidates": candidates_snapshot,
+                "type_origins": type_origins_snapshot or {},
             }
             with open(self._state_path(), "w") as f:
                 json.dump(state, f, indent=2)
@@ -260,6 +280,9 @@ class LabelProvider:
             self._active = set(state.get("active", []))
             for key, data in state.get("candidates", {}).items():
                 self._candidates[key] = LabelCandidate(**data)
+            self._type_origins = {
+                k: list(v) for k, v in state.get("type_origins", {}).items()
+            }
             logger.info("loaded dynamic labels for '%s': %d active, %d candidates",
                         self.domain, len(self._active), len(self._candidates))
         except Exception as e:  # noqa: BLE001

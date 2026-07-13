@@ -679,3 +679,45 @@ lookup fell back to the wrong/None domain. Fixed by adding `domain_name` to
 the wrapper signature and forwarding it. Verified: with the fix, both `hybrid`
 and `sliding_window` ingest paths recover typed nodes (e.g. `gpt-4`→`Framework`,
 `raptor`→`Framework`, `quality benchmark`→`Metric`) and land them in Neo4j.
+
+### Strategy 3 traceability / visibility (v3.1.4)
+The promoted type (e.g. `Framework`) is now fully traceable across three
+surfaces, so it is never a black box:
+
+1. **Neo4j `:Discovered` label (Option B).** Recovered entities get a
+   `:Discovered` label + `n.discovered_by = "llm_fallback"` property
+   (`write_graph` in `ingest.py`). Query:
+   `MATCH (n:Discovered) RETURN n` — instant label-index scan, visually
+   separable in Neo4j Browser/Bloom, composes with domain
+   (`MATCH (n:Discovered:Journal)`).
+2. **Audit log carries the type + method.** `logs/dropped_entities.jsonl`
+   now records `inferred_type` + `method: "llm_fallback"` per dropped name
+   (via `_stamp_inferred_types`). `grep` any type to see every source entity.
+3. **Promotion provenance.** `LabelProvider` tracks
+   `type_origins: {type -> [source names]}` (e.g.
+   `{"Framework": ["gpt-4","kubernetes","llama"]}`), persisted to
+   `~/.hermes/labels/<domain>_dynamic.json` and exposed via
+   `get_type_origins()`. Trace a learned type back to its sources.
+
+All three paths verified: `:Discovered` label applied correctly
+(`labels: ['Entity','Engineering','Discovered']`), audit log shows
+`('retrieval-augmented language models','Model','llm_fallback')`, and
+provenance persists across restarts.
+
+**Operational note:** on comprehensive-label domains (journal/engineering)
+GLiNER already detects most entities E2B references, so `:Discovered` nodes
+are rare AND self-healing — once Strategy 3 promotes `Framework`, GLiNER
+detects those entities natively on subsequent docs, so there is nothing left
+to recover. The marker therefore appears on the doc that FIRST triggers the
+gap, then vanishes as the gap closes. This is the intended feedback loop, not
+a defect. On sparser domains it fires more often.
+
+### Bug fixed during continued verification (post-v3.1.2)
+`sliding_window._parse_and_validate` wrapper did NOT forward `domain_name`
+to the underlying `hybrid_extraction._parse_and_validate`. This silently
+broke drop-recording (and therefore Strategy 3 + dynamic-label promotion) in
+the **sliding-window** path — drops were never recorded because the provider
+lookup fell back to the wrong/None domain. Fixed by adding `domain_name` to
+the wrapper signature and forwarding it. Verified: with the fix, both `hybrid`
+and `sliding_window` ingest paths recover typed nodes (e.g. `gpt-4`→`Framework`,
+`raptor`→`Framework`, `quality benchmark`→`Metric`) and land them in Neo4j.

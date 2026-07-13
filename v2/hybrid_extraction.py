@@ -51,11 +51,13 @@ def _domain_name(domain: dict) -> str:
 
 
 def _record_dropped(doc_id, domain_name, src, tgt,
-                    src_missing, tgt_missing):
+                    src_missing, tgt_missing, inferred_type=""):
     """Buffer a dropped-entity observation for the audit log.
 
     Called from _parse_and_validate whenever an edge references an entity
     GLiNER did not detect. Flushed by ``flush_dropped_log()`` at document end.
+    ``inferred_type`` (Strategy 3) is stamped later by
+    ``_stamp_inferred_types`` once the LLM fallback has classified the name.
     Never raises.
     """
     try:
@@ -68,10 +70,35 @@ def _record_dropped(doc_id, domain_name, src, tgt,
         })
         if src_missing and src:
             _dropped_buffer[key]["dropped"].append(
-                {"name": src, "side": "src", "inferred_type": ""})
+                {"name": src, "side": "src",
+                 "inferred_type": inferred_type, "method": ""})
         if tgt_missing and tgt:
             _dropped_buffer[key]["dropped"].append(
-                {"name": tgt, "side": "tgt", "inferred_type": ""})
+                {"name": tgt, "side": "tgt",
+                 "inferred_type": inferred_type, "method": ""})
+    except Exception:
+        pass
+
+
+def _stamp_inferred_types(doc_id, classified: dict) -> None:
+    """Enrich buffered dropped entries with Strategy-3 inferred types.
+
+    After the LLM fallback classifies dropped names, stamp the matched type
+    and method onto the buffered audit records so the jsonl log carries the
+    full trace (name -> inferred_type -> method). Idempotent.
+    """
+    try:
+        key = doc_id or "__unknown__"
+        rec = _dropped_buffer.get(key)
+        if not rec:
+            return
+        by_name = {}
+        for d in rec["dropped"]:
+            by_name.setdefault(d["name"], []).append(d)
+        for name, typ in classified.items():
+            for d in by_name.get(name, []):
+                d["inferred_type"] = typ
+                d["method"] = "llm_fallback"
     except Exception:
         pass
 
@@ -519,7 +546,12 @@ def extract_hybrid(doc_id: str, text: str, domain: dict,
     # 5. Return in extract_graph_llm-compatible shape
     return {
         "nodes": [
-            {"id": e["name"], "type": e.get("type", "unknown")}
+            {
+                "id": e["name"],
+                "type": e.get("type", "unknown"),
+                **({"discovered_by": e["discovered_by"]}
+                   if e.get("discovered_by") else {}),
+            }
             for e in entities
         ],
         "edges": [
@@ -570,6 +602,10 @@ def _strategy3_fallback(doc_id, text, domain, domain_name, entities,
     if not classified:
         return result
 
+    # Stamp the inferred types + method onto the audit buffer so the jsonl
+    # log carries the full trace: dropped name -> inferred_type -> method.
+    _stamp_inferred_types(doc_id, classified)
+
     # Record on provider with inferred_type so Strategy 2 promotes the TYPE.
     for name, inferred in classified.items():
         try:
@@ -577,12 +613,17 @@ def _strategy3_fallback(doc_id, text, domain, domain_name, entities,
         except Exception:
             pass
 
-    # Build recovered entity nodes with correct semantic type.
+    # Build recovered entity nodes with correct semantic type + discovery
+    # marker so write_graph can apply the :Discovered label (Option B).
     known = {e["name"].lower() for e in entities}
     new_entities = []
     for name, inferred in classified.items():
         if name.lower() not in known:
-            new_entities.append({"name": name, "type": inferred})
+            new_entities.append({
+                "name": name,
+                "type": inferred,
+                "discovered_by": "llm_fallback",
+            })
             known.add(name.lower())
     result["new_entities"] = new_entities
     result["second_pass"] = bool(cfg.get("second_pass", True))

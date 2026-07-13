@@ -267,6 +267,20 @@ def sliding_window_extract(text: str, domain: dict, doc_id: str = None,
         # 7. Generate summary for NEXT window (Gemini coref mechanism)
         prev_summary = generate_summary(chunk_text)
 
+    # Strategy 3 — LLM Fallback NER for entities dropped across all windows.
+    # Runs once after the loop (drops are buffered per doc in hybrid_extraction).
+    try:
+        from hybrid_extraction import _strategy3_fallback as _s3
+        recovered = _s3(doc_id, text, domain, domain_name,
+                       list(all_entities.values()), list(all_edges.values()),
+                       provider)
+        for e in recovered["new_entities"]:
+            key = e["name"].lower()
+            if key not in all_entities:
+                all_entities[key] = e
+    except Exception:
+        pass
+
     # Advance dynamic-label state (promotion/eviction) + flush audit log
     provider.step_document(doc_id)
     from hybrid_extraction import flush_dropped_log
@@ -274,7 +288,12 @@ def sliding_window_extract(text: str, domain: dict, doc_id: str = None,
 
     return {
         "nodes": [
-            {"id": e["name"], "type": e.get("type", "unknown")}
+            {
+                "id": e["name"],
+                "type": e.get("type", "unknown"),
+                **({"discovered_by": e["discovered_by"]}
+                   if e.get("discovered_by") else {}),
+            }
             for e in all_entities.values()
         ],
         "edges": [

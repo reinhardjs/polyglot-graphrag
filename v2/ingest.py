@@ -383,8 +383,12 @@ def write_graph(doc_id: str, graph: dict, source_text: str, driver,
             # Check if this exact name is NEW to this resolved node
             # (MERGE the node; append the alias only if novel)
             # V3.0: also attach the domain label (e.g. :Engineering) when set,
-            # so graph retrieval can scope subgraphs by domain.
+            # so graph retrieval can scope subgraphs by domain. Strategy 3
+            # recovered entities additionally get a :Discovered label so they
+            # are visually/queryably separable from GLiNER-detected nodes.
             label_clause = f":{safe_label}" if safe_label else ""
+            if node.get("discovered_by"):
+                label_clause += ":Discovered"
             result = s.run(
                 f"MERGE (n:Entity{label_clause} {{id:$id}}) "
                 "ON CREATE SET "
@@ -406,9 +410,12 @@ def write_graph(doc_id: str, graph: dict, source_text: str, driver,
                 "    WHEN $name IN COALESCE(n.aliases, []) THEN n.aliases "
                 "    ELSE COALESCE(n.aliases, []) + $name "
                 "  END "
-                "RETURN n.name AS name, n.aliases AS aliases",
+                # Stamp discovery metadata on first sighting (ON CREATE only,
+                # so we don't overwrite an already-tagged node on re-ingest).
+                "ON CREATE SET n.discovered_by = $discovered_by ",
                 id=resolved_id, name=raw_name, type=entity_type,
                 vec=name_vec, doc=doc_id, profile=profile,
+                discovered_by=node.get("discovered_by", ""),
             ).single()
             if result:
                 aliases = result.get("aliases", [])
