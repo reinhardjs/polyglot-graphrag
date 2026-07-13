@@ -778,9 +778,9 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
     #   config.EXTRACTION_MODE == "index_routing"; otherwise the legacy LLM
     #   (E2B) path is used. Both feed write_graph's batched UNWIND writer.
     n_nodes = 0
+    n_edges = 0
     extraction_method = "none"
     if extract_graph:
-        n_nodes = 0
         mode = getattr(C, "EXTRACTION_MODE", "index_routing")
         # E2B-free bulk-load path: GLiNER + co-occurrence, no extraction LLM.
         if os.environ.get("EXTRACT_WITHOUT_E2B", "").lower() in ("1", "true", "yes"):
@@ -829,6 +829,9 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
             n_nodes = write_graph(doc_id, g, text, driver,
                                   chunk_size=chunk_size,
                                   neo4j_label=neo4j_label)
+            # write_graph returns the node count (int); capture edge count
+            # from the extracted graph dict before writing.
+            n_edges = len(g.get("edges", []))
         finally:
             driver.close()
     t_extract = time.time()
@@ -838,7 +841,7 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
         "status": "ok",
         "chunks": n_chunks,
         "entities": n_nodes,
-        "edges": 0,  # edges not separately counted; reflect in nodes for now
+        "edges": n_edges,
         "vectors_upserted": n_chunks,
         "extraction_method": extraction_method,
         "checksum": checksum,
