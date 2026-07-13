@@ -119,6 +119,25 @@ curl http://localhost:8000/ingest/status/<task_id_from_above>
 /mnt/data-970-plus/rag-env/bin/python ingest.py /path/to/docs --domain engineering
 ```
 
+> **PDFs are NOT ingested directly.** The pipeline consumes plain text / markdown
+> / txt. To ingest a PDF, extract its text first (system `pdftotext` works), then
+> send the text via the API:
+> ```bash
+> # 1) PDF → text
+> pdftotext my-paper.pdf /tmp/my-paper.txt
+> # 2) Ingest the extracted text (journal domain example)
+> TID=$(curl -s -X POST http://localhost:8000/ingest \
+>   -H "Content-Type: application/json" \
+>   -d "{\"text\":$(python3 -c "import json;print(json.dumps(open('/tmp/my-paper.txt').read()))"),\
+>        \"doc_id\":\"my-paper\",\"domain\":\"journal\"}" \
+>   | grep -o '"task_id":"[^"]*"' | cut -d'"' -f4)
+> # 3) Poll until done
+> curl http://localhost:8000/ingest/status/$TID
+> ```
+> Verified walkthrough: the ICLR 2024 RAPTOR paper (`archive/legacy-v1/data/2401.18059v1.pdf`)
+> extracted to 1612 lines → 1882 chunks + 22 entities into `journal_chunks`, and
+> `POST /ask` (both `synthesize:false` and `synthesize:true`) returned answers.
+
 **What happens inside (so you can debug):**
 
 1. **Chunk** — text is split (late-chunking strategy per domain: `engineering`
@@ -182,6 +201,12 @@ n_contexts, contexts[], answer?}`.
 - **Single-doc `/ingest` is async** — always poll `/ingest/status/{task_id}`.
 - **Cross-lingual** matching uses Jina v3 alignment; very different scripts may
   not merge into one node.
+- **Edges may be 0 for some documents.** Relation extraction relies on the LLM
+  emitting typed relationships; dense narrative papers (e.g. some journal
+  articles) can yield entities but `edges:0`. Graph retrieval (`graph_hits`)
+  still works on the entity nodes — it just has fewer relationship paths. This is
+  a quality characteristic, not a failure; the doc is fully searchable via vectors.
+- **PDFs need pre-extraction** (see §3) — the pipeline ingests text, not PDF bytes.
 
 ---
 
