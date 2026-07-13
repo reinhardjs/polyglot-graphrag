@@ -7,7 +7,8 @@ set -u
 cd /mnt/data-970-plus/rag-system
 export EXTRACTION_MODE=sliding_window
 export SYNC_INGEST_TIMEOUT=600
-ROOT=/mnt/data-970-plus/test-docs
+# First arg = docs root to ingest (default: the cleaned test corpus).
+ROOT="${1:-/mnt/data-970-plus/test-docs}"
 STATE=$ROOT/.sync_state.json
 LOG=logs/sync_sliding_loop.log
 TOTAL=$(./venv/bin/python -c "import sync_docs as s;from pathlib import Path;r=Path('$ROOT');print(len(s.scan_files(r,s.load_syncignore(r),'$STATE')))")
