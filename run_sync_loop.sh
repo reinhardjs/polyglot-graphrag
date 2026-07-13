@@ -9,8 +9,9 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 export EXTRACTION_MODE=sliding_window
 export SYNC_INGEST_TIMEOUT=600
-# First arg = docs root to ingest (default: ./data/test-docs, project-local).
-ROOT_DOCS="${1:-$ROOT/data/test-docs}"
+# First arg = docs root to ingest (default: ./data/engineering — folder name
+# maps to the "engineering" domain via _DOMAIN_FOLDER_RULES in sync_docs.py).
+ROOT_DOCS="${1:-$ROOT/data/engineering}"
 STATE=$ROOT_DOCS/.sync_state.json
 LOG=logs/sync_sliding_loop.log
 TOTAL=$(./venv/bin/python -c "import sync_docs as s;from pathlib import Path;r=Path('$ROOT_DOCS');print(len(s.scan_files(r,s.load_syncignore(r),'$STATE')))")
