@@ -193,7 +193,8 @@ hermes
 
 ## Version
 
-**v3.1.5** — current production. Key features:
+**v3.1.5** — current stable feature line (shipped). The ongoing release
+track is **`3.1.6-beta.1`** (beta channel — see "Releases & Versioning").
 
 - GLiNER+E2B hybrid extraction (100% precision, engineering domain)
 - Sliding window for arbitrary-length documents
@@ -248,8 +249,13 @@ every release is a **Git tag** cut from `main`.
 3. Merge the release PR → release-please creates the **Git tag** (e.g. `v3.2.0`)
    and the **GitHub Release**.
 
-**Current version** is seeded in `.release-please-manifest.json` (`"3.1.5"`).
-The next meaningful feature becomes `v3.2.0`; a fix becomes `v3.1.6`.
+**Current version** is seeded in `.release-please-manifest.json` (`"3.1.6-beta.1"`).
+The project is currently on a **beta channel** (`prerelease-type: beta`), so
+release-please tags pre-releases like `v3.1.6-beta.1`, `v3.1.6-beta.2`, … and
+the GitHub Release is marked **Pre-release**. To cut the first **stable**
+release, remove `prerelease-type` from `release-please-config.json` (or set the
+next version via a `release-as:` commit) and merge the resulting release PR —
+the tag becomes `v3.2.0` (non-prerelease).
 
 > To force a specific version once: merge a commit with `release-as: X.Y.Z` in
 > its body, or set `release-as` in `release-please-config.json`.
@@ -264,6 +270,6 @@ The next meaningful feature becomes `v3.2.0`; a fix becomes `v3.1.6`.
 | v3.1.2 | 2026-07-13 | Strategy 3: LLM Fallback NER (semantic typing of dropped entities) |
 | v3.1.3 | 2026-07-13 | Fix: forward `domain_name` in `sliding_window._parse_and_validate` |
 | v3.1.4 | 2026-07-13 | Strategy 3 traceability: `:Discovered` label, audit `inferred_type`, provenance |
-| v3.1.5 | 2026-07-13 | Default dynamic-label state to `<project>/labels/` (was `~/.hermes/labels`) |
+| v3.1.5 | 2026-07-13 | Default dynamic-label state to `<project>/labels/` (was `~/.hermes/labels`) — last *stable* line; **beta channel begins at v3.1.6-beta.1** |
 
 > Pre-v3 history (v1/v2 eras) is archived in `archive/legacy-v1/CHANGELOG_v1.md`.
