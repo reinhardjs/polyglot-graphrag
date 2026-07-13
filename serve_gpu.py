@@ -50,6 +50,11 @@ app = FastAPI(title="GraphRAG GPU Daemon (config-driven, model-agnostic)")
 _jina = None
 _reranker = None
 _gliner = None
+# GLiNER is NOT thread-safe: concurrent predict_entities() calls corrupt its
+# internal state and raise KeyError. Serialize all GLiNER inference behind
+# this lock (sliding_window fires several /extract_entities calls in parallel).
+import threading
+_gliner_lock = threading.Lock()
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -262,8 +267,16 @@ def extract_graph(req: ExtractReq):
     import re
     gliner = _load_gliner()
     labels = req.labels or C.GLINER_LABELS
-    preds = gliner.predict_entities(req.text, labels,
-                                    threshold=C.GLINER_THRESHOLD)
+    with _gliner_lock:
+        try:
+            preds = gliner.predict_entities(req.text, labels,
+                                            threshold=C.GLINER_THRESHOLD)
+        except Exception as e:
+            # GLiNER can raise KeyError on certain spans (id_to_class_i bug).
+            # Degrade gracefully — return no entities rather than 500 so the
+            # caller (sliding_window) can continue with the other windows.
+            print(f"[gpu-daemon] GLiNER predict failed: {e}", flush=True)
+            preds = []
     nodes, edges, seen = {}, [], set()
     for sent in [s for s in re.split(r'(?<=[.!?])\s+', req.text) if s.strip()]:
         s_low = sent.lower()
@@ -300,8 +313,16 @@ def extract_entities(req: ExtractReq):
     """
     gliner = _load_gliner()
     labels = req.labels or C.GLINER_LABELS
-    preds = gliner.predict_entities(req.text, labels,
-                                    threshold=C.GLINER_THRESHOLD)
+    with _gliner_lock:
+        try:
+            preds = gliner.predict_entities(req.text, labels,
+                                            threshold=C.GLINER_THRESHOLD)
+        except Exception as e:
+            # GLiNER can raise KeyError on certain spans (id_to_class_i bug).
+            # Degrade gracefully — return no entities rather than 500 so the
+            # caller (sliding_window) can continue with the other windows.
+            print(f"[gpu-daemon] GLiNER predict failed: {e}", flush=True)
+            preds = []
     entities = []
     seen = set()
     for p in preds:

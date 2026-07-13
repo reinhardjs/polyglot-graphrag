@@ -471,7 +471,8 @@ def scan_files(root: Path, ignore_patterns: List[str],
     ``.tmp`` siblings) are ALWAYS excluded — we must never ingest our own
     bookkeeping file into the knowledge base.
     """
-    state_names = {state_file, state_file + ".lock", state_file + ".tmp"}
+    state_names = {state_file, state_file + ".lock", state_file + ".tmp",
+                   ".syncignore"}
     out: List[Path] = []
     for p in sorted(root.rglob("*")):
         if not p.is_file():
