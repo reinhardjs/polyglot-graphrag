@@ -4,9 +4,14 @@
 # These are the ONLY external stateful dependencies. The GPU LLMs (Gemma E2B/E4B)
 # and the FastAPI daemon (serve_gpu.py) are started separately — see RUN.md.
 #
-# Data is persisted on the host at:
-#   /mnt/data-970-plus/neo4j_data   (Neo4j graph + indexes)
-#   /mnt/data-970-plus/qdrant_storage  (Qdrant vectors)
+# Data is persisted on the host under ./data (relative to this file):
+#   ./data/neo4j     (Neo4j graph + indexes)
+#   ./data/qdrant    (Qdrant vectors)
+#
+# Paths below are relative to the project root (this file's directory) so the
+# stack is portable. For a fresh machine, data lands in ./data and is gitignored.
+# To reuse an existing dataset at a different location, edit the bind mounts or
+# set COMPOSE_PROJECT_DIR. See MIGRATION.md before changing data locations.
 #
 # Reconstructed from the running containers (rag-system-neo4j-1 / rag-system-qdrant-1).
 # NOTE: if you already have data in those host dirs, `docker compose up` will
@@ -25,11 +30,11 @@ services:
       NEO4J_server_memory_heap_max__size: 2G
       NEO4J_server_memory_pagecache_size: 512M
     volumes:
-      - /mnt/data-970-plus/neo4j_data/data:/data
-      - /mnt/data-970-plus/neo4j_data/logs:/logs
-      - /mnt/data-970-plus/neo4j_data/plugins:/plugins
-      - /mnt/data-970-plus/neo4j_data/import:/import
-      - /mnt/data-970-plus/neo4j_data/licenses:/licenses
+      - ./data/neo4j/data:/data
+      - ./data/neo4j/logs:/logs
+      - ./data/neo4j/plugins:/plugins
+      - ./data/neo4j/import:/import
+      - ./data/neo4j/licenses:/licenses
     restart: unless-stopped
 
   qdrant:
@@ -39,5 +44,5 @@ services:
       - "6333:6333"   # REST API (used by the pipeline)
       - "6334:6334"   # gRPC
     volumes:
-      - /mnt/data-970-plus/qdrant_storage:/qdrant/storage
+      - ./data/qdrant:/qdrant/storage
     restart: unless-stopped

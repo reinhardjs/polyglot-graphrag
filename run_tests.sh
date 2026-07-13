@@ -10,8 +10,9 @@
 #
 # Exit non-zero if any selected suite fails.
 set -uo pipefail
-cd "$(dirname "$0")"
-PY=/mnt/data-970-plus/rag-env/bin/python
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT"
+PY="$ROOT/venv/bin/python"
 BASE=http://127.0.0.1:8000
 RC=0
 

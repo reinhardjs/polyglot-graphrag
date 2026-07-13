@@ -1,8 +1,8 @@
 """Unit tests for pluggable chunking strategies (v2.6.0 REQ-3).
 
 Pure, no GPU / daemon needed. Run:
-    cd /mnt/data-970-plus/rag-system
-    /mnt/data-970-plus/rag-env/bin/python -m pytest tests/test_chunking.py -q
+    cd <project-root>
+    ./venv/bin/python -m pytest tests/test_chunking.py -q
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

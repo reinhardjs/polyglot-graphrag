@@ -11,7 +11,7 @@ Usage:
 Exit codes: 0 ok, 2 retrieval error (JSON error body still printed to stdout).
 """
 import os
-os.environ.setdefault("HF_HOME", "/mnt/data-970-plus/hf_cache")
+os.environ.setdefault("HF_HOME", os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache", "hf"))
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import json

@@ -51,10 +51,10 @@ large, and license/distribution constraints):
 
 1. **Gemma 4 E2B** (extraction) — `gemma-4-E2B-it-QAT-Q4_0.gguf`
    - Source: HuggingFace `lmstudio-community/gemma-4-E2B-it-QAT-GGUF`
-   - Place at: `/mnt/data-970-plus/models/gemma-4-E2B_q4_0-it.gguf`
+   - Place at: `<project-root>/models/gemma-4-E2B_q4_0-it.gguf`
 2. **Gemma 4 E4B** (answer synthesis, *optional*) — `gemma-4-E4B-it-QAT-Q4_0.gguf`
    - Source: HuggingFace `lmstudio-community/gemma-4-E4B-it-QAT-GGUF`
-   - Place at: `/home/reinhard/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-QAT-GGUF/`
+   - Place at: `<project-root>/models/gemma-4-E4B-it-QAT-Q4_0.gguf`
 
 > **What is "Gemma E2B"?** Gemma 4 is Google's open model family. **E2B** =
 > the "Extraction 2-Billion-parameter" variant — small/fast, used here to pull
@@ -73,7 +73,7 @@ large, and license/distribution constraints):
 ## 2. One-command-ish startup
 
 ```bash
-cd /mnt/data-970-plus/rag-system
+cd <project-root>
 
 # 1) Supporting stores (Neo4j + Qdrant) — Docker
 docker compose up -d
@@ -116,7 +116,7 @@ curl -X POST http://localhost:8000/ingest \
 curl http://localhost:8000/ingest/status/<task_id_from_above>
 
 # Or bulk-ingest a folder of .md/.txt:
-/mnt/data-970-plus/rag-env/bin/python ingest.py /path/to/docs --domain engineering
+<project-root>/venv/bin/python ingest.py /path/to/docs --domain engineering
 ```
 
 > **PDFs are NOT ingested directly.** The pipeline consumes plain text / markdown
@@ -193,7 +193,7 @@ n_contexts, contexts[], answer?}`.
   `synthesize:true` 500s unless `gemma-4-e4b.service` is running.
 - **Model paths are machine-specific.** `gemma-4-e2b.service` points at
   `/home/reinhard/.lmstudio/...`; the live server here actually uses
-  `/mnt/data-970-plus/models/...`. Edit the `.service` `ExecStart -m` path to
+  `/project-root>/models/...`. Edit the `.service` `ExecStart -m` path to
   match your download location.
 - **VRAM is tight on 12 GB.** E2B + daemon models ≈ 5 GB. E4B adds ~3 GB — if
   you start all three on a 12 GB card, expect OOM. Run E4B only when you need
@@ -218,6 +218,6 @@ docker compose down              # Neo4j + Qdrant (DATA IS PRESERVED on host)
 sudo systemctl stop rag-gpu-daemon
 ```
 
-Data in `/mnt/data-970-plus/neo4j_data` and `/mnt/data-970-plus/qdrant_storage`
+Data in `<project-root>/data/neo4j` and `<project-root>/data/qdrant`
 is **never** touched by stop/restart. Only `docker compose down -v` (with `-v`)
 would delete it.

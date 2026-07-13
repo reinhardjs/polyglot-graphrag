@@ -10,19 +10,19 @@ make changes, and submit a pull request.
 git clone https://github.com/reinhardjs/polyglot-graphrag.git
 cd polyglot-graphrag
 
-python3.11 -m venv /mnt/data-970-plus/rag-env
-/mnt/data-970-plus/rag-env/bin/pip install --upgrade pip
+python3.11 -m venv ./venv
+./venv/bin/pip install --upgrade pip
 
 # 2. Install CUDA torch (RTX 3060 / CUDA 12.1)
-/mnt/data-970-plus/rag-env/bin/pip install torch==2.3.1+cu121 \
+./venv/bin/pip install torch==2.3.1+cu121 \
   --index-url https://download.pytorch.org/whl/cu121
 
 # 3. Install project deps
-/mnt/data-970-plus/rag-env/bin/pip install fastapi uvicorn qdrant-client neo4j \
+./venv/bin/pip install fastapi uvicorn qdrant-client neo4j \
   openai sentence-transformers gliner einops requests numpy pytest transformers==4.49.0
 
-# 4. Set HF cache (avoids re-downloading models)
-export HF_HOME=/mnt/data-970-plus/hf_cache
+# 4. Set HF cache (avoids re-downloading models) — defaults to ./cache/hf in code
+export HF_HOME=./.cache/hf
 mkdir -p "$HF_HOME"
 
 # 5. Start databases (Qdrant + Neo4j)
@@ -36,18 +36,18 @@ sudo systemctl start gemma-4-e2b.service gemma-4-e4b.service rag-gpu-daemon.serv
 ## Running the tests
 
 ```bash
-cd v2
+cd <project-root>
 
 # Unit tests (no GPU / daemon needed — pure logic)
-/mnt/data-970-plus/rag-env/bin/python -m pytest tests/test_chunking.py \
+<project-root>/venv/bin/python -m pytest tests/test_chunking.py \
     tests/test_prompts.py tests/test_metadata.py tests/test_condense.py \
     tests/test_extraction_prompt.py tests/test_neo4j_entry.py -q
 
 # End-to-end tests (need the daemon live on :8000 with sample data ingested)
-/mnt/data-970-plus/rag-env/bin/python -m pytest tests/test_e2e_chunking.py -q
+<project-root>/venv/bin/python -m pytest tests/test_e2e_chunking.py -q
 
 # Everything
-/mnt/data-970-plus/rag-env/bin/python -m pytest tests/ -q
+<project-root>/venv/bin/python -m pytest tests/ -q
 ```
 
 ## Adding a new domain

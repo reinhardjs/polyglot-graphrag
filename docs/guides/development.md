@@ -11,8 +11,8 @@
 
 ```bash
 # Python env (prefix-based — conda activate is broken on this box)
-export RAG_ENV=/mnt/data-970-plus/rag-env
-export HF_HOME=/mnt/data-970-plus/hf_cache
+export RAG_ENV=<project-root>/venv
+export HF_HOME=<project-root>/.cache/hf
 
 # Install CUDA torch (once, after env creation)
 $RAG_ENV/bin/pip install torch==2.3.1+cu121 --index-url https://download.pytorch.org/whl/cu121
@@ -55,7 +55,7 @@ rag-system/
 ## Running the dev stack
 
 ```bash
-cd /mnt/data-970-plus/rag-system
+cd <project-root>
 
 # 1. Start DBs
 docker compose -f ../docker-compose.yml up -d
@@ -64,13 +64,13 @@ docker compose -f ../docker-compose.yml up -d
 sudo systemctl start gemma-4-e2b.service gemma-4-e4b.service
 
 # 3. Start daemon (GPU)
-/mnt/data-970-plus/rag-env/bin/python serve_gpu.py
+<project-root>/venv/bin/python serve_gpu.py
 
 # 4. Ingest sample data
-/mnt/data-970-plus/rag-env/bin/python ingest.py sample_data
+<project-root>/venv/bin/python ingest.py sample_data
 
 # 5. Test
-/mnt/data-970-plus/rag-env/bin/python ask.py "who reported BUG-204?"
+<project-root>/venv/bin/python ask.py "who reported BUG-204?"
 ```
 
 Or use `run.sh`:
@@ -89,17 +89,17 @@ bash run.sh stop           # stop daemon + LLMs
 The codebase ships a pytest suite under `v3/tests/`:
 
 ```bash
-cd /mnt/data-970-plus/rag-system
+cd <project-root>
 
 # Unit tests (no daemon / GPU needed — pure logic)
-/mnt/data-970-plus/rag-env/bin/python -m pytest tests/test_chunking.py tests/test_prompts.py \
+<project-root>/venv/bin/python -m pytest tests/test_chunking.py tests/test_prompts.py \
     tests/test_metadata.py tests/test_condense.py tests/test_extraction_prompt.py -q
 
 # End-to-end tests (require rag-gpu-daemon :8000 live)
-/mnt/data-970-plus/rag-env/bin/python -m pytest tests/test_e2e_chunking.py -q
+<project-root>/venv/bin/python -m pytest tests/test_e2e_chunking.py -q
 
 # Everything
-/mnt/data-970-plus/rag-env/bin/python -m pytest tests/ -q
+<project-root>/venv/bin/python -m pytest tests/ -q
 ```
 
 Unit tests cover: chunking strategies, synthesis-prompt domain branching,
@@ -175,7 +175,7 @@ curl -s -X POST http://127.0.0.1:8000/ask -H "Content-Type: application/json" \
 
 ### Benchmark
 ```bash
-/mnt/data-970-plus/rag-env/bin/python bench_rag.py
+<project-root>/venv/bin/python bench_rag.py
 ```
 
 ### Hermes integration test

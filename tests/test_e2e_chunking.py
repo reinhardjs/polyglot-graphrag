@@ -3,8 +3,8 @@
 These hit the live /ask + /ingest endpoints on :8000 (assumes rag-gpu-daemon
 is running). They are SLOW (involve LLM extraction + embed) — run separately:
 
-    cd /mnt/data-970-plus/rag-system
-    /mnt/data-970-plus/rag-env/bin/python -m pytest tests/test_e2e_chunking.py -q
+    cd <project-root>
+    ./venv/bin/python -m pytest tests/test_e2e_chunking.py -q
 
 Requires: rag-gpu-daemon ( :8000 ) + gemma-4-e2b ( :8082 ) + gemma-4-e4b ( :8084 ).
 """

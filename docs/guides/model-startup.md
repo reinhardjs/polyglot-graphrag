@@ -168,7 +168,7 @@ loops without degrading answer quality. Validated empirically.
 ### Server command (systemd)
 
 ```
-ExecStart=/mnt/data-970-plus/rag-env/bin/python serve_gpu.py
+ExecStart=<project-root>/venv/bin/python serve_gpu.py
 ```
 
 No CLI flags — all configuration is in `v3/config.py`:
@@ -215,8 +215,8 @@ Same code, identical API, runs on CPU:
 
 ```bash
 # Start manually (no systemd service):
-cd /mnt/data-970-plus/rag-system
-/mnt/data-970-plus/rag-env/bin/python serve_cpu.py
+cd <project-root>
+<project-root>/venv/bin/python serve_cpu.py
 ```
 
 Key difference: `EMBED_USE_HALF=False` enforced at line 1 of `serve_cpu.py`

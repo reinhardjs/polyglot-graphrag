@@ -32,7 +32,8 @@ Endpoints:
   Multi-domain: pass `collection` (str | list | "all") to /ask and /ingest.
 """
 import os
-os.environ["HF_HOME"] = "/mnt/data-970-plus/hf_cache"
+os.environ["HF_HOME"] = os.environ.get(
+    "HF_HOME", os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache", "hf"))
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 

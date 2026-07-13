@@ -155,23 +155,23 @@ To see logs in real-time during development:
 
 ```bash
 # Terminal 1: Extraction LLM
-cd /mnt/data-970-plus/rag-system
-/mnt/data-970-plus/rag-env/bin/python -m llama_cpp.server \
-  --model /mnt/data-970-plus/models/gemma-4-E2B-it-QAT-Q4_0.gguf \
+cd <project-root>
+<project-root>/venv/bin/python -m llama_cpp.server \
+  --model <project-root>/models/gemma-4-E2B-it-QAT-Q4_0.gguf \
   --host 0.0.0.0 --port 8082 --n-gpu-layers -1
 
 # Terminal 2: Synthesis LLM
-/mnt/data-970-plus/rag-env/bin/python -m llama_cpp.server \
-  --model /mnt/data-970-plus/models/gemma-4-E4B-it-QAT-Q4_0.gguf \
+<project-root>/venv/bin/python -m llama_cpp.server \
+  --model <project-root>/models/gemma-4-E4B-it-QAT-Q4_0.gguf \
   --host 0.0.0.0 --port 8084 --n-gpu-layers -1
 
 # Terminal 3: GPU daemon
-cd /mnt/data-970-plus/rag-system
-/mnt/data-970-plus/rag-env/bin/python serve_gpu.py
+cd <project-root>
+<project-root>/venv/bin/python serve_gpu.py
 
 # Terminal 4: (optional) CPU daemon fallback
-cd /mnt/data-970-plus/rag-system
-/mnt/data-970-plus/rag-env/bin/python serve_cpu.py
+cd <project-root>
+<project-root>/venv/bin/python serve_cpu.py
 ```
 
 ### What loads when

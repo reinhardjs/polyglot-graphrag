@@ -9,7 +9,8 @@ Exposes the same endpoints as serve_gpu.py: /health, /models, /embed_late,
 /collections. Multi-domain: pass `collection` (str|list|"all") to /ask, /ingest.
 """
 import os
-os.environ["HF_HOME"] = "/mnt/data-970-plus/hf_cache"
+os.environ["HF_HOME"] = os.environ.get(
+    "HF_HOME", os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache", "hf"))
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["OMP_NUM_THREADS"] = "8"
 

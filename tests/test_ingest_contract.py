@@ -6,8 +6,8 @@ Verifies:
   - Empty text returns 400
 
 These hit the live :8000 daemon. Run with the full suite or standalone:
-    cd /mnt/data-970-plus/rag-system
-    /mnt/data-970-plus/rag-env/bin/python -m pytest tests/test_ingest_contract.py -q
+    cd <project-root>
+    ./venv/bin/python -m pytest tests/test_ingest_contract.py -q
 """
 import sys, os, time, requests
 

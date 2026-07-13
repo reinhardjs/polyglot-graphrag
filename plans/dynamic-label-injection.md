@@ -4,7 +4,7 @@
 **Author:** Lead Systems Architect (via deepseek-v4-pro) · **Implemented by:** hy3:free  
 **Date:** 2026-07-12  
 **Target:** `polyglot-graphrag` v3.1.0  
-**Domain:** `/mnt/data-970-plus/rag-system`
+**Domain:** `<project-root>`
 
 ---
 

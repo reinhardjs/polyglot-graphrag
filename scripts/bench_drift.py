@@ -9,7 +9,7 @@ and measures, per document:
 Output: a markdown table + a summary drift %.
 
 Run:
-  /mnt/data-970-plus/rag-env/bin/python scripts/bench_drift.py \
+  <project-root>/venv/bin/python scripts/bench_drift.py \
       --domain journal --docs /tmp/arxiv_2401.18059.txt --repeat 1
 """
 
