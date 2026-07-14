@@ -1,125 +1,97 @@
-# Domain Profiles — GraphRAG v2.6.0
+# Domain Configuration — `domain_config.yaml`
 
-Domain profiles are TOML files in `v3/domains/` (one per domain). They make the
-system drop-in usable for any knowledge domain without code changes — chunking
-strategy, entity/edge vocabulary, extraction & synthesis prompts, Neo4j labels,
-entry strategy, and metadata schema are all declared here and read at runtime by
-`config.load_domain_profile()`.
+Domain profiles declare how a domain is ingested and queried. They live in
+**`domain_config.yaml`** (root of the repo) as a `domains:` mapping — one block
+per domain/companion. No code changes are needed to add a domain; the config is
+read at runtime by `config.load_domain_profile()` and `domain_loader.get_domain()`.
+
+> Note: older docs referenced `v3/domains/*.toml` — that layout is gone. The
+> single `domain_config.yaml` is the source of truth. The current version is
+> **0.1.0 (Experimental)**.
+
+## What a profile controls
+
+```yaml
+domains:
+  engineering:                       # domain key used by `domain=` on API calls
+    collection: engineering_chunks   # PRIMARY Qdrant corpus (real docs)
+    neo4j_label: Engineering         # :Entity:Engineering graph label
+    chunking:
+      strategy: sentence             # sentence | paragraph | section | fixed
+      chunk_size: 512
+      overlap: 64
+    companions: [engineering_docs]   # SECONDARY corpora (searched in parallel)
+    # entry_strategy, entity_types, relation_types, synthesis, metadata_schema ...
+```
 
 ## Selecting a domain
 
 Pass `domain` on any API call. The profile drives collection routing, chunking,
-extraction prompt, synthesis prompt tone, graph labels, and entry strategy.
+extraction prompt, synthesis tone, graph labels, and entry strategy.
 
 ```bash
-# Ingest into the medical domain (routes to medical_chunks, section chunking,
-# medical extraction prompt, hybrid entry)
+# Ingest into the engineering domain (routes to engineering_chunks)
 curl -s -X POST http://127.0.0.1:8000/ingest -H "Content-Type: application/json" \
-  -d '{"text":"...","doc_id":"enc-1","domain":"medical",
-       "metadata":{"patient_id":"P-42","title":"Encounter note"}}'
+  -d '{"text":"...","doc_id":"enc-1","domain":"engineering"}'
 
-# Query the medical domain (hybrid entry, clinical-tone synthesis)
+# Query the engineering domain (primary graph + companion, fused)
 curl -s -X POST http://127.0.0.1:8000/ask -H "Content-Type: application/json" \
-  -d '{"query":"what treats hypertension?","domain":"medical","synthesize":true}'
+  -d '{"query":"who reported BUG-204?","domain":"engineering","synthesize":true}'
 ```
 
-If `domain` is omitted, the system behaves like v2.5.0 (engineering defaults:
-sentence chunking, generic extraction/synthesis prompts, keyword entry,
-`engineering_chunks` collection).
+If `domain` is omitted, the system defaults to `engineering` (sentence chunking,
+`engineering_chunks` collection, keyword graph entry).
 
-## Profile schema
+## Primary corpus vs companion (secondary) corpus
 
-```toml
-[domain]
-name = "medical"                 # key used by `domain=`; also the Neo4j label base
-collection = "medical_chunks"    # Qdrant collection this domain writes/reads
-neo4j_label = "Medical"          # :Entity:Medical label for graph isolation
-description = "..."              # free text
+* **Primary corpus** — the domain's own collection (`engineering_chunks`) plus
+  its Neo4j graph. This is the domain's main knowledge. Ingested via
+  `sync_docs.py` (git-style) or `POST /ingest`.
+* **Companion (secondary) corpus** — an extra collection attached to a domain,
+  declared via `companions: [name]`. It fills gaps the primary graph can't see
+  (prose/design knowledge). Ingested via `POST /ingest_domain {"domain":"name"}`.
+  Example: `engineering_docs` (this repo's `docs/`) is the companion of
+  `engineering`; `clinical_prose` is the companion of `snomed`.
 
-[chunking]                       # REQ-3 — pluggable chunking
-strategy = "section"             # sentence | paragraph | section | fixed
-chunk_size = 512                 # token budget per chunk (for paragraph/section/fixed grouping)
-overlap = 64                     # sliding-window overlap (fixed strategy)
-section_header_prefix = "##"     # header line prefix preserved (section strategy)
+At query time, `/ask` runs the primary retriever AND every companion retriever
+in parallel, tags each hit with `_signal` (= domain or companion name), then
+fuses them. Hits appearing in ≥2 signals get a dual-evidence boost.
 
-[graph_schema]                   # entity/edge vocabulary
-entity_types = ["Symptom", "Diagnosis", "Medication", "Lab", "Procedure", "BodyPart"]
-edge_types = ["TREATS", "INDICATES", "CAUSES", "ASSOCIATED_WITH"]
+## Profile schema (key fields)
 
-[extraction]                     # REQ-4 — E2B extraction prompt (LLM primary path)
-prompt = """
-Extract a medical knowledge graph from the document below.
-Entities: extract names EXACTLY as they appear — do NOT normalize.
-Return ONLY valid JSON, no prose, no markdown:
-{"nodes":[{"id":"ExactEntityName","type":"Symptom|Diagnosis|Medication|Lab|Procedure|BodyPart"}],
- "edges":[{"source":"entity_a","target":"entity_b","type":"TREATS|INDICATES|CAUSES|ASSOCIATED_WITH"}]}
-Document ({doc_id}):
-{text}
-"""
-
-[synthesis]                      # REQ-5 — E4B answer prompt (shared via prompts.py)
-role = "clinical assistant"
-prompt = """
-You are a clinical assistant. Answer using ONLY the provided clinical documents.
-Always cite the source [n]. If the context lacks the answer, say so. Be concise.
-
-Context:
-{context}
-
-Question: {query}
-
-Answer (cite clinical documents):
-"""
-
-[metadata_schema]                # REQ-7 — optional domain metadata fields
-fields = ["patient_id", "title", "visit_date", "author", "doc_type"]
-
-[neo4j_entry]                    # REQ-6 — graph entry strategy
-strategy = "hybrid"              # keyword | vector | hybrid
-max_k_hops = 2
-```
-
-### Field reference
-
-| Section | Field | Meaning |
-|---------|-------|---------|
-| `[domain]` | `name` | Domain key. Must match the filename stem (`medical.toml` → `name="medical"`). |
-| | `collection` | Qdrant collection for this domain's chunks. |
-| | `neo4j_label` | Neo4j `:Entity:<Label>` label — isolates graph traversal per domain. |
-| | `description` | Free text shown in `GET /profiles`. |
-| `[chunking]` | `strategy` | `sentence` (1 chunk/sentence), `paragraph` (1/para), `section` (split on `section_header_prefix`, header kept), `fixed` (sliding window of `chunk_size` tokens, `overlap` overlap). |
-| | `chunk_size` | Token budget. For `fixed` it sizes the window; for `paragraph`/`section` it only sub-splits an oversized unit. |
-| | `overlap` | Sliding-window overlap in tokens (fixed strategy). |
-| | `section_header_prefix` | Markdown heading prefix marking section boundaries (section strategy). |
-| `[graph_schema]` | `entity_types` | Allowed entity types (drives GLiNER fallback labels). |
-| | `edge_types` | Allowed relationship types (documentation/validation aid). |
-| `[extraction]` | `prompt` | Full E2B prompt. May contain `{doc_id}` and `{text}` (safe-substituted). Literal `{...}` JSON is allowed (won't break — we do not use `str.format`). |
-| `[synthesis]` | `role` | Persona used when no full `prompt` template is given. |
-| | `prompt` | Full E4B prompt with `{context}` and `{query}` placeholders (safe-substituted). |
-| `[metadata_schema]` | `fields` | Declared metadata keys. Unknown keys passed at ingest are **warned (not dropped)** so ingestion never fails on schema drift. |
-| `[neo4j_entry]` | `strategy` | `keyword` (fast token overlap; auto-falls back to vector when zero overlap), `vector` (embed query+names, cosine), `hybrid` (both in parallel; keyword when overlap≥2 else vector). |
-| | `max_k_hops` | Graph traversal depth hint (currently informational; traversal uses `config.GRAPH_HOPS`). |
+| Field | Meaning |
+|-------|---------|
+| `collection` | Qdrant collection for this domain's PRIMARY chunks. |
+| `neo4j_label` | Neo4j `:Entity:<Label>` label — isolates graph traversal per domain. Omit for prose-only companions. |
+| `chunking.strategy` | `sentence` (1 chunk/sentence), `paragraph` (1/para), `section` (split on `section_header_prefix`), `fixed` (sliding window). |
+| `chunking.chunk_size` / `overlap` | Token budget / sliding-window overlap. |
+| `companions` | List of companion corpus domain names searched in parallel. |
+| `entity_types` / `relation_types` | Vocabulary for graph extraction / GLiNER fallback labels. |
+| `entry_strategy` | Graph entry: `keyword` (token overlap, falls back to vector), `vector`, `hybrid`. |
+| `metadata_schema.fields` | Declared metadata keys (unknown keys are warned, not dropped). |
 
 ## Available profiles
 
-| Domain | Collection | Chunking | Entry | Notes |
-|--------|-----------|----------|-------|-------|
-| `engineering` | `engineering_chunks` | sentence | keyword | Default; legacy-compatible. |
-| `medical` | `medical_chunks` | section | hybrid | Clinical-tone synthesis. |
-| `legal` | `legal_chunks` | section | hybrid | Statute/case vocabulary. |
-| `accounting` | `accounting_chunks` | paragraph | keyword | Financial statements. |
-| `hospitality` | `hospitality_chunks` | section | hybrid | Menus, SOPs, guest data. |
+| Domain | Collection | Chunking | Companions | Notes |
+|--------|-----------|----------|------------|-------|
+| `engineering` | `engineering_chunks` | sentence | `engineering_docs` | Default primary domain. |
+| `snomed` | (graph-only) | — | `clinical_prose` | Term-match diagnosis over SNOMED + prose. |
+| `engineering_docs` | `engineering_docs` | fixed (1024) | — | Companion: this repo's `docs/`. |
+| `clinical_prose` | `clinical_prose` | fixed | — | Companion: Wikipedia medicine prose. |
+| `example_companion` | (template) | — | — | Copy to start a new companion. |
 
 ## Adding a new domain
 
-1. Copy `v3/domains/engineering.toml` to `v3/domains/<name>.toml`.
-2. Set `name`, `collection`, `neo4j_label` (unique per domain).
-3. Tune `[chunking]`, `[extraction]`, `[synthesis]`, `[metadata_schema]`, `[neo4j_entry]`.
-4. Create the Qdrant collection (auto-created on first ingest) — or pre-create via `docker compose exec qdrant ...`.
-5. Ingest with `domain=<name>`. No code changes, no restart.
+1. Add a `domains.<name>` block to `domain_config.yaml` (`collection`,
+   `neo4j_label`, `chunking`, `companions:`, etc.).
+2. (Optional) add `domains/<name>/retrieve.py` and/or `ingest.py` for custom
+   behavior. Omit both to use the **default** retriever/ingestor — the primary
+   needs no custom code at all.
+3. Ingest (primary via `sync_docs.py`, companion via `POST /ingest_domain`).
+   No restart required.
 
-## API: list profiles
+## API
 
 ```
-GET /profiles      # returns all loaded domain profiles (name, collection, label, description)
+GET /profiles      # all loaded domain profiles (name, collection, label, description)
 ```

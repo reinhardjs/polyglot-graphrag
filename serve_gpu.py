@@ -510,6 +510,7 @@ def ask(req: AskReq):
         domain=req.domain or "",
         query=req.query, top_k=req.top_k,
         presentation=presentation, synthesize=req.synthesize, mode=req.mode,
+        vec=vec,
     ), vec=vec, rag=rag)
     q_res = fed.q_res
     g_res = fed.g_res

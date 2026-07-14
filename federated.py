@@ -38,6 +38,8 @@ class FederateRequest:
     presentation: Optional[dict] = None  # temporal {day1:[...], ...}
     synthesize: bool = False       # forwarded for synthesis-kind decision
     mode: Optional[str] = None    # "differential" -> dual_signal pref
+    vec: Optional[list] = None     # precomputed query embedding (reused by the
+                                    # default retriever to avoid a 2nd embed)
 
 
 @dataclass
@@ -64,17 +66,26 @@ def _tag_signal(rec: dict, name: str) -> dict:
 
 def _resolve_retrieval(profile: dict, name: str, req: FederateRequest,
                         out: List[dict], hits: dict, signals: list) -> None:
-    """Run ONE domain's retriever and merge its records into out[] with _signal."""
-    retrieve = get_retriever(name, temporal=bool(req.presentation))
+    """Run ONE domain's retriever and merge its records into out[] with _signal.
+
+    The retriever may pre-tag each record with a ``_sig`` field (e.g. the
+    default retriever tags vector hits ``<domain>`` and graph hits
+    ``<domain>:graph``). If absent, the signal falls back to ``name`` (used by
+    companion retrievers, which have no internal split).
+    """
+    retrieve = get_retriever(name, temporal=bool(req.presentation), vec=req.vec)
     if req.presentation is not None:
         hits_raw = retrieve(req.presentation, top_k=req.top_k)
     else:
         hits_raw = retrieve(req.query, top_k=req.top_k)
-    tagged = [_tag_signal(_as_record(h), name) for h in hits_raw]
-    out.extend(tagged)
-    hits[name] = len(tagged)
-    if name not in signals:
-        signals.append(name)
+    for h in hits_raw:
+        sig = _as_record(h).get("_sig", name)
+        tagged = _tag_signal(_as_record(h), sig)
+        out.append(tagged)
+        if name not in signals:
+            signals.append(name)
+    hits[name] = len(hits_raw)
+
 
 
 # ── the factory ───────────────────────────────────────────────────────
@@ -99,12 +110,15 @@ def assemble(req: FederateRequest, vec: Optional[list] = None,
     collection = profile.get("collection")
     neo4j_label = profile.get("neo4j_label")
 
-    # Primary domain is a retriever source unless it's a pure prose corpus
-    # (then it only acts as a companion, never a primary graph signal).
-    primary_is_retriever = retrieval != "dense_prose"
+    # Primary domain + companions, all resolved uniformly through the
+    # domains/ factory (get_retriever). The primary uses the default retriever
+    # (Qdrant collection + Neo4j graph); companions use their own retrieve.py
+    # (or the default if they have no custom file). Every retriever tags its
+    # records with _signal; assemble just runs them in parallel and merges.
+    primary_is_retriever = True  # primary always routed via get_retriever now
     companions = list(profile.get("companions", []) or [])
 
-    # ── (1)+(2) domain + companion retrievers, in parallel ──
+    # ── domain + companion retrievers, in parallel ──
     out: List[dict] = []
     hits: Dict[str, int] = {}
     signals: List[str] = []
@@ -124,40 +138,6 @@ def assemble(req: FederateRequest, vec: Optional[list] = None,
         t.start()
     for t in threads:
         t.join()
-
-    # ── (3) generic Qdrant + (optional) Neo4j parallel retrieval ──
-    # A companion with `neo4j_label: null` is prose-only → skip the graph
-    # leg entirely (avoids a wasted Neo4j query + `source_doc` warnings).
-    if collection and rag is not None and vec is not None:
-        g_out: List[dict] = []
-        q_out: List[dict] = []
-        from ask import resolve_collections
-        collections = resolve_collections(collection)
-        t1 = threading.Thread(
-            target=lambda: q_out.extend(
-                rag.qdrant_search_multi(vec, req.query, collections)))
-        threads = [t1]
-        if neo4j_label:   # only hit the graph when a label is declared
-            t2 = threading.Thread(
-                target=lambda: g_out.extend(
-                    rag.neo4j_subgraph(
-                        req.query,
-                        label=neo4j_label,
-                        entry_strategy=(profile.get("entry_strategy", "keyword")
-                                       if profile else "keyword"))))
-            threads.append(t2)
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-        for r in q_out:
-            out.append(_tag_signal(_as_record(r), req.domain))
-        for r in g_out:
-            out.append(_tag_signal(_as_record(r), req.domain + ":graph"))
-        hits[req.domain + ":qdrant"] = len(q_out)
-        hits[req.domain + ":graph"] = len(g_out)
-        if req.domain not in signals:
-            signals.append(req.domain)
 
     qdrant_hits = sum(hits.values())
     path = "hybrid" if len(signals) > 1 else (signals[0] if signals else "none")
