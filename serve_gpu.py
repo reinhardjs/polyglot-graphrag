@@ -591,7 +591,7 @@ def ask(req: AskReq):
         others = prose_norm if r.get("_signal") == "snomed" else snomed_norm
         return any((n in o or o in n) and o for o in others)
 
-    DUAL_BOOST = 0.15  # additive to rerank score (0..1 scale)
+    DUAL_BOOST = C.DUAL_SIGNAL_BOOST  # additive rerank bump for dual-signal candidates
     for r in pool:
         r["_dual_signal"] = _is_dual(r)
 
@@ -635,9 +635,9 @@ def ask(req: AskReq):
     # (docs/rerank-calibration.md): noise/weak < 0.15, moderate 0.15-0.5,
     # strong >= 0.5.
     def _confidence(raw_score: float) -> str:
-        if raw_score >= 0.5:
+        if raw_score >= C.CONFIDENCE_HIGH_THRESHOLD:
             return "high"
-        if raw_score >= 0.15:
+        if raw_score >= C.CONFIDENCE_MEDIUM_THRESHOLD:
             return "medium"
         return "low"
 

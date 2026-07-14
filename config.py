@@ -150,6 +150,17 @@ RERANK_USE_HALF    = True    # fp16 conversion
 RERANK_MODEL_NAME_CPU = "BAAI/bge-reranker-v2-m3"   # same as GPU, capped pool delivers speed
 RERANK_CPU_POOL_CAP   = 15  # sweet spot: 4.5/5 avg overlap, 2.2s /ask on CPU
 
+# ── Rerank calibration knobs ──────────────────────────────────────────────────
+# Confidence bands + dual-signal boost, tuned WITHOUT code edits. Calibrated on
+# bge-reranker-v2-m3 over 12 clinical queries (docs/rerank-calibration.md):
+#   noise/weak 0.00–0.15 | moderate 0.15–0.50 | strong dual >= 0.50
+# Confidence is computed on the RAW (de-boosted) cross-encoder score so it
+# reflects model relevance; dual_signal is a separate corroboration flag.
+CONFIDENCE_HIGH_THRESHOLD   = 0.50   # raw score >= this -> "high"
+CONFIDENCE_MEDIUM_THRESHOLD = 0.15   # raw score >= this -> "medium"; else "low"
+DUAL_SIGNAL_BOOST           = 0.15   # additive rerank bump for candidates
+                                    # confirmed by BOTH SNOMED + clinical prose
+
 # ── GLiNER (NER fallback) ──────────────────────────────────────────────────────
 GLINER_MODEL_NAME = "urchade/gliner_multi-v2.1"
 
