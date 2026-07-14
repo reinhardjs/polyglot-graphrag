@@ -1,4 +1,5 @@
-"""domains/clinical_prose/retrieve.py — semantic retrieval over clinical prose.
+"""
+domains/clinical_prose/retrieve.py — semantic retrieval over clinical prose.
 
 This retriever answers symptom queries by SEMANTIC similarity against the
 free-text disease descriptions ingested by ``ingest.py`` (Wikipedia medicine
@@ -6,17 +7,19 @@ articles, etc.) into the ``clinical_prose`` Qdrant collection. Unlike the
 SNOMED term-match, this matches a query like "fever, cough, rash" to a Measles
 article even though the SNOMED concept name contains none of those words.
 
-Registry contract: expose ``retrieve(query, top_k=5) -> list[dict]`` with the
-standard {"text","doc_id","doc_type","chunk_idx"} shape.
+Registry contract: expose ``retrieve(query, top_k=5, vec=None) -> list[dict]``
+with the standard {"text","doc_id","doc_type","chunk_idx"} shape.
 
 Query embedding is delegated to the resident GPU daemon (serve_gpu.py
-/embed_query) so we never load a second Jina-v3 copy.
+/embed_query) ONLY when vec is not already provided by the caller (the /ask
+fusion passes the precomputed vec to avoid a second Jina-v3 inference pass).
 """
-
 from __future__ import annotations
 
 import os
 import sys
+import threading
+from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
@@ -26,6 +29,20 @@ import requests
 import config as C
 
 COLLECTION = "clinical_prose"
+
+# Module-level Qdrant client singleton (no per-call construction).
+_QC = None
+_QC_LOCK = threading.Lock()
+
+
+def _qc():
+    global _QC
+    if _QC is None:
+        with _QC_LOCK:
+            if _QC is None:
+                from qdrant_client import QdrantClient
+                _QC = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
+    return _QC
 
 
 def _embed_query(text: str) -> list:
@@ -37,8 +54,7 @@ def _embed_query(text: str) -> list:
 
 def _qdrant_search(vec: list, query_text: str, top_k: int) -> list:
     """Search the clinical_prose collection (dense vector similarity)."""
-    from qdrant_client import QdrantClient
-    qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
+    qc = _qc()
     if not qc.collection_exists(COLLECTION):
         return []
     hits = qc.query_points(
@@ -62,15 +78,19 @@ def _qdrant_search(vec: list, query_text: str, top_k: int) -> list:
     return out
 
 
-def retrieve(query: str, top_k: int = 5) -> list:
-    """Registry entry point: semantic search over clinical-prose corpus."""
+def retrieve(query: str, top_k: int = 5, vec: Optional[list] = None) -> list:
+    """Registry entry point: semantic search over clinical-prose corpus.
+
+    If ``vec`` (precomputed query embedding) is provided, skip the HTTP embed
+    round-trip to the daemon and reuse it directly.
+    """
     try:
-        vec = _embed_query(query)
+        if vec is None:
+            vec = _embed_query(query)
     except Exception as e:
         print(f"[clinical_prose] embed failed: {e}", flush=True)
         return []
     hits = _qdrant_search(vec, query, top_k)
-    # Normalise to the registry shape (text only; score/title kept for context).
     out = []
     for h in hits:
         title = h.get("title", "")

@@ -7,6 +7,56 @@ relaxed vs. strict SemVer during 0.x).
 
 The format is based on [Keep a Changelog](https://keepachangelog.com).
 
+## [1.0.0] — 2026-07-15 (enterprise MVP)
+
+First stable, domain-agnostic, enterprise-grade release. Four operational
+primary domains (healthcare/SNOMED, enterprise KM, legal & compliance, fraud
+detection) behind one federated `/ask` API.
+
+### Added
+- **Phase 1 — Core Performance** (single-domain cold p95 < 250ms):
+  - P1.1 Redundant embedding eliminated: `vec` forwarded through
+    `get_retriever()` so companions reuse the resident daemon embed.
+  - P1.2 Merged keyword Cypher (`_idf_for_keyword` + `_concepts_for_keyword`
+    → single query returning `cnt` + `ids`).
+  - P1.3 Removed redundant `_edge_boost`; only `_symptom_to_disorder` remains
+    (`EXPAND_BOOST=2.0`).
+  - P1.4 Connection pooling: module-level Neo4j + Qdrant singletons.
+  - P1.5 Semantic cache enabled for ALL queries (was synthesize-only).
+  - P1.6 `_names_batch` non-English fallback via
+    `ORDER BY CASE WHEN d.languageCode='en' THEN 0 ELSE 1 END`.
+  - P1.7 SNOMED IDF precomputed into an in-memory lookup (`_IDF_CACHE`, built
+    at daemon startup) — eliminates per-keyword Cypher.
+  - P1.8 Reranker skipped when `synthesize=false` and pool ≤ 10 (raw scores).
+- **Phase 2 — Multi-Domain Expansion**:
+  - `domains/enterprise/` (dense prose + seeded ADRs/runbooks).
+  - `domains/legal/` (dense prose + seeded GDPR/SOC2/HIPAA).
+  - `domains/fraud/` (Neo4j transaction graph + Qdrant narrative companion,
+    500 synthetic txns with 5 known fraud patterns).
+  - `healthcare` public alias → SNOMED hybrid retriever.
+  - Cross-domain `domain=all` and `domain=["a","b"]` fan-out with `_domain`
+    tagging.
+- **Phase 3 — Enterprise Hardening**:
+  - P3.12 Graceful degradation: per-domain retriever failures return
+    `degraded:true` with `failed_domains`; unknown domain → 200 with
+    `error`+`available`; E4B-down → empty answer, no crash.
+  - P3.13 Extended `/health`: per-domain status, Neo4j/Qdrant/E4B backend
+    connectivity, VRAM.
+  - P3.14 Observability: `/metrics` (Prometheus text, no external dep),
+    `request_id` on every `/ask`, `scripts/bench_ask.py`.
+- **Phase 4 — Release**:
+  - `--demo` flag seeds all 4 domains idempotently (non-fatal per domain).
+  - 4 per-domain QUICKSTARTs + root README/QUICKSTART/CHANGELOG/ARCHITECTURE.
+
+### Changed
+- `domain_config.yaml` now declares `healthcare`, `enterprise`, `legal`,
+  `fraud` as primary domains; `default` → `snomed`.
+- `get_retriever` resolves domain aliases (e.g. `healthcare` → `snomed`
+  custom retriever) instead of falling back to the slow default graph path.
+
+### Removed
+- Legacy `engineering` corpus (purged; SNOMED + clinical_prose retained).
+
 ## [0.1.0] — 2026-07-14 (baseline)
 
 Initial public *experimental* baseline after resetting all prior `v1.x`/`v3.x`

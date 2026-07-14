@@ -50,6 +50,7 @@ class FederateResult:
     graph_hits: int = 0
     path: str = "none"
     signals: List[str] = field(default_factory=list)    # distinct _signal tags seen
+    failed: List[str] = field(default_factory=list)     # domains that errored (P3.12)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -65,26 +66,37 @@ def _tag_signal(rec: dict, name: str) -> dict:
 
 
 def _resolve_retrieval(profile: dict, name: str, req: FederateRequest,
-                        out: List[dict], hits: dict, signals: list) -> None:
+                        out: List[dict], hits: dict, signals: list,
+                        failed: list = None) -> None:
     """Run ONE domain's retriever and merge its records into out[] with _signal.
 
     The retriever may pre-tag each record with a ``_sig`` field (e.g. the
     default retriever tags vector hits ``<domain>`` and graph hits
     ``<domain>:graph``). If absent, the signal falls back to ``name`` (used by
     companion retrievers, which have no internal split).
+
+    Graceful degradation (P3.12): a per-domain retriever failure is recorded in
+    ``failed`` and does NOT crash the whole /ask call — the other domains still
+    return results.
     """
-    retrieve = get_retriever(name, temporal=bool(req.presentation), vec=req.vec)
-    if req.presentation is not None:
-        hits_raw = retrieve(req.presentation, top_k=req.top_k)
-    else:
-        hits_raw = retrieve(req.query, top_k=req.top_k)
-    for h in hits_raw:
-        sig = _as_record(h).get("_sig", name)
-        tagged = _tag_signal(_as_record(h), sig)
-        out.append(tagged)
-        if name not in signals:
-            signals.append(name)
-    hits[name] = len(hits_raw)
+    try:
+        retrieve = get_retriever(name, temporal=bool(req.presentation), vec=req.vec)
+        if req.presentation is not None:
+            hits_raw = retrieve(req.presentation, top_k=req.top_k)
+        else:
+            hits_raw = retrieve(req.query, top_k=req.top_k)
+        for h in hits_raw:
+            sig = _as_record(h).get("_sig", name)
+            tagged = _tag_signal(_as_record(h), sig)
+            out.append(tagged)
+            if name not in signals:
+                signals.append(name)
+        hits[name] = len(hits_raw)
+    except Exception as e:
+        print(f"[federated] domain '{name}' retrieve failed: {e}", flush=True)
+        if failed is not None:
+            failed.append(name)
+        hits[name] = 0
 
 
 
@@ -122,6 +134,7 @@ def assemble(req: FederateRequest, vec: Optional[list] = None,
     out: List[dict] = []
     hits: Dict[str, int] = {}
     signals: List[str] = []
+    failed: List[str] = []
 
     sources = []
     if primary_is_retriever:
@@ -132,7 +145,7 @@ def assemble(req: FederateRequest, vec: Optional[list] = None,
     for name in sources:
         t = threading.Thread(
             target=lambda n=name: _resolve_retrieval(
-                profile, n, req, out, hits, signals))
+                profile, n, req, out, hits, signals, failed))
         threads.append(t)
     for t in threads:
         t.start()
@@ -145,4 +158,5 @@ def assemble(req: FederateRequest, vec: Optional[list] = None,
     return FederateResult(
         q_res=out, g_res=[], qdrant_hits=qdrant_hits,
         graph_hits=hits.get(req.domain, 0), path=path, signals=signals,
+        failed=failed,
     )

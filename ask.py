@@ -130,19 +130,33 @@ def qdrant_search(vec: list, query_text: str = "",
         # Dense vector leg
         models.Prefetch(query=vec, using="", limit=top_k * 2),
     ]
-    # Sparse leg — only if we have query text to tokenize
+    # Sparse leg — only if we have query text to tokenize. The sparse vector
+    # is named "text" and only exists on collections that were created with a
+    # sparse vector (e.g. clinical_prose). Collections with a plain unnamed
+    # dense vector have no sparse "text" vector, so we guard the prefetch: if
+    # the query_points call fails on the missing sparse vector, retry dense-only.
     if query_text:
         prefetch.append(models.Prefetch(
             query=_sparse(query_text),
             using="text", limit=top_k * 2,
         ))
-    res = qc.query_points(
-        collection,
-        query=vec,
-        prefetch=prefetch,
-        limit=top_k,
-        with_payload=True,
-    ).points
+    try:
+        res = qc.query_points(
+            collection,
+            query=vec,
+            prefetch=prefetch,
+            limit=top_k,
+            with_payload=True,
+        ).points
+    except Exception:
+        # Retry without the sparse leg (collection has no sparse "text" vector).
+        res = qc.query_points(
+            collection,
+            query=vec,
+            prefetch=[models.Prefetch(query=vec, using="", limit=top_k * 2)],
+            limit=top_k,
+            with_payload=True,
+        ).points
     out = []
     for p in res:
         if not p.payload:

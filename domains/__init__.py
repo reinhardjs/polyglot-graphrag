@@ -39,6 +39,7 @@ from typing import Callable, Dict, List, Optional
 
 # Lazy import to avoid a hard dependency cycle at module import time.
 from domain_loader import get_domain, list_domains as _cfg_list_domains
+from domain_loader import _resolve_alias
 
 _DOMAINS_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -83,7 +84,10 @@ def get_retriever(name: str, temporal: bool = False, vec: Optional[list] = None)
 
     Resolution order:
       1. Explicit override (register_retriever).
-      2. ``domains/<name>/retrieve.py`` if present.
+      2. ``domains/<name>/retrieve.py`` if present — BUT `name` is first
+         resolved through any domain_config.yaml ALIAS (so `healthcare` →
+         `snomed` uses the snomed custom retriever, not the slow default
+         neo4j_subgraph fallback).
       3. **Default generic retriever** (domains._default.default_retrieve) —
          searches the domain's Qdrant ``collection`` + Neo4j ``neo4j_label``
          from domain_config.yaml. This is the PRIMARY path for domains like
@@ -94,6 +98,14 @@ def get_retriever(name: str, temporal: bool = False, vec: Optional[list] = None)
     so it reuses the embedding /ask already computed (no 2nd embed). Custom
     companion retrievers ignore it and embed internally (as before).
     """
+    # Resolve alias → concrete target so e.g. `healthcare` (alias→snomed) uses
+    # snomed's custom retriever instead of falling back to default_retrieve.
+    try:
+        resolved = _resolve_alias(name)
+    except Exception:
+        resolved = name
+    if resolved != name:
+        return get_retriever(resolved, temporal=temporal, vec=vec)
     if name in _OVERRIDES:
         return _OVERRIDES[name]
     with _LOCK:
@@ -115,6 +127,12 @@ def get_retriever(name: str, temporal: bool = False, vec: Optional[list] = None)
                 return lambda query, top_k=5: default_retrieve(name, query, top_k, vec=vec)
     if temporal and hasattr(mod, "retrieve_temporal"):
         return lambda query, top_k=5: mod.retrieve_temporal(query, top_k=top_k)
+    # Forward vec only if the retriever accepts it (clinical_prose does;
+    # snomed does not — it embeds internally via the resident daemon).
+    import inspect
+    sig = inspect.signature(mod.retrieve)
+    if "vec" in sig.parameters:
+        return lambda query, top_k=5: mod.retrieve(query, top_k=top_k, vec=vec)
     return lambda query, top_k=5: mod.retrieve(query, top_k=top_k)
 
 

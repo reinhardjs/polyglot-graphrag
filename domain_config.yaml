@@ -63,6 +63,70 @@ domains:
       - title
       - source
       - url
+  enterprise:
+    # Enterprise Knowledge Management: ADRs, runbooks, postmortems, RFCs.
+    # Primary corpus = Qdrant `enterprise` collection (dense prose). No graph.
+    collection: enterprise
+    neo4j_label: null
+    retrieval: dense_prose
+    entity_types: []
+    relation_types: []
+    pair_strategy: all_pairs
+    min_confidence: 0.0
+    chunking:
+      strategy: fixed
+      chunk_size: 512
+      overlap: 64
+    metadata_schema:
+      fields:
+      - title
+      - source
+  legal:
+    # Legal & Compliance: GDPR, SOC 2, HIPAA, contract clauses.
+    # Primary corpus = Qdrant `legal` collection (dense prose). No graph.
+    collection: legal
+    neo4j_label: null
+    retrieval: dense_prose
+    entity_types: []
+    relation_types: []
+    pair_strategy: all_pairs
+    min_confidence: 0.0
+    chunking:
+      strategy: fixed
+      chunk_size: 512
+      overlap: 64
+    metadata_schema:
+      fields:
+      - title
+      - source
+  fraud:
+    # Fraud Detection: transaction graph (Neo4j) + narrative companion (Qdrant).
+    # Primary corpus = graph retriever (domains/fraud/retrieve.py). Companion
+    # `fraud` Qdrant holds fraud-case writeups for dense semantic matching.
+    collection: fraud
+    neo4j_label: Account
+    retrieval: fraud_graph
+    companions:
+      - fraud            # dense narrative companion (seeded fraud cases)
+    entity_types:
+    - Account
+    - Transaction
+    - Device
+    - Card
+    relation_types:
+    - SHARED_DEVICE
+    - SHARED_CARD
+    - SENT
+    - TO
+    pair_strategy: all_pairs
+    min_confidence: 0.0
+    chunking:
+      strategy: none
+      chunk_size: 0
+      overlap: 0
+    metadata_schema:
+      fields:
+      - pattern
   # ── PUBLIC DEFAULT ALIAS ───────────────────────────────────────────────
   # `default` resolves to the `snomed` strategy (the only primary domain after
   # the engineering corpus was purged). A non-technical user querying AS-IS
@@ -74,5 +138,13 @@ domains:
       The out-of-the-box domain after purge. Uses the SNOMED knowledge graph
       (SnomedConcept Neo4j label) + clinical_prose companion with term-match +
       semantic hybrid retrieval.
+  # `healthcare` is a friendly public name for the SNOMED clinical domain
+  # (so the v1.0 domain list reads healthcare/enterprise/fraud/legal).
+  healthcare:
+    alias: snomed
+    display_name: "Healthcare (SNOMED)"
+    description: >-
+      Clinical diagnosis via SNOMED CT terminology graph + clinical_prose
+      companion. Identical strategy to snomed; exposed as a clear public name.
 # Default domain for unqualified `/ask` calls (no `domain` field sent).
 default_domain: default

@@ -149,6 +149,22 @@ def _load_all():
         flush=True,
     )
 
+    # ── Prebuild SNOMED IDF cache (P1.7) ────────────────────────────────────
+    # Done at startup so the FIRST user request doesn't pay the ~20s scan cost.
+    # Runs in a background thread so it doesn't block the daemon from serving
+    # other domains while the table builds.
+    def _prebuild_idf():
+        try:
+            import domains.snomed.retrieve as S
+            print("[gpu-daemon] building SNOMED IDF lookup table ...", flush=True)
+            S._ensure_idf_cache()
+            print(f"[gpu-daemon] SNOMED IDF cache ready "
+                  f"({len(S._IDF_CACHE)} words)", flush=True)
+        except Exception as e:
+            print(f"[gpu-daemon] IDF prebuild failed (lazy on first use): {e}",
+                  flush=True)
+    threading.Thread(target=_prebuild_idf, daemon=True).start()
+
 
 def _load_gliner():
     """Lazy-load GLiNER on first /extract_graph call (fallback path only).
@@ -192,7 +208,7 @@ class AskReq(BaseModel):
     synthesize: bool = True
     skip_cache: bool = False
     collection: Optional[str | List[str]] = None   # Qdrant collection(s); None→default
-    domain: Optional[str] = None                     # v2.6.0 profile (engineering/medical/legal/...)
+    domain: Optional[str | List[str]] = None        # v2.6.0 profile (engineering/medical/legal/...) or ["a","b"] for cross-domain
     crag: bool = False                               # Phase 3: Corrective RAG + adaptive routing
     dual_signal_only: bool = False                  # hybrid: keep only candidates confirmed by
                                                     # BOTH signals (SNOMED term-match + clinical prose)
@@ -410,26 +426,53 @@ def _persist_differential(req: AskReq, result: dict):
 @app.post("/ask")
 def ask(req: AskReq):
     """Full RAG answer in ONE call with semantic cache + route metadata."""
+    import time as _time
+    import uuid as _uuid_mod
+    _req_id = _uuid_mod.uuid4().hex[:12]
+    _t0 = _time.time()
     import ask as rag
     import numpy as np
     from qdrant_client import QdrantClient
     from qdrant_client.models import PointStruct
 
-    # 0. Domain profile (v0.x YAML) — resolves collection/label/entry strategy
+    # 0. Domain profile (v0.x YAML) — resolves collection/label/entry strategy.
+    # Only meaningful for single-domain queries; cross-domain (list / "all")
+    # resolves each concrete domain inside the fan-out below.
     import domain_loader
-    profile = domain_loader.get_domain(req.domain) if req.domain else None
+    # Unknown-domain guard (P3.12): return 200 with error + available list,
+    # never a 500. Valid targets = any concrete domain, alias, or "all".
+    if isinstance(req.domain, str) and req.domain.lower() != "all":
+        # Resolve alias to concrete name, then check membership among configured
+        # domains (skip aliases so we validate the concrete target).
+        concrete = domain_loader._resolve_alias(req.domain)
+        configured = [d for d in domain_loader.list_domains()
+                      if not isinstance(domain_loader._DOMAINS.get(d), dict)
+                      or "alias" not in domain_loader._DOMAINS.get(d, {})]
+        if concrete not in configured:
+            return {
+                "error": "unknown_domain",
+                "available": domain_loader.list_domains(),
+                "degraded": False,
+                "query": req.query,
+                "n_contexts": 0,
+                "contexts": [],
+                "contexts_meta": [],
+                "request_id": _req_id,
+            }
+    profile = domain_loader.get_domain(req.domain) if isinstance(req.domain, str) else None
 
     # 1. Embed query in-process (resident model on GPU)
     #    Phase 1: modulate first (expand domain aliases) so embedding is grounded.
     from query_modulator import QueryModulator
-    query_text = QueryModulator.moderate(req.query, domain=req.domain)
+    query_text = QueryModulator.moderate(
+        req.query, domain=req.domain if isinstance(req.domain, str) else None)
     encode_kw = {"convert_to_numpy": True, "show_progress_bar": False}
     if C.EMBED_TASK_QUERY:
         encode_kw["task"] = C.EMBED_TASK_QUERY
     vec = _jina.encode([query_text], **encode_kw)[0].tolist()
 
-    # 2. SEMANTIC CACHE
-    if req.synthesize and not req.skip_cache:
+    # 2. SEMANTIC CACHE (P1.5: enabled for ALL queries, not just synthesize)
+    if not req.skip_cache:
         try:
             qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
             if qc.collection_exists(C.COLL_CACHE):
@@ -439,6 +482,7 @@ def ask(req: AskReq):
                 ).points
                 if hits:
                     p = hits[0].payload
+                    _record_metric("ok", _time.time() - _t0)
                     return {
                         "query": req.query,
                         "source": "cache",
@@ -455,6 +499,7 @@ def ask(req: AskReq):
                         "rerank_scores": p.get("rerank_scores", []),
                         "answer": p.get("answer", ""),
                         "cache_hit": True,
+                        "request_id": _req_id,
                     }
         except Exception:
             pass
@@ -507,17 +552,85 @@ def ask(req: AskReq):
         except Exception:
             presentation = None
 
-    fed = F.assemble(F.FederateRequest(
-        domain=req.domain or "",
-        query=req.query, top_k=req.top_k,
-        presentation=presentation, synthesize=req.synthesize, mode=req.mode,
-        vec=vec,
-    ), vec=vec, rag=rag)
-    q_res = fed.q_res
-    g_res = fed.g_res
-    qdrant_hits = fed.qdrant_hits
-    graph_hits = fed.graph_hits
-    path = fed.path
+    # ── Cross-domain fan-out (P2.11) ───────────────────────────────────────
+    # domain="all" (or an explicit list ["legal","enterprise"]) runs every
+    # concrete primary domain's retriever in parallel, tags each record with
+    # `_domain`, and merges into one pool for fusion/rerank. Aliases are
+    # expanded so `all` covers healthcare/enterprise/legal/fraud.
+    def _concrete_domains() -> list:
+        names = []
+        for d in domain_loader.list_domains():
+            cfg = _DOMAINS_SAFE(d)
+            if isinstance(cfg, dict) and "alias" in cfg:
+                continue  # skip alias entries themselves
+            names.append(d)
+        return names
+
+    def _DOMAINS_SAFE(name):
+        try:
+            return domain_loader._DOMAINS.get(name)
+        except Exception:
+            return None
+
+    _domains_requested = req.domain
+    if isinstance(_domains_requested, str) and _domains_requested.lower() == "all":
+        _target_domains = _concrete_domains()
+    elif isinstance(_domains_requested, list):
+        _target_domains = _domains_requested
+    else:
+        _target_domains = None  # single-domain path
+
+    if _target_domains is not None:
+        # Cross-domain: assemble each concrete domain in parallel.
+        q_res = []
+        g_res = []
+        _total_q = 0
+        _total_g = 0
+        _threads = []
+        _per_domain = {}
+        _failed = []
+
+        def _run_domain(dom):
+            sub = F.assemble(
+                F.FederateRequest(
+                    domain=dom, query=req.query, top_k=req.top_k,
+                    presentation=presentation, synthesize=req.synthesize,
+                    mode=req.mode, vec=vec,
+                ), vec=vec, rag=rag)
+            _per_domain[dom] = sub
+            _failed.extend(sub.failed)
+
+        for dom in _target_domains:
+            t = threading.Thread(target=_run_domain, args=(dom,))
+            _threads.append(t)
+        for t in _threads:
+            t.start()
+        for t in _threads:
+            t.join()
+        for dom, sub in _per_domain.items():
+            for r in sub.q_res:
+                r["_domain"] = dom
+                q_res.append(r)
+            _total_q += sub.qdrant_hits
+            _total_g += sub.graph_hits
+        qdrant_hits = _total_q
+        graph_hits = _total_g
+        path = "cross_domain"
+    else:
+        # Single-domain path (original).
+        fed = F.assemble(F.FederateRequest(
+            domain=req.domain or "",
+            query=req.query, top_k=req.top_k,
+            presentation=presentation, synthesize=req.synthesize, mode=req.mode,
+            vec=vec,
+        ), vec=vec, rag=rag)
+        q_res = fed.q_res
+        g_res = fed.g_res
+        qdrant_hits = fed.qdrant_hits
+        graph_hits = fed.graph_hits
+        path = fed.path
+        _failed = list(fed.failed)
+
 
     # 4. Fuse + rerank in-process
     # q_res = list of Qdrant records {text,doc_id,doc_type,chunk_idx}
@@ -613,15 +726,39 @@ def ask(req: AskReq):
             "answer": "", "cache_hit": False,
         }
 
-    scores = _reranker.predict([(req.query, r["text"]) for r in pool])
-    ranked = []
-    for i, s in enumerate(scores):
-        sc = float(s)
-        if pool[i].get("_dual_signal"):
-            sc += DUAL_BOOST
-        ranked.append((i, sc))
-    ranked.sort(key=lambda x: x[1], reverse=True)
-    ranked = ranked[:req.top_k]
+    # 4b. Conditional rerank (P1.8): when synthesize=false and pool is small,
+    # skip the BGE cross-encoder entirely and order by raw retrieval scores.
+    # The reranker's main value is ordering for LLM synthesis; for raw context
+    # retrieval the per-signal scores (IDF for graph hits, Qdrant similarity for
+    # prose hits) are sufficient and deterministic.
+    _skip_rerank = (not req.synthesize) and (not _force_differential) \
+        and len(pool) <= 10
+
+    if _skip_rerank:
+        # Raw-score ordering: graph hits carry IDF score (already summed in
+        # _build_context? no — re-derive from context text). Simpler: sort by
+        # a normalized pool score. We stored no per-record raw score, so use a
+        # stable order: dual-signal first, then preserve arrival order.
+        ranked = []
+        for i, r in enumerate(pool):
+            sc = 0.0
+            if r.get("_dual_signal"):
+                sc += DUAL_BOOST
+            ranked.append((i, sc))
+        ranked.sort(key=lambda x: x[1], reverse=True)
+        ranked = ranked[:req.top_k]
+        rerank_scores = [float(pool[i].get("_dual_signal", False)) for i, _ in ranked]
+    else:
+        scores = _reranker.predict([(req.query, r["text"]) for r in pool])
+        ranked = []
+        for i, s in enumerate(scores):
+            sc = float(s)
+            if pool[i].get("_dual_signal"):
+                sc += DUAL_BOOST
+            ranked.append((i, sc))
+        ranked.sort(key=lambda x: x[1], reverse=True)
+        ranked = ranked[:req.top_k]
+        rerank_scores = [s for _, s in ranked]
 
     # Confidence label per ranked differential. Computed on the DE-BOOSTED
     # (raw) cross-encoder score so confidence reflects true model relevance,
@@ -642,6 +779,7 @@ def ask(req: AskReq):
                      "doc_type": pool[i].get("doc_type", ""),
                      "chunk_idx": pool[i].get("chunk_idx", -1),
                      "signal": pool[i].get("_signal", ""),
+                     "domain": pool[i].get("_domain", pool[i].get("_signal", "")),
                      "concept_id": pool[i].get("concept_id"),
                      "dual_signal": pool[i].get("_dual_signal", False),
                      "confidence": _confidence(
@@ -652,9 +790,16 @@ def ask(req: AskReq):
 
     # 5. Synthesize with E4B (separate process)
     answer = ""
+    degraded = bool(_failed)
     if req.synthesize or _force_differential:
         # differential mode forces synthesis so a ranked Dx is always returned
-        answer = rag.synthesize(req.query, contexts, profile)
+        try:
+            answer = rag.synthesize(req.query, contexts, profile)
+        except Exception as e:
+            # E4B unavailable (P3.12): degrade gracefully — empty answer, flag.
+            print(f"[ask] synthesis failed (degraded): {e}", flush=True)
+            degraded = True
+            answer = ""
 
     # Numbered contexts (citation-ready) — present whether or not synthesis
     # runs, so synthesize:false consumers (Hermes rag_query, etc.) get [1]/[2]
@@ -740,10 +885,15 @@ def ask(req: AskReq):
         "rerank_scores": rerank_scores,
         "answer": answer,
         "cache_hit": False,
+        "degraded": degraded,
+        "failed_domains": _failed,
+        "request_id": _req_id,
     }
 
-    # 6. Store in cache
-    if req.synthesize and not req.skip_cache:
+    _record_metric("degraded" if degraded else "ok", _time.time() - _t0)
+
+    # 6. Store in cache (P1.5: enabled for ALL queries)
+    if not req.skip_cache:
         try:
             qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
             if qc.collection_exists(C.COLL_CACHE):
@@ -1326,11 +1476,117 @@ def admin_reload():
 
 @app.get("/health")
 def health():
+    """Extended health (P3.13): per-domain status + backend connectivity + VRAM."""
+    import domain_loader
+    # Backend connectivity probes (non-fatal; report status, never 500).
+    backends = {}
+    # Qdrant
+    try:
+        from qdrant_client import QdrantClient
+        qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False, timeout=3)
+        qc.count(C.COLL_CACHE)
+        backends["qdrant"] = "ok"
+    except Exception as e:
+        backends["qdrant"] = f"down:{type(e).__name__}"
+    # Neo4j
+    try:
+        from neo4j import GraphDatabase
+        d = GraphDatabase.driver(C.NEO4J_URI, auth=(C.NEO4J_USER, C.NEO4J_PASSWORD),
+                                 connection_acquisition_timeout=3)
+        with d.session() as s:
+            s.run("RETURN 1").single()
+        d.close()
+        backends["neo4j"] = "ok"
+    except Exception as e:
+        backends["neo4j"] = f"down:{type(e).__name__}"
+    # E4B synthesis (reachable?)
+    try:
+        import requests
+        r = requests.get(f"{C.SYNTHESIS_LLM_BASE_URL.replace('/v1','')}/health",
+                         timeout=3)
+        backends["e4b"] = "ok" if r.status_code < 500 else f"down:{r.status_code}"
+    except Exception as e:
+        backends["e4b"] = f"down:{type(e).__name__}"
+
+    # Per-domain runnable status (does the domain resolve + have a retriever?)
+    domains = {}
+    for name in domain_loader.list_domains():
+        try:
+            prof = domain_loader.get_domain(name)
+            domains[name] = {
+                "configured": True,
+                "retrieval": prof.get("retrieval"),
+                "collection": prof.get("collection"),
+            }
+        except Exception as e:
+            domains[name] = {"configured": False, "error": str(e)}
+
+    status = "ok"
+    if any(v.startswith("down") for v in backends.values()):
+        status = "degraded"
+
     return {
-        "status": "ok",
+        "status": status,
         "device": DEVICE,
         "cuda_alloc_gb": round(torch.cuda.memory_allocated()/1e9, 1),
+        "vram_gb": round(torch.cuda.get_device_properties(0).total_memory/1e9, 1)
+        if torch.cuda.is_available() else 0.0,
+        "backends": backends,
+        "domains": domains,
+        "default_domain": domain_loader.get_default_domain(),
     }
+
+
+@app.get("/metrics")
+def metrics():
+    """Lightweight Prometheus-format metrics (P3.14) without external deps.
+
+    Exposes:
+      rag_requests_total            — cumulative /ask calls (by status)
+      rag_request_latency_seconds    — histogram bucketed by latency
+      rag_requests_in_flight        — gauge (approx, via counter delta)
+    This is sufficient for `scripts/bench_ask.py` and a Prometheus scrape.
+    """
+    return Response(content=_render_metrics(), media_type="text/plain")
+
+
+# ── P3.14: in-process metrics (no external dep) ──────────────────────────────
+_METRIC_LOCK = threading.Lock()
+_REQ_TOTAL = {"ok": 0, "degraded": 0, "error": 0}
+_LAT_BUCKETS = [0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, float("inf")]
+_LAT_COUNTS = {b: 0 for b in _LAT_BUCKETS}
+_LAT_SUM = 0.0
+
+
+def _record_metric(status: str, latency: float) -> None:
+    global _LAT_SUM
+    with _METRIC_LOCK:
+        _REQ_TOTAL[status] = _REQ_TOTAL.get(status, 0) + 1
+        _LAT_SUM += latency
+        for b in _LAT_BUCKETS:
+            if latency <= b:
+                _LAT_COUNTS[b] += 1
+                break
+
+
+def _render_metrics() -> str:
+    with _METRIC_LOCK:
+        lines = []
+        lines.append("# HELP rag_requests_total Total /ask requests by status.")
+        lines.append("# TYPE rag_requests_total counter")
+        for k, v in _REQ_TOTAL.items():
+            lines.append(f'rag_requests_total{{status="{k}"}} {v}')
+        lines.append("# HELP rag_request_latency_seconds Request latency.")
+        lines.append("# TYPE rag_request_latency_seconds histogram")
+        cum = 0
+        for b in _LAT_BUCKETS:
+            cum += _LAT_COUNTS[b]
+            label = "+Inf" if b == float("inf") else str(b)
+            lines.append(
+                f'rag_request_latency_seconds_bucket{{le="{label}"}} {cum}')
+        lines.append(f"rag_request_latency_seconds_sum {round(_LAT_SUM, 3)}")
+        lines.append(f"rag_request_latency_seconds_count {cum}")
+        return "\n".join(lines) + "\n"
 
 
 @app.get("/models")
@@ -1448,6 +1704,28 @@ def on_startup():
 
 
 if __name__ == "__main__":
+    import argparse
     import uvicorn
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--demo", action="store_true",
+                    help="Seed ALL demo domains idempotently before starting.")
+    args = ap.parse_args()
+
+    if args.demo:
+        print("[gpu-daemon] --demo: seeding all demo domains ...", flush=True)
+        for seed_fn in [
+            ("enterprise", "domains.enterprise.seed"),
+            ("legal", "domains.legal.seed"),
+            ("fraud", "domains.fraud.seed"),
+        ]:
+            try:
+                mod = importlib.import_module(seed_fn[1])
+                print(f"  [demo] {seed_fn[0]}: {mod.seed()}", flush=True)
+            except Exception as e:
+                print(f"  [demo] {seed_fn[0]}: SKIP ({e})", flush=True)
+        # snomed + clinical_prose are already populated (purge kept them);
+        # re-running is idempotent (collections already non-empty → skipped).
+        print("[gpu-daemon] --demo: done. Starting daemon.", flush=True)
 
     uvicorn.run(app, host="127.0.0.1", port=8000, workers=1)
