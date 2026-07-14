@@ -106,6 +106,35 @@ bash run.sh serve
 bash run.sh health
 ```
 
+### Full zero-setup demo (`--demo`)
+
+For a complete out-of-the-box demo that seeds BOTH corpora, start the daemon
+with `--demo` (the LLM servers must already be up — `bash run.sh llms`, or use
+`bash run.sh serve` then restart the daemon with `--demo`):
+
+```bash
+./venv/bin/python serve_gpu.py --demo
+```
+
+`--demo` seeds, after the daemon is healthy:
+- **Primary engineering graph corpus** — ingests the bundled sample set in
+  `demo/engineering/` (ADR-021, BUG-204, PR-482, checkout runbook) into
+  `engineering_chunks` + the Neo4j `Engineering` graph, and writes a small
+  curated set of demo triples (e.g. BUG-204 → reported_by → bob) so the
+  showcase query works deterministically.
+- **Companion corpus** `engineering_docs` (this repo's `docs/`) — auto-seeded
+  on startup regardless of `--demo` (it's in `SEED_ON_STARTUP`).
+
+After seeding, try:
+```bash
+bash run.sh ask "who reported BUG-204?"          # primary graph
+bash run.sh ask "what is the total VRAM budget on the RTX 3060"  # companion
+```
+
+> `run.sh serve` does NOT pass `--demo`. To get the full demo, start the daemon
+> with `./venv/bin/python serve_gpu.py --demo` (companion corpora auto-seed in
+> either case).
+
 > The `run.sh` helper launches E2B with `--ctx-size 32768` (required so the
 > parallel sliding-window extractor doesn't overflow the shared KV cache — see
 > §3) and exports `SW_EXTRACT_WORKERS=4`. No sudo, no systemd units needed.

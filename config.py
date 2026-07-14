@@ -244,5 +244,9 @@ ENTITY_VECTOR_INDEX = "entity_vector_idx"
 # if its Qdrant collection is empty. `example_companion` is the bundled
 # zero-tech demo (domains/example_companion). Add real domains here to have
 # them auto-populate on boot. Set to [] to disable auto-seed entirely.
-SEED_ON_STARTUP = ["example_companion"]
+# Companion corpora auto-seeded on daemon startup (if their Qdrant collection
+# is empty). The primary engineering graph corpus is NOT auto-seeded here —
+# run `python serve_gpu.py --demo` to also seed it from the bundled
+# demo/engineering/ sample set, or ingest your own docs via sync_docs.py.
+SEED_ON_STARTUP = ["example_companion", "engineering_docs"]
 

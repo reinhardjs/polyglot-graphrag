@@ -19,24 +19,35 @@ python -m spacy download en_core_web_sm   # sliding-window tokenization
 
 ## 1. Start the stack (boot once, then you can ask)
 
-Run from the project root. The demo corpora are **auto-seeded on first daemon
-start**, so you can ask questions immediately — no ingest step required.
+Run from the project root. The demo companion corpora (`engineering_docs`,
+`example_companion`) are **auto-seeded on first daemon start**. For a FULL
+demo that also seeds the **primary engineering graph corpus** (so graph
+questions like "who reported BUG-204?" work out-of-the-box), add `--demo` —
+it ingests a bundled sample set (`demo/engineering/`) into `engineering_chunks`
++ the Neo4j `Engineering` graph, with zero external data.
 
 ```bash
 cd /mnt/data-970-plus/rag-system
 
 # 1) Supporting stores (Neo4j + Qdrant) — Docker, runs in background.
-#    Your data persists on the host across restarts.
 docker compose up -d
 
-# 2) GPU models + the daemon, in ONE command. run.sh starts Gemma E2B
-#    (extraction, :8082) and E4B (answer writing, :8084), then the FastAPI
-#    daemon (:8000), waiting for each to be ready before proceeding.
-bash run.sh serve
+# 2) GPU models + the daemon. Add --demo to also seed the primary graph corpus.
+bash run.sh serve            # companion corpora auto-seed
+# OR for the FULL demo (primary graph + companion), start the daemon with --demo:
+#   ./venv/bin/python serve_gpu.py --demo
+# (run.sh serve does not pass --demo; use the line above for the full demo.)
 
-# 3) Confirm everything is up (daemon + both LLMs + VRAM headroom).
+# 3) Confirm everything is up (daemon + both LLMs + VRAM).
 bash run.sh health
 ```
+
+> Note: `run.sh serve` starts the daemon without `--demo`. To get the full
+> primary-graph demo, run `./venv/bin/python serve_gpu.py --demo` directly
+> (the LLMs are already up from `bash run.sh llms`, or just start everything
+> with `bash run.sh llms` then the `--demo` daemon). The `--demo` seed runs in
+> the background after the daemon is healthy; watch the daemon log for
+> "[gpu-daemon] demo seed complete".
 
 When `run.sh health` shows green, the system is ready. Stop later with
 `bash run.sh stop` (daemon + LLMs) and `docker compose down` (stores).
