@@ -1389,8 +1389,17 @@ def on_startup():
                 "}}",
                 idx=C.ENTITY_VECTOR_INDEX, dim=C.VECTOR_DIM,
             )
+            # TEXT indexes on name/id make the keyword entry-point lookup in
+            # neo4j_subgraph index-backed (CONTAINS). Without these, every /ask
+            # does a full :Entity label scan (~250-300ms on a populated graph);
+            # with them the entry match is ~10-50ms.
+            s.run("CREATE TEXT INDEX entity_name_idx IF NOT EXISTS "
+                  "FOR (n:Entity) ON (n.name)")
+            s.run("CREATE TEXT INDEX entity_id_idx IF NOT EXISTS "
+                  "FOR (n:Entity) ON (n.id)")
             print(f"[gpu-daemon] Neo4j vector index '{C.ENTITY_VECTOR_INDEX}' "
-                  f"ready (dim={C.VECTOR_DIM}, cosine)", flush=True)
+                  f"ready (dim={C.VECTOR_DIM}, cosine); TEXT indexes "
+                  f"entity_name_idx/entity_id_idx ready", flush=True)
     except Exception as e:
         print(f"[gpu-daemon] Neo4j vector index init skipped: {e}", flush=True)
 

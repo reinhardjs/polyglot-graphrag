@@ -251,18 +251,50 @@ Graphs reused: 1034 (KV cache working)
 
 ## 3. RETRIEVAL PERFORMANCE (hybrid vector + graph)
 
-| Component | Median Latency | Model |
-|-----------|---------------|-------|
-| Query embedding | **58 ms** | Jina v3 (GPU, fp16) |
-| Qdrant vector search (limit=10) | **67 ms** | Jina embed + ANN |
-| Neo4j subgraph (keyword entry) | **82 ms** | Cypher traversal |
-| Rerank (20 candidates) | **1 ms** | bge-reranker-v2-m3 |
-| **Full /ask hybrid retrieval** | **127 ms** | vector + graph fused |
-| Cache hit | <5 ms | Qdrant cache |
+> **Measured 2026-07-14 on the live daemon** (RTX 3060 12 GB, populated
+> `Engineering` graph — 82k Qdrant points + real entities/edges, companion
+> `engineering_docs` also searched). These REPLACE the older 127 ms figure,
+> which was an internal stage-sum micro-benchmark on a near-empty graph and
+> excluded HTTP/serialization overhead and the companion path.
 
-**Note:** Graph retrieval was broken (2 bugs) and is now fixed:
-1. Domain labels now written to nodes (`:Entity:Engineering`) — fixed in ingest.py
-2. Cypher 2-hop traversal syntax error — fixed in ask.py
+### 3.1 Internal stage timings (measured via direct function calls)
+
+| Component | Latency | Notes |
+|-----------|---------|-------|
+| Query embedding | **~125 ms** | Jina v3 (GPU) — realistic cold/warm, not the old 58 ms best-case |
+| Primary Qdrant (`engineering_chunks`) | **~21 ms** | limit=10 |
+| Companion Qdrant (`engineering_docs`) | **~19 ms** | runs in parallel with primary |
+| Neo4j subgraph (keyword entry) | **~37–120 ms** | **index-backed** after TEXT indexes added (was ~250–300 ms) |
+| Rerank (BGE) | **~1–5 ms** | over the merged candidate pool |
+
+### 3.2 End-to-end `/ask` (synthesize:false) — REAL HTTP round-trip
+
+| Query type | Latency (warm) | Breakdown |
+|------------|----------------|-----------|
+| Graph + primary (`who reported BUG-204?`) | **~1.05–1.3 s** | embed + Qdrant + Neo4j + HTTP/serialize |
+| + companion (`total VRAM budget…`) | **~1.8–2.0 s** | above + companion Qdrant (parallel, +~0.1 s) |
+
+The ~1 s of overhead beyond internal stages is **HTTP + FastAPI handler +
+JSON serialization** of the returned contexts (the companion chunk text is
+large). Synthesis (E4B, `synthesize:true`) adds generation time on top.
+
+### 3.3 Optimization applied this session
+
+The Neo4j subgraph was the dominant cost (~250–300 ms) because every `/ask`
+did a full `:Entity` label scan (pulled up to 500 nodes + profiles, scored in
+Python). Fixed by:
+1. **Server-side token match** in `neo4j_subgraph` (Cypher `CONTAINS` on
+   `id`/`name`, LIMIT 50) instead of the 500-node scan.
+2. **TEXT indexes** `entity_name_idx` / `entity_id_idx` (created idempotently
+   in the daemon `on_startup`) so the `CONTAINS` match is index-backed.
+3. **Cached Neo4j driver** (process-long-lived) instead of reconnect-per-call.
+
+Result: Neo4j subgraph **271 ms → 37 ms** (BUG-204), and `/ask` dropped from
+~1.3 s → ~1.05 s (graph) / ~2.0 s → ~1.8 s (companion).
+
+**Note:** the old "Full /ask hybrid retrieval = 127 ms" figure was an internal
+stage sum (embed 58 + Qdrant 67 + Neo4j 82 + rerank 1) on a near-empty graph
+with no companion and no HTTP overhead. It is NOT a real end-to-end latency.
 
 ---
 
