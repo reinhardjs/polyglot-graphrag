@@ -17,24 +17,50 @@ pip install -r requirements.txt
 python -m spacy download en_core_web_sm   # sliding-window tokenization
 ```
 
-## 1. Start the stack
+## 1. Start the stack (boot once, then you can ask)
+
+Run from the project root. The demo corpora are **auto-seeded on first daemon
+start**, so you can ask questions immediately — no ingest step required.
 
 ```bash
-cd <project-root>
-docker compose up -d          # Neo4j + Qdrant
-bash run.sh serve             # E2B (:8082) + E4B (:8084) + daemon (:8000)
-bash run.sh health            # confirm all 3 up + VRAM
+cd /mnt/data-970-plus/rag-system
+
+# 1) Supporting stores (Neo4j + Qdrant) — Docker, runs in background.
+#    Your data persists on the host across restarts.
+docker compose up -d
+
+# 2) GPU models + the daemon, in ONE command. run.sh starts Gemma E2B
+#    (extraction, :8082) and E4B (answer writing, :8084), then the FastAPI
+#    daemon (:8000), waiting for each to be ready before proceeding.
+bash run.sh serve
+
+# 3) Confirm everything is up (daemon + both LLMs + VRAM headroom).
+bash run.sh health
 ```
 
-## 2. Ask immediately (a demo corpus is auto-seeded on startup)
+When `run.sh health` shows green, the system is ready. Stop later with
+`bash run.sh stop` (daemon + LLMs) and `docker compose down` (stores).
 
-You don't have to ingest anything to try it — the `example_companion` corpus is
-seeded automatically, and `engineering` already has real data:
+## 2. Ask immediately (demo corpus is auto-seeded on startup)
+
+You don't have to ingest anything to try it. The `engineering` primary corpus
+already has real data and the `engineering_docs` companion (this repo's `docs/`)
+is seeded on startup:
 ```bash
-bash run.sh ask "what is the total VRAM budget on the RTX 3060 and which models share it"
-# or raw:
+# Full pipeline: retrieve + E4B writes the answer
+bash run.sh ask "who reported BUG-204?"
+
+# Retrieval only (no LLM answer — fast, works even if E4B is off)
+bash run.sh retrieve "what is the total VRAM budget on the RTX 3060"
+```
+
+Raw curl equivalents:
+```bash
 curl -s -X POST localhost:8000/ask -H 'Content-Type: application/json' \
-  -d '{"query":"who reported BUG-204?","domain":"engineering"}'
+  -d '{"query":"who reported BUG-204?","domain":"engineering","synthesize":true}'
+
+curl -s -X POST localhost:8000/ask -H 'Content-Type: application/json' \
+  -d '{"query":"what is the total VRAM budget on the RTX 3060","domain":"engineering","synthesize":false}'
 ```
 
 ## 3. Ingest your real engineering doc (optional)
