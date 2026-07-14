@@ -225,12 +225,15 @@ domains:
       - year
       - doi
   snomed:
-    # SNOMED CT is a terminology graph, not a prose corpus. Retrieval is by
-    # symptom keyword term-matching against SnomedDescription.term with IDF
-    # weighting (snomed_diagnose.py), NOT Cypher IS-A traversal.
+    # SNOMED CT terminology graph. Retrieval = symptom keyword term-matching
+    # against SnomedDescription.term with IDF weighting (domains/snomed/retrieve.py).
+    # The `clinical_prose` collection (separate domain) carries the free-text
+    # disease descriptions that SNOMED lacks, enabling semantic differential
+    # diagnosis. /ask for domain=snomed runs BOTH retrievers and merges.
     collection: null
     neo4j_label: SnomedConcept
     retrieval: snomed_term_match
+    prose_domain: clinical_prose   # semantic companion corpus (optional)
     entity_types:
     - Disorder
     - Finding
@@ -251,4 +254,25 @@ domains:
       fields:
       - concept_id
       - term
+  clinical_prose:
+    # Free-text clinical knowledge (Wikipedia medicine articles, etc.) embedded
+    # into Qdrant for SEMANTIC symptom->disease matching. SNOMED alone cannot
+    # describe disease presentations; this corpus supplies the prose.
+    # Ingested by domains/clinical_prose/ingest.py.
+    collection: clinical_prose
+    neo4j_label: null
+    retrieval: dense_prose
+    entity_types: []          # prose corpus: no graph extraction
+    relation_types: []
+    pair_strategy: all_pairs
+    min_confidence: 0.0
+    chunking:
+      strategy: fixed
+      chunk_size: 512
+      overlap: 64
+    metadata_schema:
+      fields:
+      - title
+      - source
+      - url
 default_domain: engineering

@@ -393,3 +393,14 @@ def retrieve_temporal(presentation: dict, top_k: int = 5) -> list:
 
     finally:
         driver.close()
+
+
+# ── Registry contract ───────────────────────────────────────────────────────
+# The domains/ registry calls `retrieve(query, top_k)` (primary) and, for
+# graduated presentations, `retrieve_temporal(presentation, top_k)` which this
+# module already defines above. This thin wrapper adapts the internal
+# `retrieve_symptoms` to the registry's `retrieve` name without touching the
+# working internals.
+def retrieve(query: str, top_k: int = 5) -> list:
+    """Registry entry point: free-text symptom query."""
+    return retrieve_symptoms(query, top_k=top_k)

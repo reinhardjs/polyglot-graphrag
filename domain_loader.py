@@ -50,10 +50,14 @@ def _validate_domain(name: str, cfg: Dict[str, Any]) -> None:
             f"domain '{name}' pair_strategy must be 'all_pairs' or "
             f"'same_sentence', got '{cfg['pair_strategy']}'"
         )
-    if not isinstance(cfg["entity_types"], list) or not cfg["entity_types"]:
-        raise ValueError(f"domain '{name}' entity_types must be a non-empty list")
-    if not isinstance(cfg["relation_types"], list) or not cfg["relation_types"]:
-        raise ValueError(f"domain '{name}' relation_types must be a non-empty list")
+    # Pure prose / vector-only domains (retrieval: dense_prose) have no graph
+    # extraction, so empty entity/relation lists are valid.
+    is_prose_only = cfg.get("retrieval") == "dense_prose"
+    if not is_prose_only:
+        if not isinstance(cfg["entity_types"], list) or not cfg["entity_types"]:
+            raise ValueError(f"domain '{name}' entity_types must be a non-empty list")
+        if not isinstance(cfg["relation_types"], list) or not cfg["relation_types"]:
+            raise ValueError(f"domain '{name}' relation_types must be a non-empty list")
     # chunking sub-keys
     chunking = cfg.get("chunking", {})
     for ck in ("strategy", "chunk_size", "overlap"):

@@ -50,6 +50,8 @@ QDRANT_COLLECTIONS = {
     "hospitality":  "hospitality_chunks",
     "accounting":   "accounting_chunks",
     "medical":      "medical_chunks",
+    "snomed":       None,            # terminology graph: no prose collection
+    "clinical_prose": "clinical_prose",
 }
 QDRANT_COLLECTION_DEFAULT = "engineering_chunks"
 

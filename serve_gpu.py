@@ -38,6 +38,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import threading
+import importlib
 import torch
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Response
 from pydantic import BaseModel
@@ -454,12 +455,13 @@ def ask(req: AskReq):
             "contexts_meta": [],
             "answer": result.get("answer") or "",
         }
-    # 2b-. SNOMED domain: Cypher-traversal retrieval (no Qdrant, no Entity graph)
+    # 2b-. SNOMED domain: terminology graph term-match + companion prose.
     # Initialise so both branches leave these bound (Pyright-friendly).
     q_res, g_res, qdrant_hits, graph_hits, path = [], [], 0, 0, "none"
     if req.domain == "snomed":
-        import snomed_diagnose as SR
         import json as _json
+        from domains import get_retriever
+
         # Detect a temporal/graduated presentation: JSON {"day1":[...],...}
         presentation = None
         q = req.query.strip()
@@ -470,17 +472,32 @@ def ask(req: AskReq):
                     presentation = parsed
             except Exception:
                 presentation = None
+
+        # Primary: SNOMED term-match (IDF) over the concept graph.
+        snomed_retrieve = get_retriever("snomed", temporal=bool(presentation))
         if presentation:
-            g_res = SR.retrieve_temporal(presentation, top_k=req.top_k)
+            g_res = snomed_retrieve(presentation, top_k=req.top_k)
         else:
-            g_res = SR.retrieve_symptoms(req.query, top_k=req.top_k)
+            g_res = snomed_retrieve(req.query, top_k=req.top_k)
         graph_hits = len(g_res)
-        qdrant_hits = 0
-        path = "graph" if graph_hits else "none"
-        # skip Qdrant; go straight to fuse/rerank with graph-only contexts
+
+        # Companion semantic corpus: clinical_prose (free-text disease
+        # descriptions SNOMED lacks). Merged into q_res so the reranker sees
+        # both signals. Silent if the corpus is empty / not yet ingested.
         q_res = []
-        t1 = None  # no Qdrant thread
-        # (fall through to fusion below by jumping past the Qdrant block)
+        qdrant_hits = 0
+        try:
+            prose_retrieve = get_retriever("clinical_prose")
+            prose_hits = prose_retrieve(req.query, top_k=req.top_k)
+            if prose_hits:
+                q_res = prose_hits
+                qdrant_hits = len(prose_hits)
+        except Exception as e:
+            print(f"[ask] snomed companion prose unavailable: {e}", flush=True)
+
+        path = "hybrid" if (graph_hits and qdrant_hits) else (
+            "graph" if graph_hits else ("qdrant" if qdrant_hits else "none"))
+        # skip the generic Qdrant/Neo4j block below
         _snomed_shortcut = True
     else:
         _snomed_shortcut = False
@@ -620,6 +637,41 @@ def ask(req: AskReq):
             pass
 
     return result
+
+
+@app.post("/ingest_domain")
+def ingest_domain(req: dict):
+    """Trigger a domain-specific ingestor (e.g. clinical_prose Wikipedia corpus).
+
+    Body: {"domain": "clinical_prose", "limit": 500, "seed": [...optional...]}
+    Runs domains/<domain>/ingest.py::ingest(...) in a background thread and
+    returns immediately. The ingestor embeds via the resident daemon, so no
+    second model load. Progress is logged to the daemon stdout.
+    """
+    import threading
+    domain = (req or {}).get("domain")
+    if not domain:
+        raise HTTPException(status_code=400, detail="domain is required")
+    try:
+        from domains import list_domains
+        if domain not in list_domains():
+            raise HTTPException(status_code=404,
+                                detail=f"no ingestor for domain '{domain}'")
+        mod = importlib.import_module(f"domains.{domain}.ingest")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    limit = int((req or {}).get("limit", 500))
+    seed = (req or {}).get("seed")
+
+    def _run():
+        try:
+            mod.ingest(limit=limit, seed=seed)
+        except Exception as e:
+            print(f"[ingest_domain] {domain} failed: {e}", flush=True)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"accepted": True, "domain": domain, "limit": limit}
 
 
 @app.post("/ingest")
