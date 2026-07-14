@@ -98,6 +98,7 @@ confirmed by more than one — see [docs/domains/README.md](docs/domains/README.
 | Get it running from zero | [RUN.md](RUN.md) |
 | The 5-min ingest→ask path | [QUICKSTART.md](QUICKSTART.md) |
 | Understand the design | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| **All API endpoints (request/response + curl)** | [docs/API.md](docs/API.md) |
 | Add a domain / companion | [docs/domains/README.md](docs/domains/README.md) |
 | How versioning works | [VERSIONING.md](VERSIONING.md) |
 | What changed / release notes | [CHANGELOG.md](CHANGELOG.md) |

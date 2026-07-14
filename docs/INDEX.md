@@ -32,6 +32,10 @@ not shipped features — status may lag the code.
 - `development.md` — dev setup.
 - `model-switching.md` — how to swap an embedding/LLM model in `config.py`.
 
+### `API.md` — **authoritative endpoint reference**
+All 22 daemon routes (retrieval, ingestion, status, admin, differentials) with
+request/response shapes and curl examples. Start here for the API contract.
+
 ### `domains/`
 - `README.md` — **how to add a domain or companion** (the key how-to).
 
