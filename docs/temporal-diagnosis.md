@@ -93,6 +93,15 @@ curl -X POST localhost:8000/ask -H 'Content-Type: application/json' -d '{
 #    dual_signal is a SEPARATE corroboration flag, not part of confidence.
 #    NOTE: confidence = strength of evidence (keyword+semantic overlap), NOT
 #    clinical probability of the disease.
+
+# min_confidence floor: drop candidates below this from `diagnoses`
+curl -X POST localhost:8000/ask -H 'Content-Type: application/json' -d '{
+  "query": "fever and rash", "domain": "snomed", "mode": "differential",
+  "min_confidence": "medium"
+}'
+
+# live calibration knobs (no source reading needed)
+curl localhost:8000/config
 ```
 
 ## Try-it-out (single command, all paths)

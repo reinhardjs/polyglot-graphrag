@@ -185,6 +185,8 @@ class AskReq(BaseModel):
                                                     # BOTH signals (SNOMED term-match + clinical prose)
     mode: Optional[str] = None                      # "differential" -> ranked Dx w/ confidence,
                                                     # dual-signal preference, synthesis forced on
+    min_confidence: Optional[str] = None            # "low"|"medium"|"high" -> drop candidates
+                                                    # below this confidence from `diagnoses`
 
 
 class IngestReq(BaseModel):
@@ -690,15 +692,47 @@ def ask(req: AskReq):
         "rank": i + 1,
         "candidate": _dx_name(c),
         "confidence": contexts_meta[i].get("confidence", "low"),
-        "dual_signal": contexts_meta[i].get("dual_signal", False),
+        "dual_signal": contexts_meta[i].get("_dual_signal", False),
         "rerank_score": round(rerank_scores[i], 4),
     } for i, c in enumerate(contexts)]
+
+    # Optional confidence floor: drop candidates below min_confidence from the
+    # diagnoses list. Always keep at least the top result so /ask never returns
+    # an empty differential when nothing clears the bar.
+    _CONF_RANK = {"low": 0, "medium": 1, "high": 2}
+    if req.min_confidence and req.min_confidence in _CONF_RANK:
+        floor = _CONF_RANK[req.min_confidence]
+        kept = [d for d in differential if _CONF_RANK.get(d["confidence"], 0) >= floor]
+        if kept:
+            # re-rank indices and trim the parallel context lists to match
+            keep_idx = [d["rank"] - 1 for d in kept]
+            differential = [{**d, "rank": j + 1} for j, d in enumerate(kept)]
+            contexts = [contexts[i] for i in keep_idx]
+            contexts_numbered = [f"[{j+1}] {contexts[j]}" for j in range(len(contexts))]
+            contexts_meta = [contexts_meta[i] for i in keep_idx]
+            rerank_scores = [rerank_scores[i] for i in keep_idx]
+            # rebuild sources to reflect kept docs
+            sources = []
+            ref_by_doc = {}
+            for m in contexts_meta:
+                did = m["doc_id"] or "__graph__"
+                if did not in ref_by_doc:
+                    ref_by_doc[did] = len(sources) + 1
+                    sources.append({
+                        "ref": len(sources) + 1, "doc_id": m["doc_id"],
+                        "doc_type": m["doc_type"], "chunk_idx": m["chunk_idx"],
+                        "dual_signal": m.get("dual_signal", False),
+                        "confidence": m.get("confidence", "low"),
+                    })
+            if req.synthesize or _force_differential:
+                answer = rag.synthesize(req.query, contexts, profile)
 
     result = {
         "query": req.query,
         "source": "llm",
         "path": path,
         "mode": req.mode,
+        "min_confidence": req.min_confidence,
         "qdrant_hits": qdrant_hits,
         "graph_hits": graph_hits,
         "n_contexts": len(contexts),
@@ -995,6 +1029,35 @@ def list_collections():
     except Exception as e:
         cols["_error"] = str(e)
     return {"collections": cols}
+
+
+@app.get("/config")
+def show_config():
+    """Active runtime calibration + model knobs (read from config.py).
+
+    Lets ops confirm the live confidence bands and dual-signal boost without
+    reading source. Mirrors the tunable constants; editing config.py + restart
+    updates these.
+    """
+    import domain_loader  # default_domain lives in domain_config.yaml
+    return {
+        "reranker": {
+            "model": C.RERANK_MODEL_NAME,
+            "use_half": C.RERANK_USE_HALF,
+        },
+        "confidence_bands": {
+            "high_threshold": C.CONFIDENCE_HIGH_THRESHOLD,
+            "medium_threshold": C.CONFIDENCE_MEDIUM_THRESHOLD,
+            "computed_on": "raw (de-boosted) cross-encoder score",
+        },
+        "dual_signal_boost": C.DUAL_SIGNAL_BOOST,
+        "default_domain": (domain_loader.get_default_domain()
+                           if hasattr(domain_loader, "get_default_domain")
+                           else "engineering"),
+        "note": "confidence = model relevance, NOT clinical probability; "
+                "dual_signal is a separate corroboration flag. "
+                "See docs/rerank-calibration.md.",
+    }
 
 
 @app.get("/domains")
