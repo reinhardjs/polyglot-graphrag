@@ -498,6 +498,7 @@ def ask(req: AskReq):
                         "sources": p.get("sources", []),
                         "rerank_scores": p.get("rerank_scores", []),
                         "answer": p.get("answer", ""),
+                        "diagnoses": p.get("diagnoses", []),
                         "cache_hit": True,
                         "request_id": _req_id,
                     }
@@ -892,8 +893,11 @@ def ask(req: AskReq):
 
     _record_metric("degraded" if degraded else "ok", _time.time() - _t0)
 
-    # 6. Store in cache (P1.5: enabled for ALL queries)
-    if not req.skip_cache:
+    # 6. Store in cache (P1.5: enabled for ALL queries).
+    # Do NOT cache degraded/empty results (e.g. E4B was down mid-request) —
+    # caching an empty answer would poison every repeat of that query.
+    _cache_worthy = (answer != "" and not degraded)
+    if not req.skip_cache and _cache_worthy:
         try:
             qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
             if qc.collection_exists(C.COLL_CACHE):
@@ -913,6 +917,7 @@ def ask(req: AskReq):
                             "sources": sources,
                             "rerank_scores": rerank_scores,
                             "answer": answer,
+                            "diagnoses": differential,
                         },
                     )],
                     wait=True,
