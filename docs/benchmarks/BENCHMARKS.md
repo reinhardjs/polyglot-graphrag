@@ -401,3 +401,61 @@ chunk (15K chars) produced any relations.
 | 3 | Sparse vector collision — duplicate indices from hash collision | `ingest.py:60-75` | Accumulate by index (sum tf) |
 | 4 | YAML domain relation types not passed to E2B | `ingest.py:668-672` | Load domain dict when profile=None |
 | 5 | Collection routing — journal docs to `engineering_chunks` | `ingest.py:587-590` | Route from domain's `collection:` field |
+
+---
+
+## 9. CURRENT BASELINE — `serve_gpu.py` v0.1.0 (2026-07-14)
+
+**Hardware:** RTX 3060 12GB / i5-11400F / 48GB RAM / Ubuntu 22.04
+**State:** populated `Engineering` graph (82k Qdrant points `engineering_chunks` +
+real entities/edges in Neo4j) + companion `engineering_docs` (66 chunks).
+**Measured:** live daemon, `synthesize:false`, warm, best-of-2 HTTP round-trip.
+
+### 9.1 End-to-end `/ask` latency (synthesize:false)
+
+| Query | Path | Latency |
+|-------|------|---------|
+| who reported BUG-204? | graph + primary (no companion hit) | **1.07 s** |
+| how does Neo4j and Qdrant work together | companion (prose) | **1.25 s** |
+| what database does ADR-021 use? | graph + primary | **1.30 s** |
+| how does checkout relate to billing | graph + primary | **1.62 s** |
+| total VRAM budget on RTX 3060 | companion + primary | **1.78 s** |
+
+**Range: ~1.07–1.78 s.** Companion-path queries sit at the top
+(~1.25–1.78 s); pure graph/primary queries at the bottom (~1.07–1.62 s).
+With `synthesize:true`, E4B generation on `:8084` adds its own time on top
+(earlier full-pipeline logs showed ~6.3 s for E4B); retrieval is unchanged.
+
+### 9.2 Internal stage timings (direct function calls, same run)
+
+| Component | Latency |
+|-----------|---------|
+| Query embedding (Jina v3, GPU) | ~125 ms |
+| Primary Qdrant (`engineering_chunks`) | ~21 ms |
+| Companion Qdrant (`engineering_docs`) | ~19 ms |
+| Neo4j subgraph (index-backed) | ~37–120 ms |
+| Rerank (BGE) | ~1–5 ms |
+| **HTTP + FastAPI + JSON serialize** | **~0.7–1.0 s** |
+
+Of the ~1.1–1.8 s total, only ~0.2–0.3 s is retrieval/rerank; the rest is
+the HTTP round-trip + handler + serializing the returned contexts (the
+companion chunk text is large).
+
+### 9.3 vs legacy (corrected record)
+
+The earlier "legacy never below 500ms" claim was **wrong** — it only applied
+to the **CPU** daemon. The actual early (2026-07-10, v2.4.x) numbers:
+
+| Path | Early (tiny graph, no companion) | **Now (v0.1.0, loaded)** |
+|------|----------------------------------|---------------------------|
+| GPU `/ask` retrieval | **~0.16 s** (below 500ms ✓) | **~1.07–1.78 s** |
+| CPU `/ask` retrieval | **~3–5 s** (above 500ms ✓) | n/a (GPU-only now) |
+
+- Early **GPU** `/ask` was ~160 ms — real, but measured on a near-empty graph
+  (Neo4j subgraph ~6 ms, a handful of Qdrant points, **no companion**).
+- Early **CPU** `/ask` was ~3–5 s — this is the "never below 500ms" case.
+- Today is slower than early GPU because the graph is now real (82k points;
+  Neo4j subgraph 6 ms → ~50 ms) and the companion path was added — but it
+  remains ~2–3× faster than the early CPU path and far more capable (real
+  graph + companion dual-evidence).
+
