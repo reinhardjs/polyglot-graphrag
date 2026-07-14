@@ -52,6 +52,7 @@ QDRANT_COLLECTIONS = {
     "medical":      "medical_chunks",
     "snomed":       None,            # terminology graph: no prose collection
     "clinical_prose": "clinical_prose",
+    "example_companion": "example_companion",  # TEMPLATE companion corpus
 }
 QDRANT_COLLECTION_DEFAULT = "engineering_chunks"
 

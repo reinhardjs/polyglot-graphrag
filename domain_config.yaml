@@ -11,6 +11,12 @@ domains:
   engineering:
     collection: engineering_chunks
     neo4j_label: Engineering
+    # TEMPLATE demonstration: a 2nd semantic corpus wired as a companion.
+    # The federated factory runs engineering_chunks + example_companion in
+    # parallel, tags each record with _signal, and the cross-signal dual-evidence
+    # boost now fires on a NON-clinical domain too. Remove this line to disable.
+    companions:
+      - example_companion
     entity_types:
     - Microservice
     - Database
@@ -278,4 +284,27 @@ domains:
       - title
       - source
       - url
+  # ── TEMPLATE companion corpus (domains/example_companion) ───────────────
+  # A self-contained example of a 2nd semantic corpus. Use it to learn the
+  # companion pattern, OR copy domains/example_companion/ to add YOUR OWN
+  # companion to any domain (list it under that domain's `companions:`).
+  # It is wired as a companion of `engineering` above; querying
+  # `domain=engineering` now exercises the generic >=2-signal dual-evidence
+  # path outside the clinical domain.
+  example_companion:
+    collection: example_companion
+    neo4j_label: null
+    retrieval: dense_prose        # a companion is dense-prose only; never a primary graph signal
+    entity_types: []             # prose corpus: no graph extraction
+    relation_types: []
+    pair_strategy: all_pairs
+    min_confidence: 0.0
+    chunking:
+      strategy: fixed
+      chunk_size: 512
+      overlap: 64
+    metadata_schema:
+      fields:
+      - doc_id
+      - doc_type
 default_domain: engineering
