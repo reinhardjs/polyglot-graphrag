@@ -347,39 +347,7 @@ def extract_entities(req: ExtractReq):
     return {"entities": entities}
 
 
-# ── Collection resolver (multi-domain / cross-domain) ────────────────────────
-def _resolve_collections(collection: Optional[str | List[str]]) -> List[str]:
-    """Resolve a collection request into a list of Qdrant collection names.
-
-    - None → [QDRANT_COLLECTION_DEFAULT] (engineering_chunks)
-    - "legal" → [QDRANT_COLLECTIONS["legal"]] (domain alias)
-    - "legal_chunks" → ["legal_chunks"] (direct name, if exists)
-    - ["eng", "legal"] → [engineering_chunks, legal_chunks] (cross-domain)
-    - "all" → all registered collections in QDRANT_COLLECTIONS
-    """
-    if collection is None:
-        return [C.QDRANT_COLLECTION_DEFAULT]
-    if isinstance(collection, str):
-        if collection == "all":
-            return list(C.QDRANT_COLLECTIONS.values())
-        # Domain alias? (e.g. "legal" → "legal_chunks")
-        if collection in C.QDRANT_COLLECTIONS:
-            return [C.QDRANT_COLLECTIONS[collection]]
-        # Direct collection name (must exist)
-        return [collection]
-    # List of aliases / names
-    out = []
-    for c in collection:
-        if c == "all":
-            out.extend(C.QDRANT_COLLECTIONS.values())
-        elif c in C.QDRANT_COLLECTIONS:
-            out.append(C.QDRANT_COLLECTIONS[c])
-        else:
-            out.append(c)
-    # dedupe, preserve order
-    seen = set()
-    return [x for x in out if not (x in seen or seen.add(x))]
-
+# ── Collection resolver moved to ask.resolve_collections (shared by daemon) ──
 
 def _persist_differential(req: AskReq, result: dict):
     """Persist a ranked differential to Neo4j for later audit / graph review.
@@ -506,91 +474,36 @@ def ask(req: AskReq):
             "contexts_meta": [],
             "answer": result.get("answer") or "",
         }
-    # 2b-. SNOMED domain: terminology graph term-match + companion prose.
-    # Initialise so both branches leave these bound (Pyright-friendly).
-    q_res, g_res, qdrant_hits, graph_hits, path = [], [], 0, 0, "none"
-    if req.domain == "snomed":
-        import json as _json
-        from domains import get_retriever
+    # 2b-. Federated retrieval assembly (domain-independent).
+    # The Mediator no longer hardcodes `if domain == "snomed"`. Composition is
+    # driven by domain_config.yaml via federated.assemble: the primary domain
+    # (unless it's a pure dense_prose corpus) plus its `companions:` list.
+    # Every fetched record is tagged with `_signal` = its domain name, so the
+    # fusion step (cross-signal dual-evidence) can reference signals generically.
+    import federated as F
+    import json as _json
 
-        # Detect a temporal/graduated presentation: JSON {"day1":[...],...}
-        presentation = None
-        q = req.query.strip()
-        if q.startswith("{") or q.startswith("day") or "day1" in q.lower():
-            try:
-                parsed = _json.loads(q) if q.startswith("{") else None
-                if isinstance(parsed, dict):
-                    presentation = parsed
-            except Exception:
-                presentation = None
-
-        # Primary: SNOMED term-match (IDF) over the concept graph.
-        snomed_retrieve = get_retriever("snomed", temporal=bool(presentation))
-        if presentation:
-            g_res = snomed_retrieve(presentation, top_k=req.top_k)
-        else:
-            g_res = snomed_retrieve(req.query, top_k=req.top_k)
-        graph_hits = len(g_res)
-
-        # Companion semantic corpus: clinical_prose (free-text disease
-        # descriptions SNOMED lacks). Merged into q_res so the reranker sees
-        # both signals. Silent if the corpus is empty / not yet ingested.
-        q_res = []
-        qdrant_hits = 0
+    # Detect a temporal/graduated presentation: JSON {"day1":[...],...}
+    presentation = None
+    q = req.query.strip()
+    if q.startswith("{") or q.startswith("day") or "day1" in q.lower():
         try:
-            prose_retrieve = get_retriever("clinical_prose")
-            prose_hits = prose_retrieve(req.query, top_k=req.top_k)
-            if prose_hits:
-                # tag each prose record with its signal so the fusion step can
-                # boost candidates that ALSO appear in the SNOMED graph set.
-                for h in prose_hits:
-                    h["_signal"] = "prose"
-                q_res = prose_hits
-                qdrant_hits = len(prose_hits)
-        except Exception as e:
-            print(f"[ask] snomed companion prose unavailable: {e}", flush=True)
+            parsed = _json.loads(q) if q.startswith("{") else None
+            if isinstance(parsed, dict):
+                presentation = parsed
+        except Exception:
+            presentation = None
 
-        # tag each SNOMED graph record with its signal
-        for g in g_res:
-            if isinstance(g, dict):
-                g["_signal"] = "snomed"
-            else:
-                g = {"text": g, "doc_id": "", "doc_type": "snomed",
-                     "chunk_idx": -1, "_signal": "snomed"}
-
-        path = "hybrid" if (graph_hits and qdrant_hits) else (
-            "graph" if graph_hits else ("qdrant" if qdrant_hits else "none"))
-        # skip the generic Qdrant/Neo4j block below
-        _snomed_shortcut = True
-    else:
-        _snomed_shortcut = False
-
-    # 3. Parallel retrieval: Qdrant + Neo4j
-    import threading
-    # Resolve collection(s) → list of Qdrant collection names.
-    # If no explicit collection given, derive from the domain profile.
-    if not _snomed_shortcut:
-        if req.collection is None and profile is not None:
-            req_collection = profile["collection"]
-        else:
-            req_collection = req.collection
-        collections = _resolve_collections(req_collection)
-        q_res, g_res = [], []
-
-        t1 = threading.Thread(
-            target=lambda: q_res.extend(rag.qdrant_search_multi(vec, req.query, collections)))
-        t2 = threading.Thread(target=lambda: g_res.extend(
-            rag.neo4j_subgraph(req.query,
-                              label=(profile["neo4j_label"] if profile else None),
-                              entry_strategy=(profile.get("entry_strategy", "keyword")
-                                              if profile else "keyword"))))
-        t1.start(); t2.start(); t1.join(); t2.join()
-
-        qdrant_hits = len(q_res)
-        graph_hits = len(g_res)
-        path = "hybrid" if (qdrant_hits and graph_hits) else (
-            "qdrant" if qdrant_hits else ("graph" if graph_hits else "none")
-        )
+    fed = F.assemble(F.FederateRequest(
+        domain=req.domain or "",
+        query=req.query, top_k=req.top_k,
+        presentation=presentation, synthesize=req.synthesize, mode=req.mode,
+    ), vec=vec, rag=rag)
+    q_res = fed.q_res
+    g_res = fed.g_res
+    qdrant_hits = fed.qdrant_hits
+    graph_hits = fed.graph_hits
+    path = fed.path
 
     # 4. Fuse + rerank in-process
     # q_res = list of Qdrant records {text,doc_id,doc_type,chunk_idx}
@@ -626,16 +539,23 @@ def ask(req: AskReq):
         t = t.split("\n")[0].split("(SNOMED")[0].strip().lower()
         return t
 
-    snomed_norm = {_norm_name(r["text"]) for r in all_records
-                   if r.get("_signal") == "snomed"}
-    prose_norm = {_norm_name(r["text"]) for r in all_records
-                  if r.get("_signal") == "prose"}
+    # Cross-signal (dual-evidence) boost, GENERIC over signal names:
+    # group normalized candidate names by their `_signal` tag (set by
+    # federated.assemble), then a record is "dual-signal" when its name also
+    # appears under a DIFFERENT signal. Works for any domain with >=2 signals
+    # (e.g. snomed + clinical_prose), not just the SNOMED/prose pair.
+    by_signal: Dict[str, set] = {}
+    for r in all_records:
+        sig = r.get("_signal", "")
+        by_signal.setdefault(sig, set()).add(_norm_name(r.get("text", "")))
 
     def _is_dual(r: dict) -> bool:
-        n = _norm_name(r["text"])
+        n = _norm_name(r.get("text", ""))
         if not n:
             return False
-        others = prose_norm if r.get("_signal") == "snomed" else snomed_norm
+        sig = r.get("_signal", "")
+        others = set().union(*[v for k, v in by_signal.items() if k != sig]) \
+            if len(by_signal) > 1 else set()
         return any((n in o or o in n) and o for o in others)
 
     DUAL_BOOST = C.DUAL_SIGNAL_BOOST  # additive rerank bump for dual-signal candidates
@@ -1239,6 +1159,7 @@ def list_domains_status():
             "collection": coll,
             "points": _pts(coll),
             "prose_domain": (profile or {}).get("prose_domain"),
+            "companions": (profile or {}).get("companions", []),
         })
     return {"domains": out, "default_domain": (domain_loader.get_default_domain()
                                                 if hasattr(domain_loader, "get_default_domain")

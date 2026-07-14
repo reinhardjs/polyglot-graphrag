@@ -21,10 +21,10 @@ def build_synthesis_prompt(query: str, contexts: list,
     Returns the full prompt string for the chat completion.
     """
     ctx = "\n\n".join(f"[{i+1}] {c}" for i, c in enumerate(contexts))
-    # SNOMED clinical diagnosis synthesis: frame the candidates as a ranked
-    # differential. The query may be a raw JSON temporal presentation, so we
-    # render it as a readable symptom timeline for the model.
-    if profile and profile.get("retrieval") == "snomed_term_match":
+    # Domain-aware synthesis. Driven by profile['synthesis']['kind'] so the
+    # Mediator stays domain-independent (no `if retrieval == "snomed_term_match"`).
+    syn_kind = (profile or {}).get("synthesis", {}).get("kind")
+    if syn_kind == "clinical_dx":
         readable = query
         try:
             import json as _j

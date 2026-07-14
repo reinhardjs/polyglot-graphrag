@@ -29,9 +29,39 @@ from neo4j import GraphDatabase
 from openai import OpenAI
 
 import config as C
+from typing import Dict, List, Optional
 
 
-# ── Sparse term vector helper (consistent hash across storage + query) ────────
+def resolve_collections(collection: Optional[str | List[str]]) -> List[str]:
+    """Resolve a collection request into a list of Qdrant collection names.
+
+    - None → [QDRANT_COLLECTION_DEFAULT] (engineering_chunks)
+    - "legal" → [QDRANT_COLLECTIONS["legal"]] (domain alias)
+    - "legal_chunks" → ["legal_chunks"] (direct name, if exists)
+    - ["eng", "legal"] → [engineering_chunks, legal_chunks] (cross-domain)
+    - "all" → all registered collections in QDRANT_COLLECTIONS
+    """
+    if collection is None:
+        return [C.QDRANT_COLLECTION_DEFAULT]
+    if isinstance(collection, str):
+        if collection == "all":
+            return list(C.QDRANT_COLLECTIONS.values())
+        if collection in C.QDRANT_COLLECTIONS:
+            return [C.QDRANT_COLLECTIONS[collection]]
+        return [collection]
+    out = []
+    for c in collection:
+        if c == "all":
+            out.extend(C.QDRANT_COLLECTIONS.values())
+        elif c in C.QDRANT_COLLECTIONS:
+            out.append(C.QDRANT_COLLECTIONS[c])
+        else:
+            out.append(c)
+    seen = set()
+    return [x for x in out if not (x in seen or seen.add(x))]
+
+
+# ── Sparse term vector helper (consistent hash across storage + query) ───────
 _SPARSE_VOCAB = 65536
 
 

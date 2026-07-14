@@ -227,13 +227,16 @@ domains:
   snomed:
     # SNOMED CT terminology graph. Retrieval = symptom keyword term-matching
     # against SnomedDescription.term with IDF weighting (domains/snomed/retrieve.py).
-    # The `clinical_prose` collection (separate domain) carries the free-text
-    # disease descriptions that SNOMED lacks, enabling semantic differential
-    # diagnosis. /ask for domain=snomed runs BOTH retrievers and merges.
+    # The `clinical_prose` collection carries the free-text disease descriptions
+    # SNOMED lacks, enabling semantic differential diagnosis. /ask runs BOTH via
+    # the federated factory (companions below) — no hardcoded domain branch.
     collection: null
     neo4j_label: SnomedConcept
     retrieval: snomed_term_match
-    prose_domain: clinical_prose   # semantic companion corpus (optional)
+    companions:
+      - clinical_prose   # semantic companion corpus (optional)
+    synthesis:
+      kind: clinical_dx
     entity_types:
     - Disorder
     - Finding
