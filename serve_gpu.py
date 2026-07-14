@@ -381,6 +381,51 @@ def _resolve_collections(collection: Optional[str | List[str]]) -> List[str]:
     return [x for x in out if not (x in seen or seen.add(x))]
 
 
+def _persist_differential(req: AskReq, result: dict):
+    """Persist a ranked differential to Neo4j for later audit / graph review.
+
+    Creates (idempotent MERGE):
+      (:Differential {query, mode, min_confidence, path, created}) -[:HAS_CANDIDATE]->
+        (:DxCandidate {rank, candidate, confidence, dual_signal, rerank_score})
+    and links each candidate to a matching (:SnomedDescription) if the name
+    resolves, via -[:MATCHES_CONCEPT]->. Only runs for mode='differential' and when there is
+    at least one diagnosis. Failures are swallowed (diagnostic, never fatal).
+    """
+    if req.mode != "differential" or not result.get("diagnoses"):
+        return
+    try:
+        from neo4j import GraphDatabase
+        driver = GraphDatabase.driver(
+            C.NEO4J_URI, auth=(C.NEO4J_USER, C.NEO4J_PASSWORD))
+        diff_id = abs(hash((req.query, req.mode, req.min_confidence or ""))) % (2 ** 63)
+        with driver.session() as s:
+            s.run(
+                "MERGE (d:Differential {id:$id}) "
+                "SET d.query=$q, d.mode=$mode, d.min_confidence=$mc, "
+                "    d.path=$path, d.created=datetime()",
+                id=diff_id, q=req.query, mode=req.mode,
+                mc=req.min_confidence, path=result.get("path"))
+            # clear stale candidates then re-add (idempotent on re-run)
+            s.run(
+                "MATCH (d:Differential {id:$id})-[r:HAS_CANDIDATE]->(c:DxCandidate) "
+                "DELETE r, c", id=diff_id)
+            for dx in result["diagnoses"]:
+                s.run(
+                    "MATCH (d:Differential {id:$id}) "
+                    "CREATE (c:DxCandidate {rank:$rank, candidate:$name, "
+                    "  confidence:$conf, dual_signal:$dual, rerank_score:$score}) "
+                    "MERGE (d)-[:HAS_CANDIDATE]->(c) "
+                    "WITH c "
+                    "MATCH (sd:SnomedDescription) WHERE sd.term CONTAINS $name "
+                    "MERGE (c)-[:MATCHES_CONCEPT]->(sd)",
+                    id=diff_id, rank=dx["rank"], name=dx["candidate"],
+                    conf=dx["confidence"], dual=dx["dual_signal"],
+                    score=dx["rerank_score"])
+        driver.close()
+    except Exception as e:
+        print(f"[ask] differential persistence failed: {e}", flush=True)
+
+
 @app.post("/ask")
 def ask(req: AskReq):
     """Full RAG answer in ONE call with semantic cache + route metadata."""
@@ -774,6 +819,15 @@ def ask(req: AskReq):
         except Exception:
             pass
 
+    # 7. Persist structured differential to Neo4j (audit / graph review).
+    persisted = False
+    try:
+        _persist_differential(req, result)
+        persisted = req.mode == "differential" and bool(result.get("diagnoses"))
+    except Exception:
+        pass
+    result["differential_persisted"] = persisted
+
     return result
 
 
@@ -1058,6 +1112,50 @@ def show_config():
                 "dual_signal is a separate corroboration flag. "
                 "See docs/rerank-calibration.md.",
     }
+
+
+@app.get("/differentials")
+def list_differentials(query: Optional[str] = None, limit: int = 20):
+    """List persisted differentials (audit). Optional ?query= filters by the
+    exact query string; ?limit= caps results. Returns the Differential node
+    plus its ranked DxCandidate children (with MATCHES_CONCEPT links).
+    """
+    from neo4j import GraphDatabase
+    driver = GraphDatabase.driver(
+        C.NEO4J_URI, auth=(C.NEO4J_USER, C.NEO4J_PASSWORD))
+    try:
+        with driver.session() as s:
+            if query:
+                diff_id = abs(hash((query, "differential", ""))) % (2 ** 63)
+                rec = s.run(
+                    "MATCH (d:Differential {id:$id})-[:HAS_CANDIDATE]->(c:DxCandidate) "
+                    "RETURN d, collect(c) AS cands", id=diff_id).single()
+                if not rec:
+                    return {"differentials": []}
+                d = rec["d"]
+                return {"differentials": [{
+                    "id": d["id"], "query": d.get("query"), "mode": d.get("mode"),
+                    "min_confidence": d.get("min_confidence"),
+                    "path": d.get("path"), "created": str(d.get("created")),
+                    "candidates": [dict(c) for c in rec["cands"]],
+                }]}
+            rows = s.run(
+                "MATCH (d:Differential)-[:HAS_CANDIDATE]->(c:DxCandidate) "
+                "WITH d, collect(c) AS cands "
+                "RETURN d, cands ORDER BY d.created DESC LIMIT $lim",
+                lim=limit).data()
+            return {"differentials": [{
+                "id": r["d"]["id"], "query": r["d"].get("query"),
+                "mode": r["d"].get("mode"),
+                "min_confidence": r["d"].get("min_confidence"),
+                "path": r["d"].get("path"), "created": str(r["d"].get("created")),
+                "candidates": [dict(c) for c in r["cands"]],
+            } for r in rows]}
+    except Exception as e:
+        return {"differentials": [], "error": str(e)}
+    finally:
+        driver.close()
+
 
 
 @app.get("/domains")

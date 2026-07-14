@@ -102,7 +102,33 @@ curl -X POST localhost:8000/ask -H 'Content-Type: application/json' -d '{
 
 # live calibration knobs (no source reading needed)
 curl localhost:8000/config
+
+# persisted differential audit (Neo4j)
+curl localhost:8000/differentials                 # list recent
+curl "localhost:8000/differentials?query=<exact-query>"   # one differential + candidates
 ```
+
+## Audit persistence (Neo4j)
+
+Every `mode: "differential"` call persists a structured differential to Neo4j
+(never fatal — failures are swallowed):
+
+```
+(:Differential {id, query, mode, min_confidence, path, created})
+   -[:HAS_CANDIDATE]-> (:DxCandidate {rank, candidate, confidence, dual_signal, rerank_score})
+        -[:MATCHES_CONCEPT]-> (:SnomedDescription)   # best-effort name match
+```
+
+The `Differential` node is keyed by `hash(query, mode, min_confidence)` so
+re-runs are idempotent (old candidates are cleared and re-added). `DxCandidate`
+links to `SnomedDescription` when the candidate name `CONTAINS` a SNOMED term,
+enabling later graph review of which terminology entries back each diagnosis.
+Retrieve via `GET /differentials` (optionally `?query=`).
+
+Note: SNOMED concept *names* live on `SnomedDescription` (not `SnomedConcept`),
+so the enrichment matches there. Diseases whose prose/article title doesn't
+appear verbatim in SNOMED descriptions (e.g. "oral candidiasis" as phrased)
+simply won't get a `MATCHES_CONCEPT` edge — that's expected, not an error.
 
 ## Try-it-out (single command, all paths)
 
