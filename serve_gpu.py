@@ -66,6 +66,18 @@ _ingest_tasks: Dict[str, Dict[str, Any]] = {}
 _ingest_tasks_lock = threading.Lock()
 import uuid as _uuid
 
+# Domain config loader (domain_config.yaml). Imported at module level so the
+# startup seeder and /domains /ask can use it without re-importing.
+import domain_loader  # noqa: E402  (kept local elsewhere; promote to module scope
+
+
+def _safe_seed(mod):
+    """Run a domain ingestor, swallowing + logging any failure (non-fatal)."""
+    try:
+        mod.ingest()
+    except Exception as e:
+        print(f"[gpu-daemon] seed ingest failed: {e}", flush=True)
+
 
 def _load_all():
     """Preload the auxiliary models onto the GPU at startup.
@@ -1315,6 +1327,34 @@ def on_startup():
                   f"ready (dim={C.VECTOR_DIM}, cosine)", flush=True)
     except Exception as e:
         print(f"[gpu-daemon] Neo4j vector index init skipped: {e}", flush=True)
+
+    # Auto-seed demo corpora so a non-technical user can query AS-IS.
+    # For each domain in config.SEED_ON_STARTUP, if its Qdrant collection is
+    # empty, run its ingestor in a background thread (non-blocking). This makes
+    # e.g. `example_companion` available immediately after `python serve_gpu.py`
+    # with zero setup — no `curl /ingest_domain` required.
+    for domain in getattr(C, "SEED_ON_STARTUP", []) or []:
+        try:
+            from domains import list_domains
+            if domain not in list_domains():
+                continue
+            prof = domain_loader.get_domain(domain)
+            coll = prof.get("collection")
+            if not coll:
+                continue
+            from qdrant_client import QdrantClient
+            qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
+            if qc.collection_exists(coll) and qc.count(coll).count > 0:
+                print(f"[gpu-daemon] seed '{domain}': collection '{coll}' "
+                      f"non-empty, skip", flush=True)
+                continue
+            mod = importlib.import_module(f"domains.{domain}.ingest")
+            print(f"[gpu-daemon] seeding demo domain '{domain}' "
+                  f"-> {coll} ...", flush=True)
+            threading.Thread(target=lambda m=mod: _safe_seed(m),
+                          daemon=True).start()
+        except Exception as e:
+            print(f"[gpu-daemon] seed '{domain}' skipped: {e}", flush=True)
 
 
 if __name__ == "__main__":

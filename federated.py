@@ -125,7 +125,9 @@ def assemble(req: FederateRequest, vec: Optional[list] = None,
     for t in threads:
         t.join()
 
-    # ── (3) generic Qdrant + Neo4j parallel retrieval ──
+    # ── (3) generic Qdrant + (optional) Neo4j parallel retrieval ──
+    # A companion with `neo4j_label: null` is prose-only → skip the graph
+    # leg entirely (avoids a wasted Neo4j query + `source_doc` warnings).
     if collection and rag is not None and vec is not None:
         g_out: List[dict] = []
         q_out: List[dict] = []
@@ -134,14 +136,20 @@ def assemble(req: FederateRequest, vec: Optional[list] = None,
         t1 = threading.Thread(
             target=lambda: q_out.extend(
                 rag.qdrant_search_multi(vec, req.query, collections)))
-        t2 = threading.Thread(
-            target=lambda: g_out.extend(
-                rag.neo4j_subgraph(
-                    req.query,
-                    label=(neo4j_label if neo4j_label else None),
-                    entry_strategy=(profile.get("entry_strategy", "keyword")
-                                   if profile else "keyword"))))
-        t1.start(); t2.start(); t1.join(); t2.join()
+        threads = [t1]
+        if neo4j_label:   # only hit the graph when a label is declared
+            t2 = threading.Thread(
+                target=lambda: g_out.extend(
+                    rag.neo4j_subgraph(
+                        req.query,
+                        label=neo4j_label,
+                        entry_strategy=(profile.get("entry_strategy", "keyword")
+                                       if profile else "keyword"))))
+            threads.append(t2)
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
         for r in q_out:
             out.append(_tag_signal(_as_record(r), req.domain))
         for r in g_out:

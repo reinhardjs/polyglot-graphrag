@@ -219,7 +219,14 @@ GLINER_THRESHOLD = 0.4
 ENTITY_RESOLUTION_THRESHOLD = 0.88   # cosine similarity for entity merger
 ENTITY_VECTOR_INDEX = "entity_vector_idx"
 
-# ── Domain config (v0.x) ──────────────────────────────────────────────────────
+# ── Domain config (v0.x) ──────────────────────────────────────────────
 # Domain schemas live in `domain_config.yaml` (YAML), consumed by
 # `domain_loader.py`. All callers use `domain_loader.get_domain(name)`.
+
+# Auto-seed demo corpora on daemon startup so a NON-technical user can query
+# them AS-IS with zero setup. Each entry: domain name whose ingestor is run
+# if its Qdrant collection is empty. `example_companion` is the bundled
+# zero-tech demo (domains/example_companion). Add real domains here to have
+# them auto-populate on boot. Set to [] to disable auto-seed entirely.
+SEED_ON_STARTUP = ["example_companion"]
 

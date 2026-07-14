@@ -307,4 +307,9 @@ domains:
       fields:
       - doc_id
       - doc_type
-default_domain: engineering
+# Default domain for unqualified `/ask` calls (no `domain` field sent).
+# Set to `example_companion` so a NON-technical user gets a ZERO-SETUP,
+# auto-seeded demo out of the box (the daemon ingests it on startup via
+# config.SEED_ON_STARTUP). Power users can switch this back to `engineering`
+# (or send `domain:` explicitly) to target a real ingested corpus.
+default_domain: example_companion
