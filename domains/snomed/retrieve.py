@@ -24,6 +24,7 @@ import config as C
 # SNOMED relationship typeIds for true disorder→symptom edges (sparse but authoritative).
 REL_EDGE_TYPES = ["246090004", "47429007", "363702006"]
 EDGE_BOOST = 2.0  # additive score per matched edge
+EXPAND_BOOST = 1.0  # additive score per symptom→disorder expansion edge
 
 # Later days weigh more: a disorder spanning many days gets amplified.
 DAY_WEIGHTS = [1.0, 1.5, 2.0, 2.5, 3.0]
@@ -139,6 +140,40 @@ def _edge_boost(driver, symptom_ids: set) -> dict:
     return {r["disorder"]: r["edge_cnt"] for r in rows}
 
 
+def _symptom_to_disorder(driver, symptom_ids: set) -> dict:
+    """Expand matched SYMPTOM concepts to the DISORDERS they point to.
+
+    Follows associated-finding edges (both directions of
+    REL_246090004|47429007|363702006, plus the IS-A REL_116680003 as a weaker
+    signal) from the given symptom concept ids to disorder targets, and
+    returns {disorder_id: edge_count}. This is what lets a symptom query
+    ("rash", "fever") surface the actual DISEASE ("Measles (disorder)") whose
+    concept_id the clinical-prose article carries — enabling concept-level
+    dual-evidence corroboration.
+    """
+    if not symptom_ids:
+        return {}
+    rel_names = [f"REL_{t}" for t in REL_EDGE_TYPES] + ["REL_116680003"]
+    with driver.session() as s:
+        # symptom -(edge)-> disorder
+        fwd = s.run(
+            "MATCH (s:SnomedConcept)-[r]->(d:SnomedConcept) "
+            "WHERE s.id IN $ids AND type(r) IN $rel_types "
+            "RETURN d.id AS disorder, count(DISTINCT s.id) AS cnt",
+            ids=list(symptom_ids), rel_types=rel_names).data()
+        # disorder -(edge)-> symptom  (reverse direction, same semantics)
+        rev = s.run(
+            "MATCH (d:SnomedConcept)-[r]->(s:SnomedConcept) "
+            "WHERE s.id IN $ids AND type(r) IN $rel_types "
+            "RETURN d.id AS disorder, count(DISTINCT s.id) AS cnt",
+            ids=list(symptom_ids), rel_types=rel_names).data()
+    out = {}
+    for r in fwd + rev:
+        out[r["disorder"]] = out.get(r["disorder"], 0) + r["cnt"]
+    return out
+
+
+
 def _build_context(name: str, cid: str, matched_terms: list,
                    score: float, edge_matches: int,
                    days_covered: int = 0) -> dict:
@@ -161,6 +196,7 @@ def _build_context(name: str, cid: str, matched_terms: list,
         "doc_id": "",
         "doc_type": "snomed",
         "chunk_idx": -1,
+        "concept_id": cid,
     }
 
 
@@ -223,6 +259,28 @@ def retrieve_symptoms(query: str, top_k: int = 5) -> list:
                     all_matched_cids.add(dis)
                     disorder_info[dis] = {
                         "score": EDGE_BOOST * cnt,
+                        "matched_terms": [],
+                        "edge_matches": cnt,
+                    }
+
+        # Symptom→disorder expansion: the matched concepts are mostly SYMPTOMS
+        # (e.g. "rash", "fever"). Follow associated-finding edges from those
+        # symptom concepts to the DISORDERS they point to, and add each disorder
+        # as a candidate carrying its SNOMED concept id. This is what lets a
+        # symptom query surface the actual disease ("Measles (disorder)") whose
+        # concept_id the clinical-prose article carries — enabling concept-level
+        # dual-evidence corroboration with the companion corpus.
+        if all_matched_cids:
+            exp = _symptom_to_disorder(driver, all_matched_cids)
+            for dis, cnt in exp.items():
+                if dis in disorder_info:
+                    # already a candidate; reinforce, don't double-count edges
+                    disorder_info[dis]["edge_matches"] += cnt
+                    disorder_info[dis]["score"] += EXPAND_BOOST * cnt
+                else:
+                    all_matched_cids.add(dis)
+                    disorder_info[dis] = {
+                        "score": EXPAND_BOOST * cnt,
                         "matched_terms": [],
                         "edge_matches": cnt,
                     }

@@ -57,6 +57,7 @@ def _qdrant_search(vec: list, query_text: str, top_k: int) -> list:
             "chunk_idx": p.get("chunk_idx", -1),
             "score": float(h.score),
             "title": (p.get("metadata") or {}).get("title", ""),
+            "concept_id": (p.get("metadata") or {}).get("concept_id"),
         })
     return out
 
@@ -79,6 +80,7 @@ def retrieve(query: str, top_k: int = 5) -> list:
             "doc_id": h["doc_id"],
             "doc_type": h["doc_type"],
             "chunk_idx": h["chunk_idx"],
+            "concept_id": h.get("concept_id"),
         })
     return out
 

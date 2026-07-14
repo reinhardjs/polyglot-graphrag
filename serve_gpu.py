@@ -554,14 +554,20 @@ def ask(req: AskReq):
         return t
 
     # Cross-signal (dual-evidence) boost, GENERIC over signal names:
-    # group normalized candidate names by their `_signal` tag (set by
-    # federated.assemble), then a record is "dual-signal" when its name also
-    # appears under a DIFFERENT signal. Works for any domain with >=2 signals
-    # (e.g. snomed + clinical_prose), not just the SNOMED/prose pair.
+    # A record is "dual-signal" when the SAME disease is confirmed by BOTH
+    # signals. We match by the authoritative SNOMED concept id when both
+    # records carry one (clinical_prose chunks now store concept_id; snomed
+    # records carry concept_id). This is exact and language-agnostic. As a
+    # fallback (when a record lacks concept_id), we fall back to normalised
+    # name containment. Works for any domain with >=2 signals.
     by_signal: Dict[str, set] = {}
+    by_signal_cid: Dict[str, set] = {}
     for r in all_records:
         sig = r.get("_signal", "")
         by_signal.setdefault(sig, set()).add(_norm_name(r.get("text", "")))
+        cid = r.get("concept_id")
+        if cid:
+            by_signal_cid.setdefault(sig, set()).add(str(cid))
 
     def _is_dual(r: dict) -> bool:
         n = _norm_name(r.get("text", ""))
@@ -570,6 +576,15 @@ def ask(req: AskReq):
         sig = r.get("_signal", "")
         others = set().union(*[v for k, v in by_signal.items() if k != sig]) \
             if len(by_signal) > 1 else set()
+        # Primary: exact concept-id match across signals.
+        rcid = r.get("concept_id")
+        if rcid:
+            other_cids = set().union(
+                *[v for k, v in by_signal_cid.items() if k != sig]) \
+                if len(by_signal_cid) > 1 else set()
+            if str(rcid) in other_cids:
+                return True
+        # Fallback: normalised name containment across signals.
         return any((n in o or o in n) and o for o in others)
 
     DUAL_BOOST = C.DUAL_SIGNAL_BOOST  # additive rerank bump for dual-signal candidates
@@ -627,6 +642,7 @@ def ask(req: AskReq):
                      "doc_type": pool[i].get("doc_type", ""),
                      "chunk_idx": pool[i].get("chunk_idx", -1),
                      "signal": pool[i].get("_signal", ""),
+                     "concept_id": pool[i].get("concept_id"),
                      "dual_signal": pool[i].get("_dual_signal", False),
                      "confidence": _confidence(
                          float(ranked[idx][1]) - (DUAL_BOOST

@@ -54,6 +54,33 @@ CHUNK_SIZE = 512          # tokens (approx, by words/0.75)
 CHUNK_OVERLAP = 64
 WIKI_API = "https://en.wikipedia.org/w/api.php"
 
+
+def _snomed_concept_for(title: str):
+    """SNOMED concept id that the SNOMED term-match retriever surfaces for `title`.
+
+    We align each prose article's `concept_id` to the disorder concept the
+    SNOMED retriever would actually return for that article's title (not a naive
+    description CONTAINS lookup). This guarantees that when /ask runs both signals
+    in parallel, a prose article and the SNOMED graph surface the SAME concept
+    id for the same disease — which is exactly what the concept-level
+    dual-evidence corroboration requires. Falls back to None if SNOMED returns
+    nothing for the title.
+    """
+    try:
+        import sys as _sys
+        _sys.path.insert(0, os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))))
+        from domains.snomed.retrieve import retrieve_symptoms
+        hits = retrieve_symptoms(title, top_k=1)
+        if hits:
+            cid = hits[0].get("concept_id")
+            if cid:
+                return str(cid)
+    except Exception as e:
+        print(f"[clinical_prose] snomed-concept lookup failed for "
+              f"'{title}': {e}", flush=True)
+    return None
+
 # Curated starting set: high-yield disease + symptom articles. The ingestor
 # also follows the "See also" / linked disease pages up to --limit, so this
 # list is just the seed.
@@ -223,7 +250,76 @@ def ingest(limit: int = 500, seed: list | None = None) -> dict:
 
     stats["collection"] = COLLECTION
     print(f"[clinical_prose] done: {stats}", flush=True)
+    # Link existing chunks to SNOMED concepts (idempotent; no re-embed).
+    backfill_concept_ids()
     return stats
+
+
+def backfill_concept_ids() -> int:
+    """Attach `concept_id` to every clinical_prose chunk that lacks one.
+
+    Looks up the article title (stored in payload.metadata.title) against the
+    SNOMED description index and writes the matched concept id via set_payload
+    (no re-embedding, no re-upload of vectors). The title→concept map is cached
+    per run so each distinct article is resolved ONCE, not per chunk (4615
+    chunks but far fewer titles). Idempotent and cheap to re-run.
+    """
+    from qdrant_client import QdrantClient
+    qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
+    if not qc.collection_exists(COLLECTION):
+        return 0
+    _title_cache: dict = {}
+    driver = None
+    try:
+        from neo4j import GraphDatabase
+        driver = GraphDatabase.driver(
+            C.NEO4J_URI, auth=(C.NEO4J_USER, C.NEO4J_PASSWORD))
+
+        def _lookup(title: str):
+            if title in _title_cache:
+                return _title_cache[title]
+            with driver.session() as s:
+                rows = s.run(
+                    "MATCH (c:SnomedConcept)-[:DESCRIBED_AS]->"
+                    "(d:SnomedDescription {languageCode:'en'}) "
+                    "WHERE toLower(d.term) CONTAINS toLower($t) "
+                    "RETURN c.id AS cid LIMIT 1",
+                    t=title).data()
+            cid = rows[0]["cid"] if rows else None
+            _title_cache[title] = cid
+            return cid
+
+        updated = 0
+        offset = None
+        while True:
+            pts, offset = qc.scroll(
+                COLLECTION, with_payload=["metadata"], with_vectors=False,
+                limit=256, offset=offset)
+            if not pts:
+                break
+            for p in pts:
+                pl = p.payload or {}
+                meta = pl.get("metadata") or {}
+                if meta.get("concept_id"):
+                    continue
+                title = meta.get("title")
+                if not title:
+                    continue
+                cid = _lookup(title)
+                if cid:
+                    qc.set_payload(
+                        COLLECTION,
+                        payload={"metadata": {**meta, "concept_id": cid}},
+                        points=[p.id])
+                    updated += 1
+            if offset is None:
+                break
+    finally:
+        if driver:
+            driver.close()
+    print(f"[clinical_prose] backfilled concept_id on {updated} chunks",
+          flush=True)
+    return updated
 
 
 if __name__ == "__main__":
