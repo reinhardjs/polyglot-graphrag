@@ -1,4 +1,4 @@
-# BENCHMARKS — polyglot-graphrag v1.0.0
+# BENCHMARKS — polyglot-graphrag (experimental, 0.x.x)
 
 **Date:** 2026-07-13 (corpus-scale run) · 2026-07-12 (micro-benchmarks)  
 **Hardware:** NVIDIA GeForce RTX 3060 12GB · Intel i5-11400F · 48GB RAM  

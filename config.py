@@ -21,7 +21,17 @@ server-side (embed → Qdrant||Neo4j → rerank → E4B synthesis) in ONE HTTP c
 """
 import os
 
-# ── Paths ──────────────────────────────────────────────────────────────────
+# ── Version ─────────────────────────────────────────────────────────────────
+# Single source of truth is the VERSION file at the project root. This is an
+# EXPERIMENTAL 0.x.x project (we are NOT at 1.0). See VERSIONING.md.
+def _read_version() -> str:
+    vf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")
+    try:
+        with open(vf, encoding="utf-8") as _f:
+            return _f.read().strip() or "0.0.0"
+    except OSError:
+        return "0.0.0"
+__version__ = _read_version()
 # All runtime paths are anchored to the project root (this file's directory) so
 # the project is portable and does not depend on a machine-specific absolute prefix.
 # Override via environment variables if needed.
