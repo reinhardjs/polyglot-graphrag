@@ -52,7 +52,8 @@ cd <project-root>
 
 ## Adding a new domain
 
-1. Copy an existing profile from `v2/domains/` (e.g. `engineering.toml`).
+1. Copy an existing profile from `domains/` (e.g. `engineering`;
+   see `domain_config.yaml` + `docs/domains/README.md`).
 2. Set `name`, `collection`, `neo4j_label` — all unique.
 3. Tune `[chunking]`, `[extraction]`, `[synthesis]`, `[metadata_schema]`,
    `[neo4j_entry]` for your domain's vocabulary and retrieval needs.

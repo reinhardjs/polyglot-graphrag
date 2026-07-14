@@ -496,37 +496,20 @@ def write_graph(doc_id: str, graph: dict, source_text: str, driver,
 
 
 # ── LLM / GLiNER extraction ───────────────────────────────────────────────────
-def extract_graph_index_routing(doc_id: str, text: str,
-                                domain: "str | None" = None) -> dict:
-    """V3.0 Hybrid Index-Routing extraction (GLiNER entities → Qwen relations).
+def extract_graph_hybrid(doc_id: str, text: str,
+                          domain: "str | None" = None) -> dict:
+    """Hybrid extraction (GLiNER entities → E2B relationship classification).
 
-    Returns a graph dict in write_graph's expected shape:
-      {"nodes": [{"id": <name>, "type": <type>}, ...],
-       "edges": [{"source": <name>, "target": <name>, "type": <REL>}, ...]}
-
-    Entity source/target names come from the index_router's remapped relations
-    (source_name / target_name), so write_graph's vector resolver can dedupe.
+    Thin wrapper so ingest_text() can call the shared hybrid_extraction path
+    directly. Returns a graph dict in write_graph's expected shape.
     """
-    import index_router
-    result = index_router.extract(text, domain_name=domain)
-    entities = result.get("entities", [])
-    relations = result.get("relations", [])
-
-    nodes = [{"id": e["name"], "type": e.get("type", "Unknown")}
-             for e in entities]
-    edges = []
-    for r in relations:
-        sname = r.get("source_name")
-        tname = r.get("target_name")
-        if not sname or not tname:
-            continue
-        edges.append({
-            "source": sname,
-            "target": tname,
-            "type": r.get("type", "ASSOCIATED_WITH"),
-        })
-    return {"nodes": nodes, "edges": edges,
-            "meta": result.get("meta", {})}
+    from hybrid_extraction import extract_hybrid
+    if domain is not None:
+        import domain_loader
+        profile = domain_loader.get_domain(domain)
+    else:
+        profile = None
+    return extract_hybrid(doc_id, text, domain=profile, domain_name=domain)
 
 
 def _extract_json_object(content: str):
@@ -775,13 +758,14 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
 
     # Step 2 — graph extraction
     #   V3.0: Hybrid Index-Routing (GLiNER→Qwen) is the primary path when
-    #   config.EXTRACTION_MODE == "index_routing"; otherwise the legacy LLM
+    #   config.EXTRACTION_MODE in ("hybrid", "llm", "sliding_window"); the
+    #   deprecated "index_routing" mode was removed.
     #   (E2B) path is used. Both feed write_graph's batched UNWIND writer.
     n_nodes = 0
     n_edges = 0
     extraction_method = "none"
     if extract_graph:
-        mode = getattr(C, "EXTRACTION_MODE", "index_routing")
+        mode = getattr(C, "EXTRACTION_MODE", "sliding_window")
         # E2B-free bulk-load path: GLiNER + co-occurrence, no extraction LLM.
         if os.environ.get("EXTRACT_WITHOUT_E2B", "").lower() in ("1", "true", "yes"):
             from extractor_gliner import extract_gliner_graph
@@ -789,10 +773,7 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
             g = extract_gliner_graph(text, labels=labels)
             extraction_method = "gliner_cooccurrence"
         else:
-            if mode == "index_routing":
-                g = extract_graph_index_routing(doc_id, text, domain=domain)
-                extraction_method = "index_routing"
-            elif mode == "hybrid":
+            if mode == "hybrid":
                 from hybrid_extraction import extract_hybrid
                 if profile is None and domain:
                     import domain_loader
