@@ -183,6 +183,8 @@ class AskReq(BaseModel):
     crag: bool = False                               # Phase 3: Corrective RAG + adaptive routing
     dual_signal_only: bool = False                  # hybrid: keep only candidates confirmed by
                                                     # BOTH signals (SNOMED term-match + clinical prose)
+    mode: Optional[str] = None                      # "differential" -> ranked Dx w/ confidence,
+                                                    # dual-signal preference, synthesis forced on
 
 
 class IngestReq(BaseModel):
@@ -597,9 +599,13 @@ def ask(req: AskReq):
     # Only meaningful on the SNOMED hybrid path (graph + prose present) and
     # when the caller opts in. Never silently drops everything if nothing is
     # dual — fall back to the full pool so /ask still returns results.
-    if req.dual_signal_only and path == "hybrid":
+    # mode="differential" implies the same preference (dual-signal candidates
+    # are boosted + ranked first), without hard-dropping single-signal ones.
+    _force_differential = (req.mode == "differential")
+    if (req.dual_signal_only or _force_differential) and path == "hybrid":
         dual_pool = [r for r in pool if r.get("_dual_signal")]
-        if dual_pool:
+        if req.dual_signal_only and dual_pool:
+            # hard filter only when explicitly requested
             pool = dual_pool
 
     if not pool:
@@ -620,17 +626,35 @@ def ask(req: AskReq):
         ranked.append((i, sc))
     ranked.sort(key=lambda x: x[1], reverse=True)
     ranked = ranked[:req.top_k]
+
+    # Confidence label per ranked differential. Derived from evidence strength:
+    #   dual   + rerank>=0.5 -> "high"
+    #   dual   or rerank>=0.5 -> "medium"
+    #   else                   -> "low"
+    # Honest framing: this is keyword+semantic overlap evidence, not clinical
+    # probability. It communicates HOW WELL-BACKED the candidate is, not how
+    # likely the disease is.
+    def _confidence(dual: bool, rerank: float) -> str:
+        if dual and rerank >= 0.5:
+            return "high"
+        if dual or rerank >= 0.5:
+            return "medium"
+        return "low"
+
     contexts = [pool[i]["text"] for i, _ in ranked]
     contexts_meta = [{"doc_id": pool[i].get("doc_id", ""),
                       "doc_type": pool[i].get("doc_type", ""),
                       "chunk_idx": pool[i].get("chunk_idx", -1),
-                      "dual_signal": pool[i].get("_dual_signal", False)}
-                     for i, _ in ranked]
+                      "dual_signal": pool[i].get("_dual_signal", False),
+                      "confidence": _confidence(pool[i].get("_dual_signal", False),
+                                                float(ranked[idx][1]))}
+                     for idx, (i, _) in enumerate(ranked)]
     rerank_scores = [s for _, s in ranked]
 
     # 5. Synthesize with E4B (separate process)
     answer = ""
-    if req.synthesize:
+    if req.synthesize or _force_differential:
+        # differential mode forces synthesis so a ranked Dx is always returned
         answer = rag.synthesize(req.query, contexts, profile)
 
     # Numbered contexts (citation-ready) — present whether or not synthesis
@@ -652,12 +676,28 @@ def ask(req: AskReq):
                 "doc_type": meta["doc_type"],
                 "chunk_idx": meta["chunk_idx"],
                 "dual_signal": meta.get("dual_signal", False),
+                "confidence": meta.get("confidence", "low"),
             })
+
+    # Differential summary: ranked list of candidate diagnoses with confidence,
+    # derived from the contexts_meta + rerank_scores (no text parsing needed).
+    def _dx_name(text: str) -> str:
+        t = text.replace("[DIAGNOSIS CANDIDATE]", "").replace("[CLINICAL PROSE]", "")
+        t = t.split("\n")[0].split("(SNOMED")[0].strip()
+        return t[:120]
+    differential = [{
+        "rank": i + 1,
+        "candidate": _dx_name(c),
+        "confidence": contexts_meta[i].get("confidence", "low"),
+        "dual_signal": contexts_meta[i].get("dual_signal", False),
+        "rerank_score": round(rerank_scores[i], 4),
+    } for i, c in enumerate(contexts)]
 
     result = {
         "query": req.query,
         "source": "llm",
         "path": path,
+        "mode": req.mode,
         "qdrant_hits": qdrant_hits,
         "graph_hits": graph_hits,
         "n_contexts": len(contexts),
@@ -665,6 +705,7 @@ def ask(req: AskReq):
         "contexts_numbered": contexts_numbered,
         "contexts_meta": contexts_meta,
         "sources": sources,
+        "diagnoses": differential,
         "rerank_scores": rerank_scores,
         "answer": answer,
         "cache_hit": False,

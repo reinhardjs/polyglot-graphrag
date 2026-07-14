@@ -80,6 +80,16 @@ curl -X POST localhost:8000/ask -H 'Content-Type: application/json' -d '{
 curl -X POST localhost:8000/ask -H 'Content-Type: application/json' -d '{
   "query": "fever and rash", "domain": "snomed", "dual_signal_only": true
 }'
+
+# differential mode: ranked Dx w/ confidence, dual-signal preference, synthesis on
+curl -X POST localhost:8000/ask -H 'Content-Type: application/json' -d '{
+  "query": "fever and rash", "domain": "snomed", "mode": "differential"
+}'
+# -> result.diagnoses = [{rank, candidate, confidence: high|medium|low,
+#                         dual_signal, rerank_score}, ...]
+#    confidence: dual + rerank>=0.5 = high; dual OR rerank>=0.5 = medium; else low
+#    NOTE: confidence = strength of evidence (keyword+semantic overlap), NOT
+#    clinical probability of the disease.
 ```
 
 ## Try-it-out (single command, all paths)
