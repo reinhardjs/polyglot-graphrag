@@ -21,6 +21,35 @@ def build_synthesis_prompt(query: str, contexts: list,
     Returns the full prompt string for the chat completion.
     """
     ctx = "\n\n".join(f"[{i+1}] {c}" for i, c in enumerate(contexts))
+    # SNOMED clinical diagnosis synthesis: frame the candidates as a ranked
+    # differential. The query may be a raw JSON temporal presentation, so we
+    # render it as a readable symptom timeline for the model.
+    if profile and profile.get("retrieval") == "snomed_traversal":
+        readable = query
+        try:
+            import json as _j
+            pres = _j.loads(query)
+            if isinstance(pres, dict):
+                lines = [f"Day {k[3:] if k.startswith('day') else k}: {', '.join(v)}"
+                         for k, v in sorted(pres.items(),
+                                            key=lambda kv: int(''.join(filter(str.isdigit, kv[0])) or 0))]
+                readable = "Patient presents with symptoms over time:\n" + "\n".join(lines)
+        except Exception:
+            pass
+        return (
+            "You are a clinical decision-support assistant using SNOMED CT. "
+            "Below are the top diagnosis candidates retrieved from the SNOMED "
+            "graph based on the patient's reported symptoms (each candidate "
+            "lists the SNOMED concept and the supporting findings that matched). "
+            "Produce a RANKED DIFFERENTIAL DIAGNOSIS: list the most likely "
+            "disorders first, cite the candidate numbers, and explain WHY each "
+            "is supported by the symptom timeline. Note if the presentation "
+            "strongly suggests a systemic illness (symptoms spanning multiple "
+            "days). Do NOT invent diagnoses beyond the candidates. If the "
+            "candidates do not clearly explain the symptoms, say so.\n\n"
+            f"PATIENT SYMPTOMS:\n{readable}\n\n"
+            f"CANDIDATE DIAGNOSES (from SNOMED CT):\n{ctx}"
+        )[: C.MAX_TOKENS_CONTEXT * 4]
     if profile and profile.get("synthesis"):
         syn = profile["synthesis"]
         role = syn.get("role", "knowledge assistant")

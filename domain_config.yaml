@@ -224,4 +224,30 @@ domains:
       - venue
       - year
       - doi
+  snomed:
+    # SNOMED CT is a terminology graph, not a prose corpus. Retrieval is by
+    # Cypher traversal (symptom term -> concept -> reverse REL_116680003 to
+    # candidate disorders), NOT Qdrant vector search. No collection is used.
+    collection: null
+    neo4j_label: SnomedConcept
+    retrieval: snomed_traversal
+    entity_types:
+    - Disorder
+    - Finding
+    - Symptom
+    - Morphology
+    relation_types:
+    - REL_116680003          # Associated finding (the diagnosis edge)
+    - REL_363698007          # Finding site
+    - REL_263502005          # Associated morphology
+    pair_strategy: all_pairs
+    min_confidence: 0.0
+    chunking:
+      strategy: none
+      chunk_size: 0
+      overlap: 0
+    metadata_schema:
+      fields:
+      - concept_id
+      - term
 default_domain: engineering

@@ -454,31 +454,63 @@ def ask(req: AskReq):
             "contexts_meta": [],
             "answer": result.get("answer") or "",
         }
+    # 2b-. SNOMED domain: Cypher-traversal retrieval (no Qdrant, no Entity graph)
+    # Initialise so both branches leave these bound (Pyright-friendly).
+    q_res, g_res, qdrant_hits, graph_hits, path = [], [], 0, 0, "none"
+    if req.domain == "snomed":
+        import snomed_retrieve as SR
+        import json as _json
+        # Detect a temporal/graduated presentation: JSON {"day1":[...],...}
+        presentation = None
+        q = req.query.strip()
+        if q.startswith("{") or q.startswith("day") or "day1" in q.lower():
+            try:
+                parsed = _json.loads(q) if q.startswith("{") else None
+                if isinstance(parsed, dict):
+                    presentation = parsed
+            except Exception:
+                presentation = None
+        if presentation:
+            g_res = SR.retrieve_temporal(presentation, top_k=req.top_k)
+        else:
+            g_res = SR.retrieve_symptoms(req.query, top_k=req.top_k)
+        graph_hits = len(g_res)
+        qdrant_hits = 0
+        path = "graph" if graph_hits else "none"
+        # skip Qdrant; go straight to fuse/rerank with graph-only contexts
+        q_res = []
+        t1 = None  # no Qdrant thread
+        # (fall through to fusion below by jumping past the Qdrant block)
+        _snomed_shortcut = True
+    else:
+        _snomed_shortcut = False
 
     # 3. Parallel retrieval: Qdrant + Neo4j
     import threading
     # Resolve collection(s) → list of Qdrant collection names.
     # If no explicit collection given, derive from the domain profile.
-    if req.collection is None and profile is not None:
-        req_collection = profile["collection"]
-    else:
-        req_collection = req.collection
-    collections = _resolve_collections(req_collection)
-    q_res, g_res = [], []
-    t1 = threading.Thread(
-        target=lambda: q_res.extend(rag.qdrant_search_multi(vec, req.query, collections)))
-    t2 = threading.Thread(target=lambda: g_res.extend(
-        rag.neo4j_subgraph(req.query,
-                          label=(profile["neo4j_label"] if profile else None),
-                          entry_strategy=(profile.get("entry_strategy", "keyword")
-                                          if profile else "keyword"))))
-    t1.start(); t2.start(); t1.join(); t2.join()
+    if not _snomed_shortcut:
+        if req.collection is None and profile is not None:
+            req_collection = profile["collection"]
+        else:
+            req_collection = req.collection
+        collections = _resolve_collections(req_collection)
+        q_res, g_res = [], []
 
-    qdrant_hits = len(q_res)
-    graph_hits = len(g_res)
-    path = "hybrid" if (qdrant_hits and graph_hits) else (
-        "qdrant" if qdrant_hits else ("graph" if graph_hits else "none")
-    )
+        t1 = threading.Thread(
+            target=lambda: q_res.extend(rag.qdrant_search_multi(vec, req.query, collections)))
+        t2 = threading.Thread(target=lambda: g_res.extend(
+            rag.neo4j_subgraph(req.query,
+                              label=(profile["neo4j_label"] if profile else None),
+                              entry_strategy=(profile.get("entry_strategy", "keyword")
+                                              if profile else "keyword"))))
+        t1.start(); t2.start(); t1.join(); t2.join()
+
+        qdrant_hits = len(q_res)
+        graph_hits = len(g_res)
+        path = "hybrid" if (qdrant_hits and graph_hits) else (
+            "qdrant" if qdrant_hits else ("graph" if graph_hits else "none")
+        )
 
     # 4. Fuse + rerank in-process
     # q_res = list of Qdrant records {text,doc_id,doc_type,chunk_idx}
