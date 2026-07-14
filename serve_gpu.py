@@ -1157,6 +1157,32 @@ def list_differentials(query: Optional[str] = None, limit: int = 20):
         driver.close()
 
 
+@app.delete("/differential")
+def delete_differential(query: str, mode: str = "differential",
+                        min_confidence: Optional[str] = None):
+    """Delete a persisted differential (audit cleanup).
+
+    Matches the same id key used at write time: hash(query, mode, min_confidence).
+    Removes the Differential node and its HAS_CANDIDATE DxCandidate children
+    (and any MATCHES_CONCEPT edges). Returns {deleted: n, id: ...}.
+    """
+    from neo4j import GraphDatabase
+    diff_id = abs(hash((query, mode, min_confidence or ""))) % (2 ** 63)
+    driver = GraphDatabase.driver(
+        C.NEO4J_URI, auth=(C.NEO4J_USER, C.NEO4J_PASSWORD))
+    try:
+        with driver.session() as s:
+            rec = s.run(
+                "MATCH (d:Differential {id:$id})-[:HAS_CANDIDATE]->(c:DxCandidate) "
+                "DETACH DELETE d, c RETURN count(c) AS n", id=diff_id).single()
+            n = rec["n"] if rec else 0
+        return {"deleted": n, "id": diff_id, "query": query}
+    except Exception as e:
+        return {"deleted": 0, "id": diff_id, "error": str(e)}
+    finally:
+        driver.close()
+
+
 
 @app.get("/domains")
 def list_domains_status():
