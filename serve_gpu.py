@@ -1120,15 +1120,25 @@ def delete_differential(query: str, mode: str = "differential",
 @app.get("/domains")
 def list_domains_status():
     """Per-domain status: configured vs runnable, collection point counts,
-    ingestor availability, and companion-domain wiring.
+    ingestor/retriever plugin availability, and companion-domain wiring.
 
     A domain is:
-      * configured  — declared in domain_config.yaml
-      * runnable    — has a domains/<name>/retrieve.py on disk
-      * ingestable  — has a domains/<name>/ingest.py on disk
+      * configured  — declared in domain_config.yaml (always True here; every
+                      listed domain is queryable via federated.assemble)
+      * runnable    — has a retrieval surface: a primary Qdrant collection,
+                      a Neo4j graph label, a retrieval strategy, or a companion
+                      with a collection. (Generic domains like `engineering`
+                      are runnable even without a domains/<name>/retrieve.py.)
+      * ingestable  — has a domains/<name>/ingest.py plugin OR is ingestible
+                      via the generic /ingest endpoint (has a Qdrant collection).
+                      Graph-only domains loaded externally (e.g. snomed via
+                      load_snomed.py) have collection=null and are not ingestable.
+      * has_retriever_plugin / has_ingest_plugin — whether the on-disk plugin
+                      folder exists (informational; runnable/ingestable do not
+                      require it).
     Plus live Qdrant point counts for any declared collection.
     """
-    from domains import list_domains, supported_domains
+    from domains import get_retriever  # noqa: F401 (registry import side-effect)
     import ingest as ingest_mod
     import domain_loader  # config loader (default_domain lives in domain_config.yaml)
 
@@ -1141,42 +1151,47 @@ def list_domains_status():
         except Exception:
             return 0
 
-    configured = set(supported_domains())
-    runnable = set(list_domains())
-    # discover ingestable domains by probing for ingest.py on disk
     domains_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "domains")
-    ingestable = set()
-    if os.path.isdir(domains_dir):
-        for d in os.listdir(domains_dir):
-            ip = os.path.join(domains_dir, d, "ingest.py")
-            if os.path.isfile(ip):
-                ingestable.add(d)
 
-    # merge all known domain names
-    all_names = configured | runnable | ingestable
+    # configured = declared in domain_config.yaml (every configured domain is
+    # queryable via federated.assemble). Aliases resolve to a concrete profile.
+    configured_names = set(domain_loader.list_domains())
+
     out = []
-    for name in sorted(all_names):
-        profile = None
-        try:
-            from domain_loader import get_domain
-            profile = get_domain(name)
-        except Exception:
-            profile = None
-        coll = (profile or {}).get("collection")
+    for name in sorted(configured_names):
+        # Resolve alias (e.g. `default` -> `engineering`) so capability checks
+        # use the concrete profile, not the alias stub.
+        profile = domain_loader.get_domain(name)
+        coll = profile.get("collection")
+        has_retriever_plugin = os.path.isfile(
+            os.path.join(domains_dir, name, "retrieve.py"))
+        has_ingest_plugin = os.path.isfile(
+            os.path.join(domains_dir, name, "ingest.py"))
+        # runnable: the domain has SOME retrieval surface (primary collection,
+        # graph label, a retrieval strategy, or a companion with a collection).
+        has_surface = bool(
+            coll or profile.get("neo4j_label")
+            or profile.get("retrieval")
+            or profile.get("companions"))
+        # ingestable: has an ingest.py plugin, OR is ingestible via the generic
+        # /ingest endpoint (has a Qdrant collection). Graph-only domains loaded
+        # externally (e.g. snomed via load_snomed.py) have collection=null and
+        # are therefore not ingestable here.
+        ingestable = bool(has_ingest_plugin or coll)
         out.append({
             "name": name,
-            "configured": name in configured,
-            "runnable": name in runnable,
-            "ingestable": name in ingestable,
-            "retrieval": (profile or {}).get("retrieval"),
+            "configured": True,
+            "runnable": has_surface,
+            "ingestable": ingestable,
+            "has_retriever_plugin": has_retriever_plugin,
+            "has_ingest_plugin": has_ingest_plugin,
+            "retrieval": profile.get("retrieval"),
             "collection": coll,
             "points": _pts(coll),
-            "prose_domain": (profile or {}).get("prose_domain"),
-            "companions": (profile or {}).get("companions", []),
+            "prose_domain": profile.get("prose_domain"),
+            "companions": profile.get("companions", []),
         })
-    return {"domains": out, "default_domain": (domain_loader.get_default_domain()
-                                                if hasattr(domain_loader, "get_default_domain")
-                                                else "engineering")}
+    return {"domains": out, "default_domain": domain_loader.get_default_domain()}
 
 
 @app.get("/profiles")
