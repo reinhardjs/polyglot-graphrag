@@ -1212,6 +1212,56 @@ def list_profiles():
     return {"profiles": out}
 
 
+@app.get("/doc/{collection}")
+def get_full_document(collection: str, doc_id: str,
+                      include_chunks: bool = True):
+    """Reconstruct a FULL document from its Qdrant chunks by `doc_id`.
+
+    Retrieval (including companion retrievers) returns individual CHUNKS, each
+    tagged with `doc_id` + `chunk_idx`. This endpoint scrolls every point in
+    `collection` sharing that `doc_id` and concatenates them in `chunk_idx`
+    order to return the complete source document — useful for citation / full
+    context when `synthesize:false` returns only the matching chunk(s).
+
+    `doc_id` is passed as a query param (not a path segment) because doc_ids
+    may contain slashes (e.g. `eng/your-doc.md`).
+
+    Response:
+        {collection, doc_id, source, chunk_count, text, chunks[]}
+    """
+    import ingest as ingest_mod
+    qc = ingest_mod.get_qdrant()
+    if not qc.collection_exists(collection):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404,
+                            detail=f"collection '{collection}' not found")
+    pts, _ = qc.scroll(
+        collection,
+        scroll_filter={"must": [{"key": "doc_id",
+                                 "match": {"value": doc_id}}]},
+        limit=500, with_payload=True, with_vectors=False)
+    if not pts:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=404,
+            detail=f"doc_id '{doc_id}' not found in '{collection}'")
+    source = pts[0].payload.get("metadata", {}).get("source", "")
+    ordered = sorted(pts, key=lambda p: p.payload.get("chunk_idx", 0))
+    full = "\n\n".join(p.payload["text"] for p in ordered)
+    chunks = [{"chunk_idx": p.payload.get("chunk_idx", -1),
+               "text": p.payload["text"]} for p in ordered] \
+        if include_chunks else []
+    return {
+        "collection": collection,
+        "doc_id": doc_id,
+        "source": source,
+        "chunk_count": len(ordered),
+        "char_count": len(full),
+        "text": full,
+        "chunks": chunks,
+    }
+
+
 # ── V3.0 Admin endpoints (YAML domain config) ────────────────────────────────
 @app.get("/admin/domains")
 def admin_domains():
