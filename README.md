@@ -79,15 +79,14 @@ confirmed by more than one — see [docs/domains/README.md](docs/domains/README.
 
 ## Explore (next steps, in order)
 
-1. **Ingest your own docs** — `./venv/bin/python sync_docs.py mydocs`
-   (needs `mydocs/eng/your-doc.md`). See [RUN.md](RUN.md) for the full flow
-   (and PDF support, watch mode, verification).
-2. **Ask with the graph** — `domain:"engineering"` uses the knowledge graph;
-   omit `domain` to hit the default. See [QUICKSTART.md](QUICKSTART.md).
-3. **Add a domain or companion** — copy `domains/example_companion/` and edit
-   `domain_config.yaml`. No daemon code change needed. See
-   [docs/domains/README.md](docs/domains/README.md).
-4. **Understand the architecture** — [ARCHITECTURE.md](ARCHITECTURE.md).
+1. **Ask with the SNOMED clinical graph** — `domain:"snomed"` (or omit `domain`
+   to hit the `default` alias → snomed). It runs SNOMED term-matching + the
+   `clinical_prose` semantic companion in parallel for differential diagnosis.
+   See [QUICKSTART.md](QUICKSTART.md).
+2. **Ingest your own docs into a NEW domain** — copy `domains/clinical_prose/`
+   (or `domains/snomed/`) and edit `domain_config.yaml`. No daemon code change
+   needed. See [docs/domains/README.md](docs/domains/README.md).
+3. **Understand the architecture** — [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
@@ -106,11 +105,12 @@ confirmed by more than one — see [docs/domains/README.md](docs/domains/README.
 | Evolve the data model safely | [MIGRATION.md](MIGRATION.md) |
 | Contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
-> **Heads-up on domains.** Only `engineering`, `snomed`, and their companions
-> (`clinical_prose`, `example_companion`, `engineering_docs`) hold **real
-> ingested data**. `legal`, `medical`, `accounting`, `hospitality`, `journal`
-> are **schema stubs** in `domain_config.yaml` — configured but not yet seeded.
-> Treat them as copy-paste templates, not working corpora.
+> **Heads-up on domains.** After the engineering corpus was purged, the only
+> configured domain is **`snomed`** (graph-only, `SnomedConcept` in Neo4j) with
+> its semantic companion **`clinical_prose`** (Qdrant). `default` aliases to
+> `snomed`. To add a new corpus, copy an existing `domains/<name>/` plugin and
+> register it in `domain_config.yaml` — the federated factory picks it up with
+> no daemon-code changes.
 
 ---
 

@@ -19,8 +19,8 @@ tags (the project had not reached a stable 1.0).
 - **Companion corpora**: any domain can attach extra Qdrant collections
   (`companions:`) searched in parallel and tagged with `_signal`; candidates
   confirmed by ≥2 signals get the dual-evidence rerank boost.
-- **Public `default` domain alias** → resolves to the `engineering` strategy
-  without renaming the `engineering:` key.
+- **Public `default` domain alias** → resolves to the `snomed` strategy
+  without renaming the `snomed:` key.
 - **Zero-setup demo**: `config.SEED_ON_STARTUP` auto-ingests the
   `example_companion` corpus on daemon boot; unqualified `/ask` (no `domain`)
   hits the configured `default_domain`.
@@ -38,10 +38,10 @@ tags (the project had not reached a stable 1.0).
 ### Known limitations (experimental)
 - `synthesize:true` requires the Gemma-4 E4B model (:8084) running; otherwise
   use `synthesize:false` for retrieval-only.
-- Several domains in `domain_config.yaml` (`legal`, `medical`, `accounting`,
-  `hospitality`, `journal`) are **schema stubs** — configured but not yet
-  ingested/seeded. Only `engineering`, `snomed`, and their companions hold
-  real data. Treat them as templates to copy, not as working corpora.
+- Several domains in `domain_config.yaml` were **schema stubs** —
+  configured but not yet ingested/seeded. After the engineering corpus was
+  purged, the only configured domain is **`snomed`** (graph-only) with its
+  `clinical_prose` companion. Treat the removed stubs as templates to copy.
 - VRAM is tight on 12 GB; avoid concurrent heavy ingest + many parallel queries.
 
 ---

@@ -60,13 +60,6 @@ _gliner_lock = threading.Lock()
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# ── Demo mode ────────────────────────────────────────────────────────────────
-# Set by the `--demo` CLI flag. When True, on_startup seeds BOTH the primary
-# engineering graph corpus (from the bundled demo/engineering/ sample set) AND
-# the engineering_docs companion, so a non-technical user gets a full working
-# demo with zero external data.
-DEMO_SEED = False
-
 # ── Ingest task store (in-process, for BackgroundTasks polling) ───────────────
 # Maps task_id → status dict. Lives for the daemon's lifetime. A production
 # deployment would use Redis, but in-process is sufficient for single-daemon.
@@ -1357,139 +1350,8 @@ def models():
         },
         "entity_resolution": {
             "threshold": C.ENTITY_RESOLUTION_THRESHOLD,
-            "index": C.ENTITY_VECTOR_INDEX,
         },
     }
-
-
-def _write_demo_graph():
-    """Write a small curated set of demo graph triples so the showcase query
-    ('who reported BUG-204?') works deterministically in the zero-setup demo.
-
-    The real extraction pipeline (sync_docs → E2B) already runs on the bundled
-    demo docs and captures what it can; this guarantees the headline relational
-    answer regardless of LLM extraction quality on short docs. Triples are
-    tagged `demo:true` + `source_docs` so they stay distinguishable/cleanable.
-    """
-    try:
-        from neo4j import GraphDatabase
-        driver = GraphDatabase.driver(
-            C.NEO4J_URI, auth=(C.NEO4J_USER, C.NEO4J_PASSWORD))
-        src = ["bug-204.md", "pr-482.md", "adr-021.md", "runbook-checkout.md"]
-        # (id, type, prof) — prof mirrors real extracted entities so the
-        # subgraph output (which only emits nodes with a `profile`) includes
-        # them. IDs are NAMESPACED with `demo:` so MERGE can never clobber a
-        # real extracted entity (e.g. a real `bob`/`PostgreSQL` node from the
-        # user's own docs). Keyword entry still matches via substring
-        # (toLower('demo:BUG-204') CONTAINS 'bug').
-        D = "demo:"
-        nodes = [
-            (D + "BUG-204", "Incident",
-             "BUG-204: checkout service cascade timeout during peak traffic; "
-             "reported by bob; fixed by PR-482."),
-            (D + "bob", "Person",
-             "bob: engineer who reported BUG-204 and is on-call for the "
-             "checkout service."),
-            (D + "PR-482", "PR",
-             "PR-482: makes the payments call async with a bounded timeout "
-             "budget; fixes BUG-204."),
-            (D + "ADR-021", "ADR",
-             "ADR-021: adopts PostgreSQL 16 as the primary transactional "
-             "store for the checkout service."),
-            (D + "PostgreSQL", "Technology",
-             "PostgreSQL 16: primary transactional store for the checkout "
-             "service (per ADR-021)."),
-            (D + "checkout service", "Service",
-             "checkout service: owns the orders/payments schemas; uses "
-             "PostgreSQL; calls the payments service."),
-        ]
-        rels = [
-            (D + "BUG-204", "Incident", D + "bob", "Person", "REPORTED_BY"),
-            (D + "PR-482", "PR", D + "BUG-204", "Incident", "FIXES"),
-            (D + "ADR-021", "ADR", D + "PostgreSQL", "Technology", "DECIDES"),
-            (D + "checkout service", "Service", D + "PostgreSQL", "Technology", "USES"),
-            (D + "bob", "Person", D + "BUG-204", "Incident", "REPORTED"),
-        ]
-        with driver.session() as s:
-            for nid, ntype, nprof in nodes:
-                s.run(
-                    "MERGE (a:Entity:Engineering {id:$nid}) "
-                    "SET a.name=$nid, a.type=$ntype, a.profile=$nprof, "
-                    "a.demo=true, a.source_docs=$src",
-                    nid=nid, ntype=ntype, nprof=nprof, src=src)
-            for sid, stype, tid, ttype, rel in rels:
-                s.run(
-                    "MATCH (a:Entity:Engineering {id:$sid}) "
-                    "MATCH (b:Entity:Engineering {id:$tid}) "
-                    "MERGE (a)-[:REL {type:$rel, demo:true, source_docs:$src}]->(b)",
-                    sid=sid, tid=tid, rel=rel, src=src)
-        driver.close()
-        print("[gpu-daemon] demo graph triples written (deterministic demo)",
-              flush=True)
-    except Exception as e:
-        print(f"[gpu-daemon] demo graph write skipped: {e}", flush=True)
-
-
-def _seed_demo():
-    """Seed the FULL demo: primary engineering graph corpus + companion.
-
-    Runs in a background thread after the daemon is healthy. The primary is
-    ingested from the bundled ``demo/engineering/`` sample set (real markdown
-    that yields a graph: ADR-021, BUG-204, PR-482, runbook). The companion
-    (engineering_docs) is seeded via its own ingestor. Idempotent: re-running
-    skips non-empty collections / already-ingested docs.
-    """
-    import time as _t
-    import subprocess
-    import sys as _sys
-    ROOT = os.path.dirname(os.path.abspath(__file__))
-
-    # Wait for the daemon itself to be ready (we self-call /embed_late etc.).
-    for _ in range(120):
-        try:
-            if requests.get(f"{C.DAEMON_URL}/health", timeout=2).status_code == 200:
-                break
-        except Exception:
-            pass
-        _t.sleep(1)
-    else:
-        print("[gpu-daemon] demo seed aborted: daemon never became healthy",
-              flush=True)
-        return
-
-    # 1) Primary engineering corpus (chunks + Engineering graph) from bundled
-    #    sample docs, via the canonical sync_docs.py path.
-    demo_dir = os.path.join(ROOT, "demo", "engineering")
-    if os.path.isdir(demo_dir):
-        print(f"[gpu-daemon] demo: seeding primary engineering from "
-              f"{demo_dir} ...", flush=True)
-        try:
-            subprocess.run(
-                [_sys.executable, "sync_docs.py", demo_dir],
-                cwd=ROOT, timeout=900, check=False)
-        except Exception as e:
-            print(f"[gpu-daemon] demo primary seed failed: {e}", flush=True)
-
-    # 1b) Deterministic demo graph triples (guarantees the showcase query
-    #     works regardless of LLM extraction quality on the short demo docs).
-    _write_demo_graph()
-
-    # 2) Companion engineering_docs (this repo's docs/) — only if empty.
-    try:
-        from domains import get_ingestor
-        ing = get_ingestor("engineering_docs")
-        from qdrant_client import QdrantClient
-        qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
-        coll = domain_loader.get_domain("engineering_docs").get("collection")
-        if coll and (not qc.collection_exists(coll) or qc.count(coll).count == 0):
-            print("[gpu-daemon] demo: seeding companion engineering_docs ...",
-                  flush=True)
-            ing()
-    except Exception as e:
-        print(f"[gpu-daemon] demo companion seed skipped: {e}", flush=True)
-
-    print("[gpu-daemon] demo seed complete. Try: "
-          "bash run.sh ask 'who reported BUG-204?'", flush=True)
 
 
 @app.on_event("startup")
@@ -1542,11 +1404,9 @@ def on_startup():
     except Exception as e:
         print(f"[gpu-daemon] Neo4j vector index init skipped: {e}", flush=True)
 
-    # Auto-seed demo corpora so a non-technical user can query AS-IS.
+    # Auto-seed corpora so a non-technical user can query AS-IS.
     # For each domain in config.SEED_ON_STARTUP, if its Qdrant collection is
-    # empty, run its ingestor in a background thread (non-blocking). This makes
-    # e.g. `example_companion` available immediately after `python serve_gpu.py`
-    # with zero setup — no `curl /ingest_domain` required.
+    # empty, run its ingestor in a background thread (non-blocking).
     for domain in getattr(C, "SEED_ON_STARTUP", []) or []:
         try:
             from domains import list_domains
@@ -1570,24 +1430,8 @@ def on_startup():
         except Exception as e:
             print(f"[gpu-daemon] seed '{domain}' skipped: {e}", flush=True)
 
-    # Full demo mode: seed the primary engineering graph corpus (from the
-    # bundled demo/engineering/ sample set) AND the engineering_docs companion,
-    # after the daemon is healthy. Lets a non-technical user run a complete
-    # query demo with zero external data.
-    if DEMO_SEED:
-        threading.Thread(target=_seed_demo, daemon=True).start()
-
 
 if __name__ == "__main__":
-    import argparse
     import uvicorn
 
-    _ap = argparse.ArgumentParser(description="GraphRAG GPU auxiliary-model daemon")
-    _ap.add_argument("--demo", action="store_true",
-                     help="Seed the FULL demo on startup: primary engineering "
-                          "graph corpus (from bundled demo/engineering/) + the "
-                          "engineering_docs companion. Zero external data needed.")
-    _args = _ap.parse_args()
-    if _args.demo:
-        DEMO_SEED = True
     uvicorn.run(app, host="127.0.0.1", port=8000, workers=1)

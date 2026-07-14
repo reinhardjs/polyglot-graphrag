@@ -78,25 +78,24 @@ domain declares:
 
 | Domain | Primary | Graph | Companions | Notes |
 |--------|---------|-------|------------|-------|
-| `engineering` | `engineering_chunks` | `Engineering` | `engineering_docs` | main corpus (82k chunks) + repo `docs/` companion |
 | `snomed` | (graph-only term-match) | `SnomedConcept` | `clinical_prose` | terminology graph + Wikipedia prose companion |
-| `default` | **alias → `engineering`** | — | — | stable public name; unqualified `/ask` uses it |
+| `default` | **alias → `snomed`** | — | — | stable public name; unqualified `/ask` uses it |
 
-`example_companion` (2 docs) is the template corpus; `engineering_docs` (66
-chunks from `docs/`) is the real companion demo.
+`clinical_prose` (Qdrant) is the semantic companion that supplies the
+free-text disease descriptions SNOMED's structured graph cannot express.
 
 ### Schema stubs (configured, NOT yet seeded)
 
-`legal`, `medical`, `accounting`, `hospitality`, `journal` — their Qdrant
-collections exist but contain **0 points**. They are copy-paste templates, not
-working corpora.
+None after the engineering corpus was purged — only `snomed` (+ `clinical_prose`
+companion) remains configured. To add a new corpus, copy `domains/snomed/` or
+`domains/clinical_prose/` and register it in `domain_config.yaml`.
 
 ### Companion — what it is
 
 A companion is a **second Qdrant collection** attached to a domain. The
-`engineering` primary misses architecture/narrative phrasing the `Engineering`
-graph entities can't answer; the `engineering_docs` companion (the repo's
-`docs/`) supplies it. Same mechanism as `snomed` + `clinical_prose`. See
+`snomed` primary is a structured terminology graph that misses the natural-language
+presentations of diseases; the `clinical_prose` companion (Wikipedia medicine
+articles) supplies that prose. See
 [docs/domains/README.md](docs/domains/README.md).
 
 ---
@@ -145,7 +144,7 @@ can see which domain/companion each context came from.
 
 - `synthesize:true` needs E4B (`:8084`); else use `synthesize:false`.
 - VRAM is tight on 12 GB — avoid concurrent heavy ingest + many parallel queries.
-- Non-engineering/snomed domains are untested stubs.
+- Non-`snomed` domains are untested stubs unless you add and seed them.
 - `/ask` is stateless (no multi-turn memory).
 - GLiNER drops entity types not in the YAML `entity_types` list (dynamic-label
   work is tracked under `docs/roadmap/`).

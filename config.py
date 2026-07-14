@@ -46,26 +46,21 @@ DATA_DIR   = os.path.join(BASE_DIR, "sample_data")
 QDRANT_HOST = "localhost"
 QDRANT_PORT = 6333
 QDRANT_URL  = f"http://{QDRANT_HOST}:{QDRANT_PORT}"
-COLL_CHUNKS = "engineering_chunks"
+COLL_CHUNKS = "clinical_prose"
 COLL_CACHE  = "query_cache"
 CACHE_THRESHOLD = 0.95   # cosine similarity above which we return cached answer
 
 # ── Multi-Domain Collections ─────────────────────────────────────────────────
 # Each domain gets its own Qdrant collection (namespace isolation, zero
-# overhead). Add a new domain here + create the collection in ingest.py /
-# serve_gpu.py on first use. Queries route to the collection by name.
+# overhead). After the engineering corpus purge, the only live Qdrant
+# collection is `clinical_prose` (snomed's semantic companion). `snomed` itself
+# is graph-only (collection: null → terminology graph in Neo4j, no prose
+# collection). Add a new domain here + create the collection on first use.
 QDRANT_COLLECTIONS = {
-    "engineering":  "engineering_chunks",
-    "legal":        "legal_chunks",
-    "hospitality":  "hospitality_chunks",
-    "accounting":   "accounting_chunks",
-    "medical":      "medical_chunks",
     "snomed":       None,            # terminology graph: no prose collection
     "clinical_prose": "clinical_prose",
-    "example_companion": "example_companion",  # TEMPLATE companion corpus
-    "engineering_docs": "engineering_docs",  # REAL companion: repo docs/ tree
 }
-QDRANT_COLLECTION_DEFAULT = "engineering_chunks"
+QDRANT_COLLECTION_DEFAULT = "clinical_prose"
 
 NEO4J_URI      = "bolt://localhost:7687"
 NEO4J_USER     = "neo4j"
@@ -244,9 +239,9 @@ ENTITY_VECTOR_INDEX = "entity_vector_idx"
 # if its Qdrant collection is empty. `example_companion` is the bundled
 # zero-tech demo (domains/example_companion). Add real domains here to have
 # them auto-populate on boot. Set to [] to disable auto-seed entirely.
-# Companion corpora auto-seeded on daemon startup (if their Qdrant collection
-# is empty). The primary engineering graph corpus is NOT auto-seeded here —
-# run `python serve_gpu.py --demo` to also seed it from the bundled
-# demo/engineering/ sample set, or ingest your own docs via sync_docs.py.
-SEED_ON_STARTUP = ["example_companion", "engineering_docs"]
+# Companion corpora auto-seeded on daemon startup (if their Qdrant collection is
+# empty). Left empty after the engineering corpus purge — the only remaining
+# domain is `snomed` (graph-only, collection=null) with companion
+# `clinical_prose` (bulk-seeded on demand, not auto-seeded here).
+SEED_ON_STARTUP = []
 

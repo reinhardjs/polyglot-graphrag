@@ -106,35 +106,6 @@ bash run.sh serve
 bash run.sh health
 ```
 
-### Full zero-setup demo (`--demo`)
-
-For a complete out-of-the-box demo that seeds BOTH corpora, start the daemon
-with `--demo` (the LLM servers must already be up — `bash run.sh llms`, or use
-`bash run.sh serve` then restart the daemon with `--demo`):
-
-```bash
-./venv/bin/python serve_gpu.py --demo
-```
-
-`--demo` seeds, after the daemon is healthy:
-- **Primary engineering graph corpus** — ingests the bundled sample set in
-  `demo/engineering/` (ADR-021, BUG-204, PR-482, checkout runbook) into
-  `engineering_chunks` + the Neo4j `Engineering` graph, and writes a small
-  curated set of demo triples (e.g. BUG-204 → reported_by → bob) so the
-  showcase query works deterministically.
-- **Companion corpus** `engineering_docs` (this repo's `docs/`) — auto-seeded
-  on startup regardless of `--demo` (it's in `SEED_ON_STARTUP`).
-
-After seeding, try:
-```bash
-bash run.sh ask "who reported BUG-204?"          # primary graph
-bash run.sh ask "what is the total VRAM budget on the RTX 3060"  # companion
-```
-
-> `run.sh serve` does NOT pass `--demo`. To get the full demo, start the daemon
-> with `./venv/bin/python serve_gpu.py --demo` (companion corpora auto-seed in
-> either case).
-
 > The `run.sh` helper launches E2B with `--ctx-size 32768` (required so the
 > parallel sliding-window extractor doesn't overflow the shared KV cache — see
 > §3) and exports `SW_EXTRACT_WORKERS=4`. No sudo, no systemd units needed.
@@ -143,8 +114,8 @@ Handy `run.sh` subcommands:
 ```bash
 bash run.sh serve      # start LLMs + daemon (idempotent)
 bash run.sh health     # check everything (LLMs + daemon + VRAM)
-bash run.sh ask "who reported BUG-204?"   # full pipeline (retrieve + synthesize)
-bash run.sh retrieve "who reported BUG-204?"  # retrieval only (no synthesis)
+bash run.sh ask "chest pain and shortness of breath"   # full pipeline (retrieve + synthesize)
+bash run.sh retrieve "fever and rash"  # retrieval only (no synthesis)
 bash run.sh stop       # stop daemon + LLMs
 ```
 
@@ -189,8 +160,7 @@ cp /path/to/your-real-doc.md mydocs/eng/
 ```bash
 curl -s -X POST http://localhost:8000/ingest \
   -H "Content-Type: application/json" \
-  -d '{"text":"BUG-204 caused an outage in checkout. bob reported it.",
-       "doc_id":"my-doc-1","domain":"engineering"}'
+  -d '{"text":"Chest pain radiating to the left arm with shortness of breath suggests cardiac ischemia.","doc_id":"my-doc-1","domain":"snomed"}'
 
 # Poll until done (ingest is async):
 curl http://localhost:8000/ingest/status/<task_id>
@@ -202,7 +172,7 @@ pdftotext my-paper.pdf /tmp/my-paper.txt
 TID=$(curl -s -X POST http://localhost:8000/ingest \
   -H "Content-Type: application/json" \
   -d "{\"text\":$(python3 -c "import json;print(json.dumps(open('/tmp/my-paper.txt').read()))"),\
-       \"doc_id\":\"my-paper\",\"domain\":\"journal\"}" \
+       \"doc_id\":\"my-paper\",\"domain\":\"snomed\"}" \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['task_id'])")
 curl http://localhost:8000/ingest/status/$TID
 ```
@@ -211,11 +181,8 @@ curl http://localhost:8000/ingest/status/$TID
 > ```bash
 > docker exec rag-system-neo4j-1 cypher-shell -a bolt://localhost:7687 \
 >   -u neo4j -p ragpassword123 \
->   "MATCH (n:Entity) WHERE 'eng/your-real-doc.md' IN n.source_docs \
+>   "MATCH (n:Entity) WHERE 'my-doc-1' IN n.source_docs \
 >    RETURN n.name, n.type LIMIT 20;"
-> curl -s "http://localhost:6333/collections/engineering_chunks/points/count" \
->   -H "Content-Type: application/json" \
->   -d '{"filter":{"must":[{"key":"doc_id","match":{"value":"eng/your-real-doc.md"}}]}}'
 > ```
 
 **What happens inside (so you can debug):**
@@ -223,7 +190,8 @@ curl http://localhost:8000/ingest/status/$TID
 1. **Chunk** — text is split (late-chunking strategy per domain).
 2. **Embed** — each chunk → 1024-d vector via **Jina v3** (multilingual) on GPU.
 3. **Store vectors** — upserted into the domain's Qdrant collection
-   (`engineering_chunks`, `journal_chunks`, …), tagged with `doc_id`.
+   (e.g. `clinical_prose` for a prose corpus, or a graph domain's collection),
+   tagged with `doc_id`.
 4. **Extract graph** — default mode is **`sliding_window`**: the doc is split
    into windows, each window's entities are found (GLiNER) and relationships
    extracted (Gemma E2B) **in parallel** (`SW_EXTRACT_WORKERS=4`). This yields
@@ -246,12 +214,12 @@ curl http://localhost:8000/ingest/status/$TID
 # Retrieval + synthesis (needs E4B on :8084):
 curl -s -X POST http://localhost:8000/ask \
   -H "Content-Type: application/json" \
-  -d '{"query":"who reported BUG-204?","domain":"engineering","synthesize":true}'
+  -d '{"query":"chest pain and shortness of breath","domain":"snomed","synthesize":true}'
 
 # Retrieval only (no E4B needed):
 curl -s -X POST http://localhost:8000/ask \
   -H "Content-Type: application/json" \
-  -d '{"query":"who reported BUG-204?","synthesize":false}'
+  -d '{"query":"chest pain","synthesize":false}'
 ```
 
 **What happens inside:**
