@@ -490,10 +490,22 @@ def ask(req: AskReq):
             prose_retrieve = get_retriever("clinical_prose")
             prose_hits = prose_retrieve(req.query, top_k=req.top_k)
             if prose_hits:
+                # tag each prose record with its signal so the fusion step can
+                # boost candidates that ALSO appear in the SNOMED graph set.
+                for h in prose_hits:
+                    h["_signal"] = "prose"
                 q_res = prose_hits
                 qdrant_hits = len(prose_hits)
         except Exception as e:
             print(f"[ask] snomed companion prose unavailable: {e}", flush=True)
+
+        # tag each SNOMED graph record with its signal
+        for g in g_res:
+            if isinstance(g, dict):
+                g["_signal"] = "snomed"
+            else:
+                g = {"text": g, "doc_id": "", "doc_type": "snomed",
+                     "chunk_idx": -1, "_signal": "snomed"}
 
         path = "hybrid" if (graph_hits and qdrant_hits) else (
             "graph" if graph_hits else ("qdrant" if qdrant_hits else "none"))
@@ -548,6 +560,37 @@ def ask(req: AskReq):
         seen.add(key)
         pool.append(r)
 
+    # ── Cross-signal (dual-evidence) boost ──────────────────────────────────
+    # A candidate is "dual-signal" when BOTH the SNOMED term-match AND the
+    # clinical-prose semantic search surface the SAME disease. SNOMED records
+    # look like "[DIAGNOSIS CANDIDATE] Measles (disorder) (SNOMED 123)"; prose
+    # records like "[CLINICAL PROSE] Measles\n...". We normalise the leading
+    # title and treat a candidate as dual when the other signal's normalised
+    # name is contained in (or contains) this one. Marked records get a rerank
+    # bump so both the score AND the prompt preference align.
+    def _norm_name(text: str) -> str:
+        t = text.replace("[DIAGNOSIS CANDIDATE]", "").replace("[CLINICAL PROSE]", "")
+        t = t.strip()
+        # take the first line / the text before " (SNOMED" or newline
+        t = t.split("\n")[0].split("(SNOMED")[0].strip().lower()
+        return t
+
+    snomed_norm = {_norm_name(r["text"]) for r in all_records
+                   if r.get("_signal") == "snomed"}
+    prose_norm = {_norm_name(r["text"]) for r in all_records
+                  if r.get("_signal") == "prose"}
+
+    def _is_dual(r: dict) -> bool:
+        n = _norm_name(r["text"])
+        if not n:
+            return False
+        others = prose_norm if r.get("_signal") == "snomed" else snomed_norm
+        return any((n in o or o in n) and o for o in others)
+
+    DUAL_BOOST = 0.15  # additive to rerank score (0..1 scale)
+    for r in pool:
+        r["_dual_signal"] = _is_dual(r)
+
     if not pool:
         return {
             "query": req.query, "source": "llm", "path": path,
@@ -558,12 +601,19 @@ def ask(req: AskReq):
         }
 
     scores = _reranker.predict([(req.query, r["text"]) for r in pool])
-    ranked = sorted([(i, float(s)) for i, s in enumerate(scores)],
-                    key=lambda x: x[1], reverse=True)[:req.top_k]
+    ranked = []
+    for i, s in enumerate(scores):
+        sc = float(s)
+        if pool[i].get("_dual_signal"):
+            sc += DUAL_BOOST
+        ranked.append((i, sc))
+    ranked.sort(key=lambda x: x[1], reverse=True)
+    ranked = ranked[:req.top_k]
     contexts = [pool[i]["text"] for i, _ in ranked]
     contexts_meta = [{"doc_id": pool[i].get("doc_id", ""),
                       "doc_type": pool[i].get("doc_type", ""),
-                      "chunk_idx": pool[i].get("chunk_idx", -1)}
+                      "chunk_idx": pool[i].get("chunk_idx", -1),
+                      "dual_signal": pool[i].get("_dual_signal", False)}
                      for i, _ in ranked]
     rerank_scores = [s for _, s in ranked]
 
@@ -590,6 +640,7 @@ def ask(req: AskReq):
                 "doc_id": meta["doc_id"],
                 "doc_type": meta["doc_type"],
                 "chunk_idx": meta["chunk_idx"],
+                "dual_signal": meta.get("dual_signal", False),
             })
 
     result = {
@@ -891,6 +942,67 @@ def list_collections():
     except Exception as e:
         cols["_error"] = str(e)
     return {"collections": cols}
+
+
+@app.get("/domains")
+def list_domains_status():
+    """Per-domain status: configured vs runnable, collection point counts,
+    ingestor availability, and companion-domain wiring.
+
+    A domain is:
+      * configured  — declared in domain_config.yaml
+      * runnable    — has a domains/<name>/retrieve.py on disk
+      * ingestable  — has a domains/<name>/ingest.py on disk
+    Plus live Qdrant point counts for any declared collection.
+    """
+    from domains import list_domains, supported_domains
+    import ingest as ingest_mod
+    import domain_loader  # config loader (default_domain lives in domain_config.yaml)
+
+    qc = ingest_mod.get_qdrant()
+    def _pts(coll):
+        if not coll:
+            return None
+        try:
+            return qc.get_collection(coll).points_count or 0
+        except Exception:
+            return 0
+
+    configured = set(supported_domains())
+    runnable = set(list_domains())
+    # discover ingestable domains by probing for ingest.py on disk
+    domains_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "domains")
+    ingestable = set()
+    if os.path.isdir(domains_dir):
+        for d in os.listdir(domains_dir):
+            ip = os.path.join(domains_dir, d, "ingest.py")
+            if os.path.isfile(ip):
+                ingestable.add(d)
+
+    # merge all known domain names
+    all_names = configured | runnable | ingestable
+    out = []
+    for name in sorted(all_names):
+        profile = None
+        try:
+            from domain_loader import get_domain
+            profile = get_domain(name)
+        except Exception:
+            profile = None
+        coll = (profile or {}).get("collection")
+        out.append({
+            "name": name,
+            "configured": name in configured,
+            "runnable": name in runnable,
+            "ingestable": name in ingestable,
+            "retrieval": (profile or {}).get("retrieval"),
+            "collection": coll,
+            "points": _pts(coll),
+            "prose_domain": (profile or {}).get("prose_domain"),
+        })
+    return {"domains": out, "default_domain": (domain_loader.get_default_domain()
+                                                if hasattr(domain_loader, "get_default_domain")
+                                                else "engineering")}
 
 
 @app.get("/profiles")
