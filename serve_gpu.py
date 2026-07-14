@@ -181,6 +181,8 @@ class AskReq(BaseModel):
     collection: Optional[str | List[str]] = None   # Qdrant collection(s); None→default
     domain: Optional[str] = None                     # v2.6.0 profile (engineering/medical/legal/...)
     crag: bool = False                               # Phase 3: Corrective RAG + adaptive routing
+    dual_signal_only: bool = False                  # hybrid: keep only candidates confirmed by
+                                                    # BOTH signals (SNOMED term-match + clinical prose)
 
 
 class IngestReq(BaseModel):
@@ -590,6 +592,15 @@ def ask(req: AskReq):
     DUAL_BOOST = 0.15  # additive to rerank score (0..1 scale)
     for r in pool:
         r["_dual_signal"] = _is_dual(r)
+
+    # Optional hard filter: keep only candidates confirmed by BOTH signals.
+    # Only meaningful on the SNOMED hybrid path (graph + prose present) and
+    # when the caller opts in. Never silently drops everything if nothing is
+    # dual — fall back to the full pool so /ask still returns results.
+    if req.dual_signal_only and path == "hybrid":
+        dual_pool = [r for r in pool if r.get("_dual_signal")]
+        if dual_pool:
+            pool = dual_pool
 
     if not pool:
         return {
