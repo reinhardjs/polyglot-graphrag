@@ -87,7 +87,10 @@ curl -X POST localhost:8000/ask -H 'Content-Type: application/json' -d '{
 }'
 # -> result.diagnoses = [{rank, candidate, confidence: high|medium|low,
 #                         dual_signal, rerank_score}, ...]
-#    confidence: dual + rerank>=0.5 = high; dual OR rerank>=0.5 = medium; else low
+#    confidence bands (on RAW cross-encoder score, de-boosted):
+#      raw >= 0.50 -> high;  >= 0.15 -> medium;  else low
+#      (calibrated on bge-reranker-v2-m3, see docs/rerank-calibration.md)
+#    dual_signal is a SEPARATE corroboration flag, not part of confidence.
 #    NOTE: confidence = strength of evidence (keyword+semantic overlap), NOT
 #    clinical probability of the disease.
 ```

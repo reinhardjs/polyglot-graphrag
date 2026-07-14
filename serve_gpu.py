@@ -627,17 +627,17 @@ def ask(req: AskReq):
     ranked.sort(key=lambda x: x[1], reverse=True)
     ranked = ranked[:req.top_k]
 
-    # Confidence label per ranked differential. Derived from evidence strength:
-    #   dual   + rerank>=0.5 -> "high"
-    #   dual   or rerank>=0.5 -> "medium"
-    #   else                   -> "low"
-    # Honest framing: this is keyword+semantic overlap evidence, not clinical
-    # probability. It communicates HOW WELL-BACKED the candidate is, not how
-    # likely the disease is.
-    def _confidence(dual: bool, rerank: float) -> str:
-        if dual and rerank >= 0.5:
+    # Confidence label per ranked differential. Computed on the DE-BOOSTED
+    # (raw) cross-encoder score so confidence reflects true model relevance,
+    # NOT our dual-signal heuristic prior. dual_signal remains a separate
+    # corroboration flag (see contexts_meta / diagnoses).
+    # Bands calibrated on bge-reranker-v2-m3 over 12 clinical queries
+    # (docs/rerank-calibration.md): noise/weak < 0.15, moderate 0.15-0.5,
+    # strong >= 0.5.
+    def _confidence(raw_score: float) -> str:
+        if raw_score >= 0.5:
             return "high"
-        if dual or rerank >= 0.5:
+        if raw_score >= 0.15:
             return "medium"
         return "low"
 
@@ -646,8 +646,9 @@ def ask(req: AskReq):
                       "doc_type": pool[i].get("doc_type", ""),
                       "chunk_idx": pool[i].get("chunk_idx", -1),
                       "dual_signal": pool[i].get("_dual_signal", False),
-                      "confidence": _confidence(pool[i].get("_dual_signal", False),
-                                                float(ranked[idx][1]))}
+                      "confidence": _confidence(
+                          float(ranked[idx][1]) - (DUAL_BOOST
+                              if pool[i].get("_dual_signal") else 0.0))}
                      for idx, (i, _) in enumerate(ranked)]
     rerank_scores = [s for _, s in ranked]
 
