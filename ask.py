@@ -75,15 +75,18 @@ def _sparse(text: str) -> models.SparseVector:
     """
     toks = re.findall(r"\w+", text.lower())
     c = Counter(toks)
-    idxs, vals = [], []
+    # Qdrant REQUIRES strictly-unique, ascending sparse indices. Two distinct
+    # tokens can hash to the same 64K bin, and repeated tokens produce the
+    # same index twice -> 'must be unique' upsert error on repetitive docs.
+    # Aggregate values per index and emit sorted-unique indices.
+    agg = {}
     for tok, f in c.items():
-        # Deterministic across processes (Python's built-in hash() is randomized
-        # per process via PYTHONHASHSEED, which silently breaks sparse search
-        # when ingest and query run in different processes).
-        idxs.append(int.from_bytes(hashlib.md5(tok.encode()).digest()[:4], "little") % _SPARSE_VOCAB)
-        vals.append(float(f))
-    return models.SparseVector(indices=idxs, values=vals)
-
+        idx = int.from_bytes(hashlib.md5(tok.encode()).digest()[:4],
+                                  "little") % _SPARSE_VOCAB
+        agg[idx] = agg.get(idx, 0.0) + float(f)
+    indices = sorted(agg.keys())
+    vals = [agg[i] for i in indices]
+    return models.SparseVector(indices=indices, values=vals)
 
 # ── Embedding ─────────────────────────────────────────────────────────────────
 def embed_query(text: str) -> list:

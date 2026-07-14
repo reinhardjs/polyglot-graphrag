@@ -11,12 +11,14 @@ domains:
   engineering:
     collection: engineering_chunks
     neo4j_label: Engineering
-    # TEMPLATE demonstration: a 2nd semantic corpus wired as a companion.
-    # The federated factory runs engineering_chunks + example_companion in
-    # parallel, tags each record with _signal, and the cross-signal dual-evidence
-    # boost now fires on a NON-clinical domain too. Remove this line to disable.
+    # REAL companion: the repo's docs/ tree (architecture, guides, roadmaps)
+    # ingested into the `engineering_docs` Qdrant collection. The federated
+    # factory runs engineering_chunks + the Engineering Neo4j graph + this
+    # companion in parallel, tags each with `_signal`, and the cross-signal
+    # dual-evidence boost fires when a candidate is confirmed by >=2 signals
+    # (e.g. a graph entity AND a docs-prose passage). Remove to disable.
     companions:
-      - example_companion
+      - engineering_docs
     entity_types:
     - Microservice
     - Database
@@ -307,6 +309,32 @@ domains:
       fields:
       - doc_id
       - doc_type
+  # ── REAL engineering companion (repo docs/) ───────────────────────
+  # The `engineering` domain's COMPANION: ingests the repo's `docs/` tree
+  # (architecture, guides, roadmaps) into the `engineering_docs` Qdrant
+  # collection. Distinct from the primary `engineering_chunks` (ingested by
+  # sync_docs.py) — chunked LARGER (1024) so narrative passages survive,
+  # giving semantic purchase on architecture/design questions the structured
+  # `Engineering` graph (Microservice/Bug/PR entities) can't directly answer.
+  # See domains/engineering_docs/ .
+  engineering_docs:
+    collection: engineering_docs
+    neo4j_label: null          # prose-only companion: no graph extraction
+    retrieval: dense_prose
+    entity_types: []
+    relation_types: []
+    pair_strategy: all_pairs
+    min_confidence: 0.0
+    chunking:
+      strategy: fixed
+      chunk_size: 1024
+      overlap: 128
+    metadata_schema:
+      fields:
+      - doc_id
+      - doc_type
+      - title
+      - source
   # ── PUBLIC DEFAULT ALIAS ───────────────────────────────────────────────
   # `default` is a STABLE public name whose strategy IS `engineering`. We do
   # NOT rename `engineering` (referenced in ~50 places: config, tests,

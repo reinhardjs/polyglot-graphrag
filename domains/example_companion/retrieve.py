@@ -69,7 +69,7 @@ def _qdrant_search(vec: list, query_text: str, top_k: int) -> list:
     return out
 
 
-# Minimal consistent-hash sparse leg mirroring ask._sparse (so sparse search
+# Consistent-hash sparse leg mirroring ask._sparse (so sparse search
 # is identical to how the corpus was ingested). Copy from your ingest step.
 import re
 import hashlib
@@ -80,14 +80,17 @@ _VOCAB = 65536
 
 
 def _sparse(text: str) -> _models.SparseVector:
+    # Qdrant requires unique, ascending sparse indices. Two tokens can hash to
+    # the same 64K bin and repeated tokens duplicate an index -> 'must be
+    # unique' upsert error. Aggregate values per index, emit sorted-unique.
     toks = re.findall(r"\w+", text.lower())
-    c = Counter(toks)
-    idxs, vals = [], []
-    for tok, f in c.items():
-        idxs.append(int.from_bytes(hashlib.md5(tok.encode()).digest()[:4],
-                                  "little") % _VOCAB)
-        vals.append(float(f))
-    return _models.SparseVector(indices=idxs, values=vals)
+    agg = {}
+    for tok, f in Counter(toks).items():
+        idx = int.from_bytes(hashlib.md5(tok.encode()).digest()[:4],
+                              "little") % _VOCAB
+        agg[idx] = agg.get(idx, 0.0) + float(f)
+    indices = sorted(agg.keys())
+    return _models.SparseVector(indices=indices, values=[agg[i] for i in indices])
 
 
 def retrieve(query: str, top_k: int = 5) -> list:

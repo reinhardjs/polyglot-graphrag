@@ -622,13 +622,14 @@ def ask(req: AskReq):
 
     contexts = [pool[i]["text"] for i, _ in ranked]
     contexts_meta = [{"doc_id": pool[i].get("doc_id", ""),
-                      "doc_type": pool[i].get("doc_type", ""),
-                      "chunk_idx": pool[i].get("chunk_idx", -1),
-                      "dual_signal": pool[i].get("_dual_signal", False),
-                      "confidence": _confidence(
-                          float(ranked[idx][1]) - (DUAL_BOOST
-                              if pool[i].get("_dual_signal") else 0.0))}
-                     for idx, (i, _) in enumerate(ranked)]
+                     "doc_type": pool[i].get("doc_type", ""),
+                     "chunk_idx": pool[i].get("chunk_idx", -1),
+                     "signal": pool[i].get("_signal", ""),
+                     "dual_signal": pool[i].get("_dual_signal", False),
+                     "confidence": _confidence(
+                         float(ranked[idx][1]) - (DUAL_BOOST
+                             if pool[i].get("_dual_signal") else 0.0))}
+                    for idx, (i, _) in enumerate(ranked)]
     rerank_scores = [s for _, s in ranked]
 
     # 5. Synthesize with E4B (separate process)

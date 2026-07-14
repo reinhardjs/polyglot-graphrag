@@ -41,13 +41,14 @@ def _sparse(text: str):
     matches how the corpus was ingested."""
     from qdrant_client import models
     toks = re.findall(r"\w+", text.lower())
-    c = Counter(toks)
-    idxs, vals = [], []
-    for tok, f in c.items():
-        idxs.append(int.from_bytes(hashlib.md5(tok.encode()).digest()[:4],
-                                  "little") % 65536)
-        vals.append(float(f))
-    return models.SparseVector(indices=idxs, values=vals)
+    # Qdrant requires unique, ascending sparse indices (see ask._sparse).
+    agg = {}
+    for tok, f in Counter(toks).items():
+        idx = int.from_bytes(hashlib.md5(tok.encode()).digest()[:4],
+                              "little") % 65536
+        agg[idx] = agg.get(idx, 0.0) + float(f)
+    indices = sorted(agg.keys())
+    return models.SparseVector(indices=indices, values=[agg[i] for i in indices])
 
 
 def _sample_docs():
