@@ -307,9 +307,22 @@ domains:
       fields:
       - doc_id
       - doc_type
+  # ── PUBLIC DEFAULT ALIAS ───────────────────────────────────────────────
+  # `default` is a STABLE public name whose strategy IS `engineering`. We do
+  # NOT rename `engineering` (referenced in ~50 places: config, tests,
+  # hybrid_extraction, sync, etc.). Instead this alias lets a non-technical
+  # user say `domain: default` (or send no domain at all — see default_domain
+  # below) and transparently get the engineering retrieval strategy.
+  # Resolve via domain_loader._resolve_alias() inside get_domain().
+  default:
+    alias: engineering
+    display_name: "Default (Engineering)"
+    description: >-
+      The out-of-the-box domain. Uses the engineering knowledge graph
+      (engineering_chunks + Engineering Neo4j label) with the standard
+      dense+sparse hybrid retrieval. This is the strategy applied when no
+      domain is specified.
 # Default domain for unqualified `/ask` calls (no `domain` field sent).
-# Set to `example_companion` so a NON-technical user gets a ZERO-SETUP,
-# auto-seeded demo out of the box (the daemon ingests it on startup via
-# config.SEED_ON_STARTUP). Power users can switch this back to `engineering`
-# (or send `domain:` explicitly) to target a real ingested corpus.
-default_domain: example_companion
+# Now `default` (the alias above) → resolves to the `engineering` strategy.
+# A non-technical user querying AS-IS gets engineering retrieval with zero setup.
+default_domain: default

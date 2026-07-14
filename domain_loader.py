@@ -77,6 +77,12 @@ def _load_file() -> Dict[str, Any]:
     if not isinstance(domains, dict) or not domains:
         raise ValueError("domain_config.yaml 'domains' must be a non-empty mapping")
     for name, cfg in domains.items():
+        # An *alias* block ({alias: <target>}) is NOT a real domain — it
+        # just points a public name at a concrete domain. Skip schema validation.
+        if isinstance(cfg, dict) and "alias" in cfg:
+            if not isinstance(cfg["alias"], str) or not cfg["alias"]:
+                raise ValueError(f"domain '{name}' alias must be a non-empty string")
+            continue
         _validate_domain(name, cfg)
     return {
         "domains": domains,
@@ -106,6 +112,22 @@ def get_top_level(key: str) -> Dict[str, Any]:
         return _TOP_LEVEL.get(key, {})
 
 
+def _resolve_alias(name: str) -> str:
+    """Resolve a domain *alias* to its concrete target name.
+
+    An alias is a `domains:<name>:` block with an `alias:` key (e.g.
+    `default: {alias: engineering}`). This lets us expose a stable public
+    name (`default`) whose underlying strategy is another domain, WITHOUT
+    renaming the concrete domain (which is referenced in many places).
+    Returns `name` unchanged if it is not an alias.
+    """
+    with _LOCK:
+        cfg = _DOMAINS.get(name)
+    if isinstance(cfg, dict) and isinstance(cfg.get("alias"), str):
+        return cfg["alias"]
+    return name
+
+
 def _ensure_loaded() -> None:
     with _LOCK:
         if not _DOMAINS:
@@ -116,17 +138,25 @@ def _ensure_loaded() -> None:
 
 
 def get_domain(name: str | None = None) -> Dict[str, Any]:
-    """Return the domain config dict for `name` (or default if None)."""
+    """Return the domain config dict for `name` (or default if None).
+
+    `name` may be an *alias* (e.g. `default` → `engineering`); it is
+    resolved transparently via `_resolve_alias`. The returned dict is a
+    deep copy of the concrete domain so callers can mutate it safely.
+    """
     _ensure_loaded()
+    resolved = _resolve_alias(name or _DEFAULT_DOMAIN)
     with _LOCK:
-        key = name or _DEFAULT_DOMAIN
+        key = resolved
         if key not in _DOMAINS:
             # Fall back to default if requested domain unknown
-            if key is not None and key != _DEFAULT_DOMAIN:
-                if _DEFAULT_DOMAIN in _DOMAINS:
-                    return _DOMAINS[_DEFAULT_DOMAIN]
-            raise KeyError(f"unknown domain '{key}' (available: {list_domains()})")
-        return _DOMAINS[key]
+            if resolved != _DEFAULT_DOMAIN and _DEFAULT_DOMAIN in _DOMAINS:
+                key = _DEFAULT_DOMAIN
+            else:
+                raise KeyError(
+                    f"unknown domain '{name}' (available: {list_domains()})")
+        import copy
+        return copy.deepcopy(_DOMAINS[key])
 
 
 def list_domains() -> List[str]:
@@ -137,7 +167,11 @@ def list_domains() -> List[str]:
 
 
 def get_default_domain() -> str:
-    """Return the configured default domain name."""
+    """Return the configured default domain name (may be an alias, e.g. `default`).
+
+    Callers that need the actual strategy should pass the returned name to
+    `get_domain()`, which resolves the alias transparently.
+    """
     _ensure_loaded()
     with _LOCK:
         return _DEFAULT_DOMAIN
