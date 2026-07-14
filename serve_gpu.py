@@ -1377,33 +1377,38 @@ def _write_demo_graph():
             C.NEO4J_URI, auth=(C.NEO4J_USER, C.NEO4J_PASSWORD))
         src = ["bug-204.md", "pr-482.md", "adr-021.md", "runbook-checkout.md"]
         # (id, type, prof) — prof mirrors real extracted entities so the
-        # subgraph output (which only emits nodes with a `prof`) includes them.
+        # subgraph output (which only emits nodes with a `profile`) includes
+        # them. IDs are NAMESPACED with `demo:` so MERGE can never clobber a
+        # real extracted entity (e.g. a real `bob`/`PostgreSQL` node from the
+        # user's own docs). Keyword entry still matches via substring
+        # (toLower('demo:BUG-204') CONTAINS 'bug').
+        D = "demo:"
         nodes = [
-            ("BUG-204", "Incident",
+            (D + "BUG-204", "Incident",
              "BUG-204: checkout service cascade timeout during peak traffic; "
              "reported by bob; fixed by PR-482."),
-            ("bob", "Person",
+            (D + "bob", "Person",
              "bob: engineer who reported BUG-204 and is on-call for the "
              "checkout service."),
-            ("PR-482", "PR",
+            (D + "PR-482", "PR",
              "PR-482: makes the payments call async with a bounded timeout "
              "budget; fixes BUG-204."),
-            ("ADR-021", "ADR",
+            (D + "ADR-021", "ADR",
              "ADR-021: adopts PostgreSQL 16 as the primary transactional "
              "store for the checkout service."),
-            ("PostgreSQL", "Technology",
+            (D + "PostgreSQL", "Technology",
              "PostgreSQL 16: primary transactional store for the checkout "
              "service (per ADR-021)."),
-            ("checkout service", "Service",
+            (D + "checkout service", "Service",
              "checkout service: owns the orders/payments schemas; uses "
              "PostgreSQL; calls the payments service."),
         ]
         rels = [
-            ("BUG-204", "Incident", "bob", "Person", "REPORTED_BY"),
-            ("PR-482", "PR", "BUG-204", "Incident", "FIXES"),
-            ("ADR-021", "ADR", "PostgreSQL", "Technology", "DECIDES"),
-            ("checkout service", "Service", "PostgreSQL", "Technology", "USES"),
-            ("bob", "Person", "BUG-204", "Incident", "REPORTED"),
+            (D + "BUG-204", "Incident", D + "bob", "Person", "REPORTED_BY"),
+            (D + "PR-482", "PR", D + "BUG-204", "Incident", "FIXES"),
+            (D + "ADR-021", "ADR", D + "PostgreSQL", "Technology", "DECIDES"),
+            (D + "checkout service", "Service", D + "PostgreSQL", "Technology", "USES"),
+            (D + "bob", "Person", D + "BUG-204", "Incident", "REPORTED"),
         ]
         with driver.session() as s:
             for nid, ntype, nprof in nodes:
