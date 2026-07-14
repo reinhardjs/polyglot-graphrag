@@ -24,7 +24,7 @@ def build_synthesis_prompt(query: str, contexts: list,
     # SNOMED clinical diagnosis synthesis: frame the candidates as a ranked
     # differential. The query may be a raw JSON temporal presentation, so we
     # render it as a readable symptom timeline for the model.
-    if profile and profile.get("retrieval") == "snomed_traversal":
+    if profile and profile.get("retrieval") == "snomed_term_match":
         readable = query
         try:
             import json as _j
@@ -37,18 +37,25 @@ def build_synthesis_prompt(query: str, contexts: list,
         except Exception:
             pass
         return (
-            "You are a clinical decision-support assistant using SNOMED CT. "
-            "Below are the top diagnosis candidates retrieved from the SNOMED "
-            "graph based on the patient's reported symptoms (each candidate "
-            "lists the SNOMED concept and the supporting findings that matched). "
-            "Produce a RANKED DIFFERENTIAL DIAGNOSIS: list the most likely "
-            "disorders first, cite the candidate numbers, and explain WHY each "
-            "is supported by the symptom timeline. Note if the presentation "
-            "strongly suggests a systemic illness (symptoms spanning multiple "
-            "days). Do NOT invent diagnoses beyond the candidates. If the "
-            "candidates do not clearly explain the symptoms, say so.\n\n"
+            "You are a clinical decision-support assistant using SNOMED CT "
+            "terminology. Below are SNOMED concepts whose names matched the "
+            "patient's reported symptom keywords (NOT a differential diagnosis). "
+            "Each candidate shows the IDF (Inverse Document Frequency) weight for "
+            "each matched keyword — higher IDF means the keyword is rarer and more "
+            "discriminative. The total score is the sum of IDF weights across matched "
+            "keywords, plus edge-signal boosts where applicable.\n\n"
+            "IMPORTANT: These are FINDINGS THAT MATCH SYMPTOM KEYWORDS IN DISORDER "
+            "NAMES, not definitive diagnoses. Be honest about this: the most likely "
+            "explanation is based on keyword overlap, not clinical expertise. "
+            "For each candidate, note which specific terms matched and with what "
+            "confidence (IDF weight). If the presentation spans multiple days and "
+            "several HIV-associated or systemic disorders appear, suggest that a "
+            "systemic or immunodeficiency-related process may be the underlying "
+            "cause — but frame this as a hypothesis, not a diagnosis.\n\n"
+            "Do NOT invent findings beyond the candidates. If candidates do not "
+            "clearly explain the symptoms, say so.\n\n"
             f"PATIENT SYMPTOMS:\n{readable}\n\n"
-            f"CANDIDATE DIAGNOSES (from SNOMED CT):\n{ctx}"
+            f"CANDIDATE DIAGNOSES (from SNOMED CT term matching):\n{ctx}"
         )[: C.MAX_TOKENS_CONTEXT * 4]
     if profile and profile.get("synthesis"):
         syn = profile["synthesis"]

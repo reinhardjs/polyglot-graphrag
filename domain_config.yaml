@@ -226,20 +226,21 @@ domains:
       - doi
   snomed:
     # SNOMED CT is a terminology graph, not a prose corpus. Retrieval is by
-    # Cypher traversal (symptom term -> concept -> reverse REL_116680003 to
-    # candidate disorders), NOT Qdrant vector search. No collection is used.
+    # symptom keyword term-matching against SnomedDescription.term with IDF
+    # weighting (snomed_diagnose.py), NOT Cypher IS-A traversal.
     collection: null
     neo4j_label: SnomedConcept
-    retrieval: snomed_traversal
+    retrieval: snomed_term_match
     entity_types:
     - Disorder
     - Finding
     - Symptom
     - Morphology
     relation_types:
-    - REL_116680003          # Associated finding (the diagnosis edge)
-    - REL_363698007          # Finding site
-    - REL_263502005          # Associated morphology
+    - REL_246090004          # Associated finding (the diagnosis edge, sparse)
+    - REL_47429007           # Associated with
+    - REL_363702006          # Has definitional manifestation
+    - REL_116680003          # IS-A hierarchy (used for taxonomy, not retrieval)
     pair_strategy: all_pairs
     min_confidence: 0.0
     chunking:

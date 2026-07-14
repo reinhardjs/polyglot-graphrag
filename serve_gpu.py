@@ -458,7 +458,7 @@ def ask(req: AskReq):
     # Initialise so both branches leave these bound (Pyright-friendly).
     q_res, g_res, qdrant_hits, graph_hits, path = [], [], 0, 0, "none"
     if req.domain == "snomed":
-        import snomed_retrieve as SR
+        import snomed_diagnose as SR
         import json as _json
         # Detect a temporal/graduated presentation: JSON {"day1":[...],...}
         presentation = None
