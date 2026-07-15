@@ -17,7 +17,7 @@ answer with E2B (the same model that performs extraction).
 
 ```json
 { "query": "who reported BUG-204?",
-  "domain": "engineering",        // optional; None → default_domain
+  "domain": "enterprise",       // optional; None → default_domain (enterprise)
   "top_k": 5,                     // default 5
   "synthesize": false,            // false → return raw contexts only (no synthesis)
   "skip_cache": false,
@@ -29,7 +29,7 @@ answer with E2B (the same model that performs extraction).
 ```
 ```bash
 curl -s -X POST localhost:8000/ask -H 'Content-Type: application/json' \
-  -d '{"query":"who reported BUG-204?","domain":"engineering","synthesize":false}'
+  -d '{"query":"who reported BUG-204?","domain":"enterprise","synthesize":false}'
 ```
 Response includes `contexts[]`, `contexts_meta[]` (each tagged with `_signal`,
 `doc_id`, `doc_type`, `chunk_idx`, `dual_signal`), `path`, `n_contexts`, and
@@ -41,19 +41,33 @@ them in `chunk_idx` order. `doc_id` is a **query param** (doc_ids may contain
 slashes). See `GET /doc` example below.
 
 ```bash
-curl "localhost:8000/doc/engineering_docs?doc_id=docs:e707efd2b0b0&include_chunks=false"
+curl "localhost:8000/doc/enterprise?doc_id=docs:e707efd2b0b0&include_chunks=false"
 # → {collection, doc_id, source, chunk_count, char_count, text, chunks[]}
 ```
 
 ### `POST /embed_query` — embed a query string
 Domain-agnostic query embedding (applies alias modulation first).
 
+
 ```json
-{ "text": "total VRAM budget on the RTX 3060", "domain": "engineering" }
+{ "text": "total VRAM budget on the RTX 3060", "domain": "enterprise" }
 ```
 ```bash
 curl -s -X POST localhost:8000/embed_query -H 'Content-Type: application/json' \
   -d '{"text":"what is the VRAM budget?"}'   # → {"vector":[...], "text_used": "..."}
+```
+
+### `POST /v1/embeddings` — OpenAI-compatible embeddings (Jina)
+Exposes the Jina embedding model over an OpenAI-compatible `/v1/embeddings`
+endpoint (used by downstream tools such as RAGAS semantic evaluation).
+Returns OpenAI-shaped vectors.
+```json
+{ "input": "text to embed", "model": "jina" }
+```
+```bash
+curl -s -X POST localhost:8000/v1/embeddings -H 'Content-Type: application/json' \
+  -d '{"input":"what is the VRAM budget?","model":"jina"}'
+# → {"object":"list","data":[{"embedding":[...],"index":0}],"model":"jina"}
 ```
 
 ### `POST /rerank` — rerank candidates with BGE
@@ -91,13 +105,13 @@ Neo4j. Returns a `task_id`; poll `GET /ingest/status/{task_id}`. If
   "author": "unknown",
   "extract_graph": true,
   "if_checksum": null,          // pass stored checksum to skip-if-unchanged
-  "collection": null,          // None → domain default (engineering_chunks)
-  "domain": "engineering",
+  "collection": null,          // None → domain default (enterprise)
+  "domain": "enterprise",
   "metadata": null }            // domain metadata schema
 ```
 ```bash
 TID=$(curl -s -X POST localhost:8000/ingest -H 'Content-Type: application/json' \
-  -d '{"doc_id":"x","text":"BUG-204 impacted checkout","domain":"engineering"}' \
+  -d '{"doc_id":"x","text":"BUG-204 impacted checkout","domain":"enterprise"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['task_id'])")
 curl -s localhost:8000/ingest/status/$TID
 ```
@@ -119,19 +133,19 @@ curl -s -X DELETE "localhost:8000/ingest/eng/your-doc.md"
 
 ### `POST /ingest_domain` — trigger a domain-specific ingestor
 Runs `domains/<domain>/ingest.py::ingest(...)` in a background thread (e.g. to
-seed `clinical_prose`, `engineering_docs`, `example_companion`).
+seed `clinical_prose`, `legal`, or `enterprise` via `ingest_corpus_docs.py`).
 ```json
-{ "domain": "engineering_docs", "limit": 500, "seed": [ "optional doc list" ] }
+{ "domain": "legal", "limit": 500, "seed": [ "optional doc list" ] }
 ```
 ```bash
 curl -s -X POST localhost:8000/ingest_domain -H 'Content-Type: application/json' \
-  -d '{"domain":"engineering_docs"}'
+  -d '{"domain":"legal"}'
 ```
 
 ### `POST /extract_graph` — extract graph only (no chunk embed)
 GLiNER zero-shot NER + co-occurrence edges (E2B-free fallback path).
 ```json
-{ "text": "BUG-204 impacted checkout", "domain": "engineering", "extract_graph": true }
+{ "text": "BUG-204 impacted checkout", "domain": "enterprise", "extract_graph": true }
 ```
 
 ### `POST /embed_late` — late-chunking embed (ingest-time)
@@ -186,10 +200,19 @@ curl localhost:8000/domains
 Entity/relation types, pair strategy, min_confidence, collection, neo4j_label
 per domain (from `domain_config.yaml`).
 
+### `POST /reload` — reload `domain_config.yaml` without restart
+Plain alias for `/admin/reload` (easier to remember). After editing
+`domain_config.yaml`, call this so profile/collection/default-domain changes
+take effect without restarting the daemon.
+```bash
+curl -s -X POST localhost:8000/reload
+# → {"status":"reloaded","domains":[...],"default_domain":"enterprise"}
+```
+
 ### `POST /admin/reload` — reload `domain_config.yaml` without restart
 ```bash
 curl -s -X POST localhost:8000/admin/reload
-# → {"status":"reloaded","domains":[...],"default_domain":"default"}
+# → {"status":"reloaded","domains":[...],"default_domain":"enterprise"}
 ```
 
 ## Differentials (SNOMED / clinical, optional)
@@ -205,13 +228,14 @@ curl -s -X DELETE "localhost:8000/differential?query=<query>"
 
 ---
 
-## Endpoint summary (22 routes)
+## Endpoint summary (24 routes)
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | POST | `/ask` | Hybrid retrieval (+ E2B synthesis) |
 | GET | `/doc/{collection}` | Reconstruct full doc from chunks by `doc_id` |
 | POST | `/embed_query` | Embed a query string |
+| POST | `/v1/embeddings` | OpenAI-compatible Jina embeddings (RAGAS etc.) |
 | POST | `/rerank` | BGE rerank over candidates |
 | POST | `/extract_entities` | GLiNER zero-shot NER |
 | POST | `/ingest` | Ingest one document (async) |
@@ -228,6 +252,7 @@ curl -s -X DELETE "localhost:8000/differential?query=<query>"
 | GET | `/profiles` | Domain profiles |
 | GET | `/domains` | Per-domain runnable/ingestable status |
 | GET | `/admin/domains` | Domain schema summary |
+| POST | `/reload` | Reload `domain_config.yaml` (no restart) |
 | POST | `/admin/reload` | Reload `domain_config.yaml` |
 | GET | `/differentials` | List persisted differentials |
 | DELETE | `/differential` | Delete a differential |

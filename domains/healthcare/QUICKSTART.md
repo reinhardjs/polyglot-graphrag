@@ -1,6 +1,6 @@
 # Healthcare (SNOMED) — Quick Start
 
-This is the default clinical domain. It answers symptom-based differential
+This is a clinical domain (a friendly public alias for `snomed`). It answers symptom-based differential
 diagnosis questions by combining the SNOMED CT terminology graph (512k
 concepts) with a free-text clinical-prose companion corpus. `healthcare` is
 an alias for `snomed`; both resolve to the same hybrid retriever.

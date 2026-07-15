@@ -67,7 +67,7 @@ bash run.sh ask "what is the ask pipeline and how does it fuse Qdrant and Neo4j"
 (Idempotent: it only seeds when the collection is empty, and skips docs that
 already exist. Point it at your own corpus anytime with `ingest_corpus_docs.py`.)
 
-Raw curl equivalents (omit `domain` to use the `default` alias → `snomed`):
+Raw curl equivalents (omit `domain` to use the default `enterprise` domain):
 ```bash
 curl -s -X POST 127.0.0.1:8000/ask -H 'Content-Type: application/json' \
   -d '{"query":"chest pain and shortness of breath","domain":"snomed","synthesize":true}'

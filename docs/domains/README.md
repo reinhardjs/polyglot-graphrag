@@ -13,14 +13,14 @@ read at runtime by `config.load_domain_profile()` and `domain_loader.get_domain(
 
 ```yaml
 domains:
-  engineering:                       # domain key used by `domain=` on API calls
-    collection: engineering_chunks   # PRIMARY Qdrant corpus (real docs)
-    neo4j_label: Engineering         # :Entity:Engineering graph label
+  enterprise:                        # domain key used by `domain=` on API calls
+    collection: enterprise           # PRIMARY Qdrant corpus (real docs)
+    neo4j_label: EnterpriseDoc       # :Entity:EnterpriseDoc graph label
     chunking:
-      strategy: sentence             # sentence | paragraph | section | fixed
+      strategy: fixed                # sentence | paragraph | section | fixed
       chunk_size: 512
       overlap: 64
-    companions: [engineering_docs]   # SECONDARY corpora (searched in parallel)
+    companions: []                   # SECONDARY corpora (searched in parallel)
     # entry_strategy, entity_types, relation_types, synthesis, metadata_schema ...
 ```
 
@@ -30,13 +30,13 @@ Pass `domain` on any API call. The profile drives collection routing, chunking,
 extraction prompt, synthesis tone, graph labels, and entry strategy.
 
 ```bash
-# Ingest into the engineering domain (routes to engineering_chunks)
+# Ingest into the enterprise domain (routes to enterprise)
 curl -s -X POST http://127.0.0.1:8000/ingest -H "Content-Type: application/json" \
-  -d '{"text":"...","doc_id":"enc-1","domain":"engineering"}'
+  -d '{"text":"...","doc_id":"enc-1","domain":"enterprise"}'
 
-# Query the engineering domain (primary graph + companion, fused)
+# Query the enterprise domain (primary graph + companion, fused)
 curl -s -X POST http://127.0.0.1:8000/ask -H "Content-Type: application/json" \
-  -d '{"query":"who reported BUG-204?","domain":"engineering","synthesize":true}'
+  -d '{"query":"who reported BUG-204?","domain":"enterprise","synthesize":true}'
 ```
 
 If `domain` is omitted, the system defaults to `enterprise` (the primary,
@@ -46,14 +46,14 @@ is NOT the implicit default (its data is confidential / access-controlled).
 
 ## Primary corpus vs companion (secondary) corpus
 
-* **Primary corpus** — the domain's own collection (`engineering_chunks`) plus
+* **Primary corpus** — the domain's own collection (`enterprise`) plus
   its Neo4j graph. This is the domain's main knowledge. Ingested via
   `sync_docs.py` (git-style) or `POST /ingest`.
 * **Companion (secondary) corpus** — an extra collection attached to a domain,
   declared via `companions: [name]`. It fills gaps the primary graph can't see
   (prose/design knowledge). Ingested via `POST /ingest_domain {"domain":"name"}`.
-  Example: `engineering_docs` (this repo's `docs/`) is the companion of
-  `engineering`; `clinical_prose` is the companion of `snomed`.
+  Example: `legal` is a companion of `enterprise`; `clinical_prose` is the
+  companion of `snomed`.
 
 At query time, `/ask` runs the primary retriever AND every companion retriever
 in parallel, tags each hit with `_signal` (= domain or companion name), then

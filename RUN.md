@@ -214,7 +214,7 @@ cp /path/to/your-real-doc.md mydocs/eng/
 ```
 
 - `doc_id` = relative path (`eng/your-real-doc.md`); `domain` inferred from the
-  path (`eng/`→engineering, `journal/` or `*.pdf`→journal, `legal/`→legal).
+  path (`eng/`→enterprise, `journal/` or `*.pdf`→journal, `legal/`→legal).
 - Re-running skips unchanged files; edits are re-ingested; deleted files are
   removed from BOTH stores. State lives in `mydocs/.sync_state.json`.
 - **PDFs are auto-extracted** with `pdftotext` — just drop them in the folder.
