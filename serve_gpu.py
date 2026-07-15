@@ -449,10 +449,12 @@ def ask(req: AskReq):
                       if not isinstance(domain_loader._DOMAINS.get(d), dict)
                       or "alias" not in domain_loader._DOMAINS.get(d, {})]
         if concrete not in configured:
+            _available = domain_loader.list_domains()
             return {
                 "error": "unknown_domain",
-                "available": domain_loader.list_domains(),
-                "degraded": False,
+                "available": _available,
+                "degraded": True,
+                "notice": f"unknown domain '{req.domain}'; available: {', '.join(_available)}",
                 "query": req.query,
                 "n_contexts": 0,
                 "contexts": [],
@@ -523,13 +525,16 @@ def ask(req: AskReq):
                         "answer": p.get("answer", ""),
                         "diagnoses": p.get("diagnoses", []),
                         "cache_hit": True,
+                        "notice": "",
                         "request_id": _req_id,
                     }
         except Exception:
             pass
 
     # 2b. CRAG mode (Phase 3): adaptive routing + corrective retrieval.
-    if req.crag:
+    # CRAG is gated behind config.ENABLE_CRAG (default false).
+    # Enable to opt into experimental query rewriting + corrective retrieval.
+    if C.ENABLE_CRAG and getattr(req, "crag", False):
         import crag_pipeline as CR
         result = CR.run_crag(req.query, domain=req.domain,
                              synthesize=req.synthesize)
@@ -555,6 +560,7 @@ def ask(req: AskReq):
             "sources": {},
             "contexts_meta": [],
             "answer": result.get("answer") or "",
+            "notice": "",
         }
     # 2b-. Federated retrieval assembly (domain-independent).
     # The Mediator no longer hardcodes `if domain == "snomed"`. Composition is
@@ -747,7 +753,7 @@ def ask(req: AskReq):
             "qdrant_hits": qdrant_hits, "graph_hits": graph_hits,
             "n_contexts": 0, "contexts": [], "contexts_numbered": [],
             "contexts_meta": [], "sources": [], "rerank_scores": [],
-            "answer": "", "cache_hit": False,
+            "answer": "", "cache_hit": False, "notice": "",
         }
 
     # 4b. Conditional rerank (P1.8): when synthesize=false and pool is small,
@@ -892,6 +898,17 @@ def ask(req: AskReq):
             if req.synthesize or _force_differential:
                 answer = rag.synthesize(req.query, contexts, profile)
 
+    # Compose human-readable notice for degraded responses.
+    _notice_parts = []
+    if _failed:
+        _dom_list = ", ".join(_failed)
+        _notice_parts.append(
+            f"domain(s) '{_dom_list}' failed; results exclude {'it' if len(_failed)==1 else 'them'}")
+    if degraded and answer == "" and (req.synthesize or _force_differential):
+        _notice_parts.append(
+            "synthesis unavailable (E4B unreachable); returned retrieval-only results")
+    _notice = "; ".join(_notice_parts) if _notice_parts else ""
+
     result = {
         "query": req.query,
         "source": "llm",
@@ -911,6 +928,7 @@ def ask(req: AskReq):
         "cache_hit": False,
         "degraded": degraded,
         "failed_domains": _failed,
+        "notice": _notice,
         "request_id": _req_id,
     }
 

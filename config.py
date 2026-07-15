@@ -50,6 +50,12 @@ COLL_CHUNKS = "clinical_prose"
 COLL_CACHE  = "query_cache"
 CACHE_THRESHOLD = 0.95   # cosine similarity above which we return cached answer
 
+# ── Feature Gates ─────────────────────────────────────────────────────────────
+ENABLE_CRAG = False     # Phase 3: Corrective RAG + adaptive routing (experimental)
+                        # When True, the `crag` field is exposed on /ask AskReq.
+                        # Kept off by default to preserve the v1.0 explicit-
+                        # retrieval-only contract. Toggle on for v2.0 CRAG testing.
+
 # ── Multi-Domain Collections ─────────────────────────────────────────────────
 # Each domain gets its own Qdrant collection (namespace isolation, zero
 # overhead). After the engineering corpus purge, the only live Qdrant
