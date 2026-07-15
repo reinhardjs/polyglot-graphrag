@@ -61,17 +61,22 @@ host drop that line and use `torch==2.3.1`. `gliner`, `spacy`, `watchdog`
 (for `--watch`), `fastapi`/`uvicorn` are all required at runtime — they were
 previously undocumented.
 
-**You must download two model files yourself** (they are not in the repo —
-too large, and license/distribution constraints):
+**You must download one required model file yourself** (it is not in the repo —
+too large, and license/distribution constraints). An optional second
+model (E4B) for deeper answers is described below.
 
-1. **Gemma 4 E2B** (extraction) — `gemma-4-E2B-it-QAT-Q4_0.gguf`
+1. **Gemma 4 E2B** (extraction + synthesis) — `gemma-4-E2B-it-QAT-Q4_0.gguf`
    - Source: HuggingFace `lmstudio-community/gemma-4-E2B-it-QAT-GGUF`
    - Place at: `<project-root>/models/gemma-4-E2B-it-QAT-Q4_0.gguf`
    - **Required launch flag:** `--reasoning off`. Gemma-4 routes answers to
      `reasoning_content` (the `<|channel>thought` token) by default, leaving
      `message.content` EMPTY — extraction would get nothing. `run.sh` sets this
      automatically.
-2. **Gemma 4 E4B** (answer synthesis, *optional*) — `gemma-4-E4B-it-QAT-Q4_0.gguf`
+2. **Gemma 4 E4B** (answer synthesis, *optional / RETIRED*) — `gemma-4-E4B-it-QAT-Q4_0.gguf`
+   - Status: **retired since v1.0.2** — synthesis runs on E2B (:8082) by
+     default (~2.2s p95). E4B is opt-in only via `SYNTHESIS_LLM_*` env
+     override (deeper answers but ~22s on the 12 GB card). Not required
+     for normal operation; only place the GGUF if you intend to opt in.
    - Source: HuggingFace `lmstudio-community/gemma-4-E4B-it-QAT-GGUF`
    - Place at: `<project-root>/models/gemma-4-E4B-it-QAT-Q4_0.gguf`
 

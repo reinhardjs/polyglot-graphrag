@@ -8,7 +8,7 @@ Computes the four core RAG metrics over a domain-specific "golden dataset":
 
 Two backends (auto-selected):
   1. ragas  — if `ragas` + `datasets` are installed AND EVAL_USE_RAGAS=1, use the
-              real ragas framework wired to the LOCAL E4B LLM + Jina embeddings.
+              real ragas framework wired to the LOCAL E2B LLM + Jina embeddings.
   2. local  — otherwise, built-in implementations that score with the local Jina
               embed daemon (cosine similarity) + lexical coverage. Zero cloud,
               zero heavy deps. Numbers are directional and reproducible.
@@ -190,7 +190,7 @@ def evaluate_ragas(rows: List[Dict]) -> Dict:
         "contexts": r.get("contexts", []) or [],
         "ground_truth": r.get("ground_truth", ""),
     } for r in rows])
-    # Wire ragas to local LLM + embeddings (OpenAI-compatible E4B + Jina daemon).
+    # Wire ragas to local LLM + embeddings (OpenAI-compatible E2B + Jina daemon).
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
     llm = ChatOpenAI(model=C.SYNTHESIS_LLM_MODEL,
                      base_url=C.SYNTHESIS_LLM_BASE_URL,

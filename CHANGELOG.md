@@ -6,6 +6,15 @@ stable release; see `VERSIONING.md` for the exact rules.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com).
 
+> **Current release: `v1.0.0`** (git tag `v1.0.0`). The internal
+> increments `1.0.1`–`1.0.3` below were pre-release refinements that were
+> folded into the `v1.0.0` tag rather than shipped as separate versions.
+> The substantive changes from those increments — **E4B retired (E2B
+> serves extraction + synthesis)**, **BGE reranker moved to GPU**,
+> **answer-quality release gate (12/12 checks)**, and the **git-ignored
+> `golden/` question drop-zone** — are all part of the shipped `v1.0.0`.
+> See the `[1.0.1]`–`[1.0.3]` entries for detail.
+
 ## [1.0.3] — 2026-07-15 (E4B retired, E2B-only + systemd)
 
 ### Changed

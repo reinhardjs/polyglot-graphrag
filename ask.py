@@ -11,7 +11,7 @@ Flow:
   2. PARALLEL: Thread-1 Qdrant dense+sparse hybrid top-10
             + Thread-2 Neo4j k-hop subgraph (vector-based entry)
   3. Pool + rerank (daemon /rerank) -> keep top 5
-  4. Synthesize with Gemma 4 E4B (streamed), context capped to MAX_TOKENS_CONTEXT
+  4. Synthesize with Gemma 4 E2B (streamed), context capped to MAX_TOKENS_CONTEXT
 """
 import os
 os.environ["HF_HOME"] = os.environ.get(
@@ -415,11 +415,11 @@ def synthesize(query: str, contexts: list, profile: dict = None) -> str:
         max_tokens=C.SYNTH_MAX_TOKENS_OUT,
         stream=True,
     )
-    reasoning_parts = []  # E4B chain-of-thought (debug only)
+    reasoning_parts = []  # model chain-of-thought (debug only)
     answer_parts = []     # clean final answer
     for chunk in stream:
         delta = chunk.choices[0].delta
-        # E4B puts reasoning in reasoning_content, clean answer in content
+        # the model puts reasoning in reasoning_content, clean answer in content
         r = getattr(delta, "reasoning_content", None) or ""
         c = getattr(delta, "content", None) or ""
         if r:

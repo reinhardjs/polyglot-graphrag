@@ -34,15 +34,21 @@ docker compose up -d
 
 # 3) Start the models + daemon. This needs TWO GGUF files you download
 #    yourself (see below). If you already have them in ./models, just run:
-bash run.sh serve        # Gemma E2B (:8082) + E4B (:8084) + daemon (:8000)
-bash run.sh health       # confirm all three are up
+bash run.sh serve        # Gemma E2B (:8082, extraction+synthesis) + daemon (:8000)
+bash run.sh health       # confirm both are up
 ```
 
-**You must download two model files** (not in the repo — too large / license):
-- `gemma-4-E2B-it-QAT-Q4_0.gguf` → extraction  (HuggingFace `lmstudio-community/gemma-4-E2B-it-QAT-GGUF`)
-- `gemma-4-E4B-it-QAT-Q4_0.gguf` → answer writing (HuggingFace `lmstudio-community/gemma-4-E4B-it-QAT-GGUF`)
+**You must download one model file** (not in the repo — too large / license):
+- `gemma-4-E2B-it-QAT-Q4_0.gguf` → extraction + answer synthesis (HuggingFace `lmstudio-community/gemma-4-E2B-it-QAT-GGUF`)
 
-Put both in `<project-root>/models/`. `run.sh` finds them automatically.
+Put it in `<project-root>/models/`. `run.sh` finds it automatically.
+
+> **Optional deeper answers:** the larger `gemma-4-E4B-it-QAT-Q4_0.gguf`
+> (HuggingFace `lmstudio-community/gemma-4-E4B-it-QAT-GGUF`) may be
+> placed in `models/` and enabled at runtime via the `SYNTHESIS_LLM_*`
+> environment variables for longer, deeper answers (~22s p95 on the
+> 12 GB card). It is **not required** — E2B handles synthesis by default
+> at ~2.2s p95.
 
 **Ask a question immediately** (a demo corpus is auto-seeded on startup):
 
