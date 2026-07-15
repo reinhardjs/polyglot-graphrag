@@ -4,6 +4,14 @@ Drop your quality-evaluation question sets in **this directory**. They are
 **git-ignored** (`*.json` here is in `.gitignore`) so confidential
 corpus content never gets committed to the repo.
 
+## Default demo golden (shipped)
+
+`self-docs-demo.json` is a **demo** golden built from the auto-seeded
+self-docs corpus (via `build_oragolden.py --out golden/self-docs-demo.json`).
+The release gate uses it by DEFAULT, so a fresh clone (which boots into the
+self-docs-only `enterprise` collection) passes 12/12 out of the box with no
+confidential data. It is git-ignored like all `*.json` here.
+
 ## Why this dir
 
 `evaluate_pipeline.py` and the release-gate's **Check 12 (Answer
@@ -57,8 +65,11 @@ Example: `GOLDEN_FILE=my-corpus.json python scripts/release-gate.py`
 
 The shipped demo golden `self-docs-demo.json` is built from the
 auto-seeded self-docs corpus (`build_oragolden.py --out golden/self-docs-demo.json`)
-and is safe to use for a smoke-test release gate without any confidential data:
-`GOLDEN_FILE=self-docs-demo.json python scripts/release-gate.py`.
+and is the release gate's DEFAULT (matches the self-docs-only enterprise
+collection), so a fresh clone passes 12/12 with no confidential data:
+`python scripts/release-gate.py`. To score YOUR own corpus instead, drop it
+at `golden/<your-set>.json` and run `GOLDEN_FILE=<your-set>.json python
+scripts/release-gate.py`.
 
 ## IMPORTANT
 

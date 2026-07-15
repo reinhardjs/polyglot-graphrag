@@ -219,10 +219,16 @@ def run():
         # Live synthesize + score Faithfulness/Relevance/Precision/Recall
         # over the golden dataset. The set lives in GOLDEN_DIR (default
         # golden/) which is GIT-IGNORED (confidential — never
-        # committed). Override with GOLDEN_DIR / GOLDEN_FILE. The file
-        # name is the user's corpus, not a hardcoded one.
+        # committed). Override with GOLDEN_DIR / GOLDEN_FILE. The default is
+        # the shipped self-docs-demo.json (matches the auto-seeded self-docs
+        # corpus); use GOLDEN_FILE=golden.json to score your own confidential
+        # corpus. The file name is the user's, not a hardcoded one.
         gdir = os.environ.get("GOLDEN_DIR", os.path.join(BASE, "golden"))
-        gfile = os.environ.get("GOLDEN_FILE", "golden.json")
+        # Default to the SHIPPED demo golden (built from the auto-seeded
+        # self-docs corpus) so a fresh clone's default gate is green against
+        # the default corpus. To evaluate YOUR own corpus, drop it at
+        # golden/<your-set>.json (git-ignored) and set GOLDEN_FILE.
+        gfile = os.environ.get("GOLDEN_FILE", "self-docs-demo.json")
         golden = os.path.join(gdir, gfile)
         assert os.path.exists(golden), (
             f"golden set missing: {golden}\n"
