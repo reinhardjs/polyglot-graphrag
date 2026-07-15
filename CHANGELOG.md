@@ -1,11 +1,13 @@
-> **Current release: `v1.0.1`** (git tag `v1.0.1`).
+> **Current release: `v1.0.0`** (git tag `v1.0.0`).
 
-## [1.0.1] — 2026-07-16
+## [1.0.0] — 2026-07-16 (consolidated)
 
 ### Changed
 - **Unified daemon** (`serve_gpu.py`): auto-detects CUDA vs CPU, guards `.half()` calls on CPU, device-aware log prefix (`gpu-daemon` / `rag-daemon`). `serve_cpu.py` is now a thin wrapper — zero future divergence.
 - **Release gate** (`scripts/release-gate.py`): device-aware thresholds — bench <2000ms on CPU (vs 400ms GPU), synth <5.0s on CPU (vs 4.0s GPU), auto-detected from `/health`.
 - **serve_cpu.py parity**: added `/v1/embeddings`, `/admin/reload`, `/metrics`, full health endpoint, unknown-domain guard, cross-domain fan-out, Prometheus counters, and fixed stale `_resolve_collections` / `process_query` bug.
+- **Doc audit**: fixed stale E4B/E2B, engineering/enterprise naming, and badge version across ARCHITECTURE.md, MIGRATION.md, ask-pipeline.md, benchmarks, and Python docstrings.
+- **Sample answers doc**: `docs/sample-answers.md` — 7 verified Q&A pairs with copy-paste curl commands.
 
 ### Fixed
 - `serve_gpu.py`: CPU-safe `.half()` loading for Jina embedder and GLiNER. `torch.cuda.memory_allocated()` guarded with `"N/A (CPU)"` fallback.
