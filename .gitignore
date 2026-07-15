@@ -75,6 +75,9 @@ SNOMED_BENCHMARK.md
 /golden/*.json
 /golden/**/*.json
 !/golden/README.md
+# user corpus drop-folder — keep the README, ignore user documents
+/corpus/*
+!/corpus/README.md
 
 # Local one-off SNOMED RF2 loader (not part of shipped pipeline)
 load_snomed.py

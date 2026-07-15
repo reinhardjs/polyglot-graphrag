@@ -185,6 +185,7 @@ case "${1:-help}" in
   serve)    cmd_doctor || true; start_llm 8082 "$E2B_MODEL" "$ROOT/logs/llm_e2b.log" "$E2B_CTX" || true; start_daemon ;;
   ask)      shift; cmd_ask "$@" ;;
   retrieve) shift; cmd_retrieve "$@" ;;
+  ingest)   shift; ensure_up; "$PY" scripts/ingest_corpus_docs.py --docs "${DOCS:-corpus}" --domain "${DOMAIN:-enterprise}" --source "${SOURCE:-my-corpus}" "$@" ;;
   health)   cmd_health ;;
   stop)     [ -f "$DAEMON_PID" ] && kill "$(cat "$DAEMON_PID")" 2>/dev/null && rm -f "$DAEMON_PID"
             pkill -f "llama-server.*--port 8082" 2>/dev/null || true
@@ -195,6 +196,7 @@ case "${1:-help}" in
             echo "  bash run.sh serve               start models + daemon"
             echo "  bash run.sh ask \"your question\"  ask (starts stack if needed)"
             echo "  bash run.sh retrieve \"query\"    retrieval-only (no synthesis)"
+            echo "  bash run.sh ingest              ingest ./corpus/*.md (see corpus/README.md)"
             echo "  bash run.sh health              service + VRAM status"
             echo "  bash run.sh stop                stop everything" ;;
 esac

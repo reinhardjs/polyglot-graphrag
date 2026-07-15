@@ -89,10 +89,10 @@ def poll(task_id, timeout=180):
 
 def main():
     ap = argparse.ArgumentParser()
+    _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ap.add_argument("--docs",
-                    default=os.path.join(os.path.dirname(os.path.dirname(
-                        os.path.abspath(__file__))), "..", "corpus-docs", "docs"),
-                    help="path to the corpus docs dir (default: ../corpus-docs/docs relative to repo)")
+                    default=os.path.join(_REPO, "corpus"),
+                    help="path to the corpus docs dir (default: ./corpus — the repo drop-folder)")
     ap.add_argument("--source", default="corpus",
                     help="corpus identity used as the doc_id prefix and source_repo "
                          "metadata (e.g. --source my-corpus). The pipeline is corpus-agnostic.")
@@ -108,16 +108,22 @@ def main():
 
     if not os.path.isdir(args.docs):
         print(f"ERROR: docs root not found: {args.docs}", file=sys.stderr)
+        print("  Put your .md files in the 'corpus/' folder (see corpus/README.md),", file=sys.stderr)
+        print("  or pass --docs /path/to/your/markdown/dir", file=sys.stderr)
         sys.exit(1)
 
     files = []
     for root, _, fnames in os.walk(args.docs):
         for fn in fnames:
-            if fn.lower().endswith(".md"):
+            if fn.lower().endswith(".md") and fn != "README.md":
                 files.append(os.path.join(root, fn))
     files.sort()
     if args.limit:
         files = files[:args.limit]
+    if not files:
+        print(f"No .md files found under {args.docs} (only README.md is skipped).", file=sys.stderr)
+        print("  Copy your documents into that folder, then re-run. See corpus/README.md.", file=sys.stderr)
+        sys.exit(1)
     print(f"Found {len(files)} markdown files under {args.docs} "
           f"(workers={args.workers})")
 
