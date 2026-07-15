@@ -44,9 +44,9 @@ offload, no external API calls.
 | `serve_gpu.py` | **Primary daemon.** Preloads aux models on GPU (identities from config). Exposes `/ask`, `/embed_query`, `/embed_late`, `/rerank`, `/extract_graph`, `/models`, `/health`. |
 | `serve_cpu.py` | **Fallback daemon.** Same API, runs models on CPU. Used if CUDA torch unavailable. |
 | `ingest.py` | Document→Qdrant+Neo4j. Late-chunk embeds (strategy from profile), LLM extraction (E2B) or GLiNER fallback (domain entity types), vector-driven entity resolution (Jina v3 → Neo4j index). |
-| `ask.py` | CLI client + shared library. `parallel_retrieve()` (Qdrant+Neo4j threaded, configurable entry strategy), `condense()` (rerank, dict-record aware), `synthesize()` (E4B stream, uses prompts.py). |
+| `ask.py` | CLI client + shared library. `parallel_retrieve()` (Qdrant+Neo4j threaded, configurable entry strategy), `condense()` (rerank, dict-record aware), `synthesize()` (E2B stream, uses prompts.py). |
 | `chunking.py` | **Pluggable chunkers (v2.6.0 REQ-3).** `sentence`/`paragraph`/`section`/`fixed` strategies as pure functions — directly unit-testable, no GPU. |
-| `prompts.py` | **Shared synthesis-prompt builder (v2.6.0 REQ-5).** Single source of truth for the E4B prompt; domain-aware via profile `[synthesis]`. |
+| `prompts.py` | **Shared synthesis-prompt builder (v2.6.0 REQ-5).** Single source of truth for the synthesis prompt; domain-aware via profile `[synthesis]`. |
 | `config.py` | All constants: ports, credentials, token limits, entity resolution threshold, vector index config, `load_domain_profile()`. No YAML parsing. |
 | `run.sh` | Orchestrator: `serve`, `ingest`, `ask`, `retrieve`, `health`, `stop`. |
 | `bench_rag.py` | Per-stage latency benchmark (3 queries × 3 iterations). |
@@ -83,7 +83,7 @@ user query
   │     Thread-B: Neo4j k-hop (entry node selected by profile strategy:
 │              keyword overlap / vector cosine / hybrid — v2.6.0 REQ-6)
   ├─[4] fuse + dedupe → rerank (BGE, in-process on GPU)
-  ├─[5] synthesize (E4B :8084, streamed)  [if synthesize=true]
+  ├─[5] synthesize (E2B :8082, streamed)  [if synthesize=true]
   │     └─ reasoning trace (stdout only) → clean answer (API field)
   ├─[6] store in query_cache for future hits
   └─[7] return {source, path, qdrant_hits, graph_hits, rerank_scores, contexts, answer}

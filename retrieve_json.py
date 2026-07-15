@@ -2,7 +2,7 @@
 retrieve_json.py — headless retrieval for the Hermes plugin.
 
 Reuses ask.py's tested pipeline (embed -> parallel Qdrant+Neo4j -> rerank) but
-returns JSON instead of streaming. Optionally synthesizes an answer with E4B.
+returns JSON instead of streaming. Optionally synthesizes an answer (E2B).
 
 Usage:
   python retrieve_json.py "query text"              -> {"contexts": [...]}
@@ -21,7 +21,7 @@ import ask  # reuse embed_query, parallel_retrieve, condense, synthesize helpers
 
 
 def _synthesize_nonstream(query: str, contexts: list, profile: dict = None) -> str:
-    """Non-streaming synthesis via E4B (ask.synthesize streams to stdout).
+    """Non-streaming synthesis (E2B; ask.synthesize streams to stdout).
 
     Uses the shared prompts.build_synthesis_prompt (v2.6.0 REQ-5) so the
     domain-aware prompt logic lives in one place.

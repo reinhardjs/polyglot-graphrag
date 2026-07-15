@@ -43,9 +43,9 @@ llama.cpp servers.
 **~10.6 GB / 12 GB** with all three GPU models. Synthesis-only users can skip
 E4B → ~7 GB. Everything runs locally; nothing leaves the machine.
 
-> **E4B is REQUIRED for synthesis.** `POST /ask` with `synthesize:true` needs
-> E4B (`:8084`) up; otherwise use `synthesize:false` for retrieval-only. This is
-> by design, not a bug.
+> **E2B serves synthesis (no separate model required).** `POST /ask` with
+> `synthesize:true` uses E2B (`:8082`), which also performs extraction. Use
+> `synthesize:false` for retrieval-only if you want the fastest path.
 
 ---
 

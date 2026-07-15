@@ -63,7 +63,7 @@ flowchart TD
 | Confidence | raw (de-boosted) score → high/medium/low | `_confidence()` |
 | Filter | `min_confidence` floor (keep ≥1) | fusion block |
 | Persist | Neo4j Differential/DxCandidate (mode=differential only) | `_persist_differential` |
-| Synthesize | E4B (Gemma) → answer; forced on for differential | `rag.synthesize` |
+| Synthesize | E2B (Gemma) → answer; forced on for differential | `rag.synthesize` |
 
 ## Tuning knobs (config.py, no code edits)
 

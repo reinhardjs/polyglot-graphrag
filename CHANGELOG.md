@@ -211,8 +211,10 @@ tags (the project had not reached a stable 1.0).
   docs → `422 must be unique` on upsert. Now aggregated per index.
 
 ### Known limitations (experimental)
-- `synthesize:true` requires the Gemma-4 E4B model (:8084) running; otherwise
-  use `synthesize:false` for retrieval-only.
+- `synthesize:true` uses the E2B model (`:8082`, which also performs
+  extraction). Use `synthesize:false` for retrieval-only if you want the
+  fastest path. (The larger E4B model is an optional opt-in for deeper
+  answers — see RUN.md.)
 - Several domains in `domain_config.yaml` were **schema stubs** —
   configured but not yet ingested/seeded. As of v1.0.1 the active domains are
   `snomed` (graph-only) + `clinical_prose` companion, `enterprise` (the

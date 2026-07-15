@@ -13,13 +13,13 @@ GLiNER, E2B extraction + synthesis via llama.cpp) and the retrieval/ingest API.
 ### `POST /ask` — hybrid retrieval (+ optional synthesis)
 The main query endpoint. Searches Qdrant (vector + sparse) and the Neo4j graph
 (in parallel, via `federated.assemble`), reranks, and optionally synthesizes an
-answer with E4B.
+answer with E2B (the same model that performs extraction).
 
 ```json
 { "query": "who reported BUG-204?",
   "domain": "engineering",        // optional; None → default_domain
   "top_k": 5,                     // default 5
-  "synthesize": false,            // false → return raw contexts only (no E4B)
+  "synthesize": false,            // false → return raw contexts only (no synthesis)
   "skip_cache": false,
   "collection": null,             // optional Qdrant collection override
   "crag": false,                  // Corrective-RAG adaptive routing
