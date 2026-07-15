@@ -35,13 +35,13 @@ llama.cpp servers.
 | Component | Model | Port | VRAM (approx) | Role |
 |-----------|-------|------|------|------|
 | GPU daemon | Jina v3 (embed) + BGE reranker-v2-m3 + GLiNER multi-v2.1 (lazy) | `:8000` | ~4.0 GB | embed / rerank / NER |
-| Extraction LLM | Gemma-4-E2B Q4_0 (`--reasoning off`) | `:8082` | ~2.3 GB | entities + relations |
-| Synthesis LLM | Gemma-4-E4B Q4_0 (`--reasoning off`) | `:8084` | ~3.6 GB | writes the `/ask` answer |
+| **Extraction + Synthesis LLM** | Gemma-4-E2B Q4_0 (`--reasoning off`) | `:8082` | ~2.3 GB | entities/relations + answer synthesis |
 | Neo4j | — | `:7687` | — | entity graph |
 | Qdrant | — | `:6333` | — | vector store |
 
-**~10.6 GB / 12 GB** with all three GPU models. Synthesis-only users can skip
-E4B → ~7 GB. Everything runs locally; nothing leaves the machine.
+**~6.3 GB / 12 GB** with daemon + E2B. Synthesis is handled by the same E2B
+model as extraction — no separate synthesis LLM needed. Everything runs
+locally; nothing leaves the machine.
 
 > **E2B serves synthesis (no separate model required).** `POST /ask` with
 > `synthesize:true` uses E2B (`:8082`), which also performs extraction. Use

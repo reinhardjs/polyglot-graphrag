@@ -12,17 +12,17 @@ Nodes
 1. Router     — decide the retrieval path for a query:
                   "graph"  : strict factual lookup (entity/ID) → Neo4j only
                   "hybrid" : complex analysis → Qdrant + Neo4j
-                Uses a fast heuristic; optionally confirmed by an E4B classifier
+                Uses a fast heuristic; optionally confirmed by an LLM judge
                 (config.CRAG_USE_LLM_ROUTER).
 2. Evaluator  — after retrieval, grade the context vs the query:
                   CORRECT | AMBIGUOUS | INCORRECT
-                Heuristic (lexical overlap + non-empty) with optional E4B judge.
-3. Fallback   — on INCORRECT/AMBIGUOUS, rewrite the query (E4B or heuristic) and
+                Heuristic (lexical overlap + non-empty) with optional LLM judge.
+3. Fallback   — on INCORRECT/AMBIGUOUS, rewrite the query (LLM or heuristic) and
                 run a second, wider retrieval, then synthesize.
 
 Domain-agnostic: nothing here hardcodes a domain. Routing/labels come from the
 active profile; the LLM prompts are generic. All LLM use is optional and guarded
-so the pipeline degrades gracefully to pure heuristics if the E4B daemon is down.
+so the pipeline degrades gracefully to pure heuristics if the LLM backend is down.
 
 Public API
 ----------
@@ -57,7 +57,7 @@ def route(query: str) -> str:
 
 
 def _llm_route(query: str) -> Optional[str]:
-    """Optional E4B confirmation of the route. Returns 'graph'/'hybrid'/None."""
+    """Optional LLM confirmation of the route. Returns 'graph'/'hybrid'/None."""
     try:
         from openai import OpenAI
         client = OpenAI(base_url=C.SYNTHESIS_LLM_BASE_URL,
@@ -113,7 +113,7 @@ _STOP = {"the", "a", "an", "of", "to", "is", "are", "was", "were", "and", "or",
 
 # ── Fallback / query rewrite ─────────────────────────────────────────────────
 def rewrite_query(query: str) -> str:
-    """Rewrite a query for a wider secondary search (heuristic + optional E4B)."""
+    """Rewrite a query for a wider secondary search (heuristic + optional LLM)."""
     llm = _llm_rewrite(query)
     if llm:
         return llm

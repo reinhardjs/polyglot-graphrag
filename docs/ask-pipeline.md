@@ -74,7 +74,7 @@ flowchart TD
 
 ## Query params
 
-- `domain` — snomed | engineering | medical | clinical_prose | ...
+- `domain` — enterprise | snomed | clinical_prose | legal | fraud | healthcare | all
 - `mode: "differential"` — ranked Dx + forced synthesis + Neo4j persist
 - `dual_signal_only: true` — keep only dual-confirmed
 - `min_confidence: "low"|"medium"|"high"` — floor the differential

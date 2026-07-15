@@ -1,5 +1,11 @@
 # CPU vs GPU Benchmark — GraphRAG v2
 
+> **Note:** This benchmark was recorded when E4B (`:8084`) was the synthesis
+> backend. E4B has since been **retired** — E2B now handles both extraction and
+> synthesis at ~2.2s p95. The retrieval-stage numbers (embed → rerank) below
+> remain valid; the synthesis numbers are historical and no longer reflect the
+> live pipeline.
+
 **Date:** 2026-07-10
 **Hardware:** RTX 3060 12GB / Intel i5-11400F (6C/12T) / 48GB DDR4
 **Environment:** rag-env (torch 2.3.1+cu121, transformers 4.49.0, sentence_transformers 5.6.0)

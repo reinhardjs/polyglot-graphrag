@@ -9,7 +9,7 @@ Stages:
   qdrant     - dense+sparse hybrid vector search (top_k)
   neo4j      - k-hop subgraph lookup
   rerank     - BGE rerank of merged pool -> top_k
-  synth      - E4B synthesis of top contexts (streaming)
+  synth      - E2B synthesis of top contexts (streaming)
   TOTAL      - embed -> (qdrant || neo4j) -> rerank -> synth
 """
 import os
@@ -78,6 +78,6 @@ if __name__ == "__main__":
     ]
     for q in qs:
         bench(q, iters=3, with_synth=True)
-    print("\n=== retrieval-only (no E4B synth) ===")
+    print("\n=== retrieval-only (no synth) ===")
     for q in qs:
         bench(q, iters=3, with_synth=False)

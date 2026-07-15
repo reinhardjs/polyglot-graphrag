@@ -13,9 +13,13 @@ first (Conventional Commits: `docs(migration): ...` or `feat!: ...` for breaking
 ## 1. Current data model (the contract)
 
 ### Qdrant (vectors)
-- **One collection per domain**, keyed in `config.QDRANT_COLLECTIONS`:
-  `engineering_chunks`, `legal_chunks`, `medical_chunks`, `hospitality_chunks`,
-  `accounting_chunks`. Plus `query_cache` (answer cache).
+- **One collection per domain**, keyed by the `collection:` field in each domain
+  profile within `domain_config.yaml`. Current collections:
+  `enterprise`, `clinical_prose`, `legal`, `fraud`, plus `query_cache` (answer cache).
+  > **Legacy naming note.** The collections were previously named
+  > `engineering_chunks`, `medical_chunks`, `legal_chunks`, `hospitality_chunks`,
+  > `accounting_chunks` (one per domain). If you still have old names, migrate
+  > with the steps in §4.
 - Each point payload: `{text, doc_id, domain, chunk_index, …}`.
 - Vector: Jina v3, **1024-dim**, cosine. Dimension is part of the collection
   schema — **changing the embed model changes the dimension → breaks existing
