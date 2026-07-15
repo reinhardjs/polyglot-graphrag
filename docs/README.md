@@ -23,6 +23,8 @@ docs/
 │   ├── cpu-vs-gpu-benchmark.md   CPU vs GPU latency comparison (serve_cpu vs serve_gpu)
 │   └── full-benchmark-history.md Full benchmark history across versions
 │
+├── sample-answers.md      Verified Q&A samples — proof of relevance
+│
 ├── guides/                Development & operations
 │   └── development.md         Environment setup, prerequisites, workflows
 │
@@ -49,6 +51,9 @@ docs/
 ### Benchmarks
 - [CPU vs GPU](benchmarks/cpu-vs-gpu-benchmark.md) — latency comparison across serve modes
 - [Benchmark History](benchmarks/full-benchmark-history.md) — per-stage timing across all versions
+
+### Sample Answers
+- [Sample Queries & Answers](sample-answers.md) — verified Q&A pairs + copy-paste curl commands
 
 ### Guides
 - [Development](guides/development.md) — prerequisites, environment, common workflows
