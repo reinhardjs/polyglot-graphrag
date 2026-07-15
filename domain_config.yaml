@@ -87,8 +87,15 @@ domains:
     collection: legal
     neo4j_label: null
     retrieval: dense_prose
-    entity_types: []
-    relation_types: []
+    entity_types: [Statute, Regulation, Clause, Party, Contract, Policy, Obligation]
+    relation_types: [GOVERNS, REFERENCES, OVERRIDES, OBLIGATES, AMENDS, DEFINES]
+    # Example domain: custom synthesis + extraction prompts live in prompts/.
+    # Set synthesis.kind -> prompts/legal_synthesis.md; extraction.template ->
+    # prompts/legal_extraction.md. No Python changes needed.
+    synthesis:
+      kind: legal_synthesis
+    extraction:
+      template: legal_extraction.md
     pair_strategy: all_pairs
     min_confidence: 0.0
     chunking:
