@@ -106,14 +106,16 @@ confirmed by more than one — see [docs/domains/README.md](docs/domains/README.
 | Evolve the data model safely | [MIGRATION.md](MIGRATION.md) |
 | Contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
-> **Heads-up on domains.** After the engineering corpus was purged, the only
-> configured domain is **`snomed`** (graph-only, `SnomedConcept` in Neo4j) with
-> its semantic companion **`clinical_prose`** (Qdrant). `default` aliases to
-> `snomed`. To add a new corpus, copy an existing `domains/<name>/` plugin and
-> register it in `domain_config.yaml` — the federated factory picks it up with
-> no daemon-code changes.
+> **Configured domains.** The deployment ships with **7 domains**:
+> `snomed` (graph-only terminology), `clinical_prose` (medicine prose companion),
+> `enterprise` (engineering knowledge base — the confidential corpus),
+> `legal`, `fraud` (graph + vector), plus `default` and `healthcare` (both alias
+> to `snomed`). `domain="all"` fans out to every concrete domain. To add a new
+> corpus, copy an existing `domains/<name>/` plugin and register it in
+> `domain_config.yaml` — the federated factory picks it up with no daemon-code
+> changes.
+>
 
----
 
 ## Requirements
 

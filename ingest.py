@@ -747,11 +747,31 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
     t_clean = time.time()
 
     # Step 1 — late-chunked vectors -> Qdrant (strategy from domain profile)
-    r = requests.post(C.DAEMON_EMBED_LATE,
-                      json={"text": text, "doc_id": doc_id,
-                            "strategy": strategy, "chunk_size": chunk_size,
-                            "overlap": overlap, "header_prefix": header_prefix},
-                      timeout=300).json()
+    # In-process embed (no HTTP loopback to the daemon's own /embed_late, which
+    # starves the daemon threadpool under large-doc load). Resolve the Jina
+    # model from the running daemon module. serve_gpu is launched as __main__,
+    # so `import serve_gpu` would give a *separate, uninitialized* module — we
+    # must read _jina from __main__ (the live process) and fall back to the
+    # serve_gpu module name if imported differently.
+    import sys
+    import embed_late as EL
+    _daemon = sys.modules.get("__main__")
+    _jina = getattr(_daemon, "_jina", None)
+    if _jina is None:
+        import serve_gpu as _sg
+        _jina = getattr(_sg, "_jina", None)
+    if _jina is None:
+        raise RuntimeError("embedding model not initialized")
+    _lock = getattr(_daemon, "_jina_lock", None) or getattr(
+        __import__("serve_gpu"), "_jina_lock", None)
+    if _lock is None:
+        import threading as _th
+        _lock = _th.Lock()
+    with _lock:
+        r = {"doc_id": doc_id, "chunks": EL.embed_late_chunks(
+            _jina, text, strategy=strategy, chunk_size=chunk_size,
+            overlap=overlap, header_prefix=header_prefix,
+            task=getattr(C, "EMBED_TASK_PASSAGE", None))}
     n_chunks = write_vectors(doc_id, r["chunks"], meta, checksum=checksum,
                              collection=collection)
     t_embed = time.time()

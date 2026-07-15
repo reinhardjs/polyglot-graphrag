@@ -161,6 +161,11 @@ EMBED_MATRYOSHKA_DIM  = None    # for models supporting MRL (Jina v4: 128-2048)
 # the full 568M params on 27+ docs at ~61ms — no compromise needed.
 RERANK_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
 RERANK_USE_HALF    = True    # fp16 conversion
+# Reranker device. Default "cpu" so the 12 GB GPU keeps headroom for the Jina
+# embedder + the E2B/E4B GGUF backends (which share the same card). Reranking
+# 5 candidates on CPU is fast (<50 ms) and removes a ~2.5 GB GPU allocation
+# that would otherwise OOM the card when all three models are resident.
+RERANK_DEVICE = "cpu"
 
 # CPU fallback (serve_cpu.py): lighter model + capped pool. BGE-base at 278M
 # params is 2.7× faster than v2-m3 on CPU. Capping the fused pool to 10 docs

@@ -64,6 +64,13 @@ _gliner_lock = threading.Lock()
 # a separate model and does NOT cover Jina — both need their own serializer.
 _jina_lock = threading.Lock()
 
+# Global ingest serializer. The whole ingest pipeline (delete -> embed via
+# /embed_late -> graph extract) touches the shared GPU (Jina) and Neo4j. Even
+# with _jina_lock on the embed call, overlapping background ingest tasks push
+# resident-model VRAM past 12 GB and intermittently CUDA-OOM. Serializing the
+# entire task guarantees zero overlap and a 100% reliable bulk ingest.
+_ingest_lock = threading.Lock()
+
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ── Ingest task store (in-process, for BackgroundTasks polling) ───────────────
@@ -134,8 +141,10 @@ def _load_all():
         )
 
     # ── Reranker ───
-    _reranker = CrossEncoder(C.RERANK_MODEL_NAME, device=DEVICE)
-    if C.RERANK_USE_HALF:
+    # Loaded on RERANK_DEVICE (cpu by default) to keep GPU VRAM free for the
+    # Jina embedder + E2B/E4B GGUF backends that share the 12 GB card.
+    _reranker = CrossEncoder(C.RERANK_MODEL_NAME, device=C.RERANK_DEVICE)
+    if C.RERANK_USE_HALF and C.RERANK_DEVICE != "cpu":
         try:
             _reranker = _reranker.half()
         except Exception:
@@ -252,24 +261,13 @@ def embed_late(req: EmbedLateReq):
     Chunking is dispatched via chunking.py (v2.6.0 REQ-3) so it is testable
     and domain-configurable. Uses config.EMBED_TASK_PASSAGE for the encode task.
     """
-    import chunking as CH
-    chunks = CH.chunk_text(req.text, strategy=req.strategy,
-                           chunk_size=req.chunk_size, overlap=req.overlap,
-                           header_prefix=req.header_prefix)
-    if not chunks:
-        chunks = [req.text.strip()]
-    encode_kw = {"convert_to_numpy": True, "show_progress_bar": False}
-    if C.EMBED_TASK_PASSAGE:
-        encode_kw["task"] = C.EMBED_TASK_PASSAGE
+    import embed_late as EL
     with _jina_lock:
-        vecs = _jina.encode(chunks, **encode_kw)
-    return {
-        "doc_id": req.doc_id,
-        "chunks": [
-            {"chunk_idx": i, "vector": vecs[i].tolist(), "text": chunks[i]}
-            for i in range(len(chunks))
-        ],
-    }
+        chunks_out = EL.embed_late_chunks(
+            _jina, req.text, strategy=req.strategy,
+            chunk_size=req.chunk_size, overlap=req.overlap,
+            header_prefix=req.header_prefix, task=C.EMBED_TASK_PASSAGE)
+    return {"doc_id": req.doc_id, "chunks": chunks_out}
 
 
 @app.post("/embed_query")
@@ -1092,27 +1090,28 @@ def ingest(req: IngestReq, background_tasks: BackgroundTasks, response: Response
     def _run():
         import ingest as ingest_mod
         import config as C
-        with _ingest_tasks_lock:
-            _ingest_tasks[task_id]["status"] = "running"
-        try:
-            res = ingest_mod.ingest_text(
-                text=req.text,
-                doc_id=req.doc_id,
-                meta=({"doc_type": req.doc_type, "author": req.author}
-                      | (req.metadata or {})),
-                extract_graph=req.extract_graph,
-                if_checksum=None,  # already handled synchronously above
-                collection=target_collection,
-                domain=req.domain,
-                metadata=req.metadata,
-            )
+        with _ingest_lock:
             with _ingest_tasks_lock:
-                _ingest_tasks[task_id]["status"] = "done"
-                _ingest_tasks[task_id]["result"] = res
-        except Exception as e:
-            with _ingest_tasks_lock:
-                _ingest_tasks[task_id]["status"] = "error"
-                _ingest_tasks[task_id]["error"] = str(e)
+                _ingest_tasks[task_id]["status"] = "running"
+            try:
+                res = ingest_mod.ingest_text(
+                    text=req.text,
+                    doc_id=req.doc_id,
+                    meta=({"doc_type": req.doc_type, "author": req.author}
+                          | (req.metadata or {})),
+                    extract_graph=req.extract_graph,
+                    if_checksum=None,  # already handled synchronously above
+                    collection=target_collection,
+                    domain=req.domain,
+                    metadata=req.metadata,
+                )
+                with _ingest_tasks_lock:
+                    _ingest_tasks[task_id]["status"] = "done"
+                    _ingest_tasks[task_id]["result"] = res
+            except Exception as e:
+                with _ingest_tasks_lock:
+                    _ingest_tasks[task_id]["status"] = "error"
+                    _ingest_tasks[task_id]["error"] = str(e)
 
     background_tasks.add_task(_run)
     response.status_code = 202

@@ -66,12 +66,12 @@ resolves a retriever/ingestor in this order:
 2. **Default** (`domains/_default.py`) otherwise.
 
 So:
-* The **primary** corpus of `engineering` works with **no custom code** — it
+* The **primary** corpus of `enterprise` works with **no custom code** — it
   uses the default retriever (Qdrant `collection` + Neo4j `neo4j_label`) and the
   default ingestor (`ingest.py::ingest_text`, the same machinery `sync_docs.py`
-  uses). `domains/engineering/retrieve.py` exists only to make the primary's
+  uses). `domains/enterprise/retrieve.py` exists only to make the primary's
   home in `domains/` explicit; it just points at the default.
-* A **companion** (e.g. `engineering_docs`) normally DOES need a custom
+* A **companion** (e.g. `enterprise_docs`) normally DOES need a custom
   `ingest.py` (different source, different chunking) — that's the whole point of
   a plugin. But if a companion's data can be ingested by the generic path, it can
   omit `ingest.py` and use the default too.
