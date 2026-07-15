@@ -288,6 +288,20 @@ def run():
                 f"backend={backend} (n={m.get('n_samples')})")
     results.append(check("Answer quality (golden set, E2B synth)", c_quality))
 
+    # ── 13. Doc/code consistency audit (non-negotiable: no doc drift) ──
+    def c_docs():
+        import subprocess as _sp
+        audit = os.path.join(BASE, "scripts", "audit_docs.py")
+        assert os.path.isfile(audit), "scripts/audit_docs.py missing"
+        r = _sp.run([sys.executable, audit, "--daemon-url", "http://127.0.0.1:8000"],
+                    capture_output=True, text=True, timeout=120)
+        if r.returncode != 0:
+            # surface the [FAIL] lines so the operator sees exactly what drifted
+            fails = [ln for ln in r.stdout.splitlines() if "[FAIL]" in ln]
+            raise AssertionError("doc/code drift:\n    " + "\n    ".join(fails))
+        return "no doc drift"
+    results.append(check("Doc/code consistency (audit_docs.py)", c_docs))
+
     # ── Print results ───────────────────────────────────────────────
     print()
     print("=" * 72)

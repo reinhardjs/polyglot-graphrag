@@ -111,6 +111,15 @@ cmd_doctor() {
   # synthesis backend
   if curl -s --max-time 2 http://127.0.0.1:8082/v1/models >/dev/null 2>&1; then echo "  [ok]  E2B :8082 (synthesis)"; else
     echo "  [ACTION] E2B :8082 not up — 'bash run.sh serve' will start it"; fi
+  # doc/code consistency audit (advisory — flags drift, non-fatal)
+  if [ -x "$PY" ] && [ -f "$ROOT/scripts/audit_docs.py" ]; then
+    if "$PY" "$ROOT/scripts/audit_docs.py" --daemon-url http://127.0.0.1:8000 >/tmp/audit_docs.log 2>&1; then
+      echo "  [ok]  doc/code audit (no drift)"
+    else
+      echo "  [ACTION] doc/code drift detected — run:  ./venv/bin/python scripts/audit_docs.py"
+      echo "           (see /tmp/audit_docs.log for the [FAIL] items)"
+    fi
+  fi
   echo "──────────────────────────────────────"
   if [ "$fail" -ne 0 ]; then echo "Setup INCOMPLETE — fix the [MISSING] items above, then re-run."; return 1; fi
   echo "Setup OK — you can 'bash run.sh ask \"how does the ask pipeline work\"'."
