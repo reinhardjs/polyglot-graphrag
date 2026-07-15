@@ -121,10 +121,16 @@ SW_EXTRACT_WORKERS = int(os.environ.get("SW_EXTRACT_WORKERS", "4"))
 EXTRACTION_CHAR_LIMIT = int(os.environ.get("EXTRACTION_CHAR_LIMIT", "32000"))
 EXTRACTION_MAX_TOKENS = int(os.environ.get("EXTRACTION_MAX_TOKENS", "4096"))
 
-# Synthesis: larger reasoning model for answer generation from context.
-SYNTHESIS_LLM_BASE_URL = "http://localhost:8084/v1"
-SYNTHESIS_LLM_API_KEY  = "not-needed"
-SYNTHESIS_LLM_MODEL    = "gemma-4-E4B-it-QAT-Q4_0.gguf"
+# Synthesis: answer generation from retrieved context.
+# DEFAULT = E2B (gemma-4-E2B Q4_0 on :8082) — measured p95 ~2.6s on the
+# RTX 3060 12GB card with the synthesis-cost caps below. This is the fast,
+# production default. The larger E4B (:8084) gives deeper answers but runs
+# ~22s on this hardware; enable it via env override:
+#   SYNTHESIS_LLM_BASE_URL=http://127.0.0.1:8084/v1 \
+#   SYNTHESIS_LLM_MODEL=gemma-4-E4B-it-QAT-Q4_0.gguf python serve_gpu.py
+SYNTHESIS_LLM_BASE_URL = os.environ.get("SYNTHESIS_LLM_BASE_URL", "http://127.0.0.1:8082/v1")
+SYNTHESIS_LLM_API_KEY  = os.environ.get("SYNTHESIS_LLM_API_KEY", "not-needed")
+SYNTHESIS_LLM_MODEL    = os.environ.get("SYNTHESIS_LLM_MODEL", "gemma-4-E2B_q4_0-it.gguf")
 
 # Legacy single-LLM alias (kept for compatibility)
 LLM_BASE_URL = SYNTHESIS_LLM_BASE_URL
@@ -210,6 +216,20 @@ EXTRACTION_PROMPT = (
     '"type":"ASSOCIATED_WITH|DEPENDS_ON|IMPACTS|AUTHORED|REFERENCES|FIXES"}}]}}\n'
     "Document ({doc_id}):\n{text}"
 )
+
+# Cap the length of each retrieved context chunk fed to the synthesis LLM.
+# The full chunk (~1700 chars) is needed for retrieval/rerank/citations, but
+# the generator only needs a capped excerpt to summarize + cite — truncating
+# slashes prompt prefill time and keeps synthesis under the latency target
+# (E2B: ~5.7s full prompt -> ~1.1s truncated; E4B likewise). Set 0 to disable.
+MAX_SYNTH_CONTEXT_CHARS = int(os.environ.get("MAX_SYNTH_CONTEXT_CHARS", "350"))
+# Cap the NUMBER of contexts sent to synthesis. The LLM only needs the top few
+# most-relevant chunks; sending all reranked candidates just inflates prefill.
+MAX_SYNTH_CONTEXTS = int(os.environ.get("MAX_SYNTH_CONTEXTS", "3"))
+# Max tokens the synthesis LLM may generate. Lower = faster answers (caps
+# generation time, the dominant cost for small models like E2B). 512 is plenty
+# for a cited summary of 3 short context excerpts.
+SYNTH_MAX_TOKENS_OUT = int(os.environ.get("SYNTH_MAX_TOKENS_OUT", "400"))
 
 # ── Context / token budgeting ────────────────────────────────────────────────
 MAX_TOKENS_CONTEXT = 4096

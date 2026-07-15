@@ -107,6 +107,28 @@ is logged for debugging, content is parsed as JSON.
 > truth for restarts. Synthesis latency on this 12 GB card is ~20 s for a
 > detailed ~800-token answer (E4B Q4_0 generates ~80 tok/s) — a HARDWARE
 > limit, not a code defect.
+>
+> **Default synthesis backend is E2B (:8082), not E4B.** For v1.0 the daemon
+> uses E2B for synthesis (p95 ~2.2s steady-state on this card) — see the
+> synthesis-tuning note below. E4B remains available via
+> `SYNTHESIS_LLM_BASE_URL=http://127.0.0.1:8084/v1 SYNTHESIS_LLM_MODEL=gemma-4-E4B-it-QAT-Q4_0.gguf`
+> for deeper answers at the cost of ~22s latency.
+
+### Synthesis tuning (v1.0 — how <3s is achieved)
+
+The daemon keeps E2B synthesis under 3s on the RTX 3060 12 GB card via three
+levers in `config.py` (all env-overridable):
+
+- `MAX_SYNTH_CONTEXT_CHARS` (default 350) — truncate each retrieved chunk sent
+  to the generator, slashing prompt prefill.
+- `MAX_SYNTH_CONTEXTS` (default 3) — send only the top-3 chunks, not all
+  reranked candidates.
+- `SYNTH_MAX_TOKENS_OUT` (default 400) — cap generated length.
+- The CPU BGE reranker is **skipped when synthesizing** (it added ~9.6s on CPU
+  for no benefit — the LLM reads all contexts and synthesizes them itself).
+- Synthesis backends are reached via `127.0.0.1` (not `localhost`) — `localhost`
+  resolves to IPv6 `::1` first while the llama-servers bind IPv4, causing a
+  multi-second connection retry per call.
 
 ### Server command (matches gemma-4-e4b.service)
 

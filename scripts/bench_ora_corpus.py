@@ -16,9 +16,9 @@ QUALITY RULES (hard PASS/FAIL gates — any failure => exit non-zero)
                            check across a sample of real docs — not filename
                            stems, which are poor queries)
   R3  Retrieval latency   : p95 < 250 ms (single-domain, no synthesis, warm)
-  R4  Synthesis latency   : p95 < 25 s (E4B Q4_0 on 12 GB card — realistic;
-                           detailed answers are ~800 tokens @ ~80 tok/s; this is
-                           a HARDWARE constraint, not a code defect)
+  R4  Synthesis latency   : p95 < 3 s (E2B default synthesis backend; the
+                           larger E4B runs ~22s on this 12 GB card and is
+                           opt-in via SYNTHESIS_LLM_* env override)
   R5  Reliability         : 0 errors across ALL benchmark queries
   R6  Provenance          : 100% of returned contexts carry doc_id + domain
   R7  Concurrency         : 24 parallel enterprise queries -> 0 errors
@@ -53,7 +53,7 @@ HEALTH = "http://localhost:8000/health"
 
 # ── Latency / quality targets (from v1.0 roadmap + measured hardware reality) ──
 TARGET_RETRIEVAL_P95_MS = 250.0   # single-domain, no synthesis
-TARGET_SYNTH_P95_MS = 25000.0     # E4B Q4_0 @ ~80 tok/s on RTX 3060 12GB (hardware limit)
+TARGET_SYNTH_P95_MS = 3000.0      # E2B synthesis default (p95 ~2.2s steady-state)
 TARGET_ACCURACY = 0.80            # exact-doc content-identity recall for this corpus
 VRAM_TOTAL_GB = 12.6              # RTX 3060 12 GB card
 
@@ -228,7 +228,7 @@ def main():
 
     # ── R4 Synthesis latency ──
     if not args.no_synth:
-        print("\n[R4] Synthesis latency (E4B, detailed answers)")
+        print("\n[R4] Synthesis latency (E2B default synthesis backend)")
         slat, serr = [], []
         for q in LOAD_QUERIES[:5]:
             d, dt, code, e = ask(q, synthesize=True, top_k=args.top_k)

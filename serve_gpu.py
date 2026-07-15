@@ -438,7 +438,20 @@ def ask(req: AskReq):
     _t0 = _time.time()
     import ask as rag
     import numpy as np
-    from qdrant_client import QdrantClient
+    
+    # Truncate each context chunk before synthesis: the generator only needs a
+    # capped excerpt to summarize + cite; this slashes prompt prefill time and
+    # keeps synthesis under the latency target (E2B ~1s vs ~5.7s untruncated).
+    def _synth_contexts(ctxs):
+        # cap the number of contexts sent to synthesis (LLM only needs top few)
+        n = C.MAX_SYNTH_CONTEXTS
+        if n and n > 0:
+            ctxs = ctxs[:n]
+        cap = C.MAX_SYNTH_CONTEXT_CHARS
+        if not cap or cap <= 0:
+            return ctxs
+        return [c[:cap] for c in ctxs]
+
     from qdrant_client.models import PointStruct
 
     # 0. Domain profile (v0.x YAML) — resolves collection/label/entry strategy.
@@ -668,7 +681,6 @@ def ask(req: AskReq):
         path = fed.path
         _failed = list(fed.failed)
 
-
     # 4. Fuse + rerank in-process
     # q_res = list of Qdrant records {text,doc_id,doc_type,chunk_idx}
     # g_res = list of graph profile strings (no doc_id)
@@ -768,8 +780,13 @@ def ask(req: AskReq):
     # The reranker's main value is ordering for LLM synthesis; for raw context
     # retrieval the per-signal scores (IDF for graph hits, Qdrant similarity for
     # prose hits) are sufficient and deterministic.
-    _skip_rerank = (not req.synthesize) and (not _force_differential) \
-        and len(pool) <= 10
+    # For synthesize=TRUE we ALSO skip the rerank: the LLM reads all top-k
+    # contexts and synthesizes them itself, so pre-reranking only adds latency
+    # (the BGE reranker runs on CPU — ~9.6s for a 10-candidate pool — and that
+    # cost is pure overhead when synthesis is happening anyway).
+    _skip_rerank = req.synthesize or (
+        (not _force_differential) and len(pool) <= 10
+    )
 
     if _skip_rerank:
         # Raw-score ordering: graph hits carry IDF score (already summed in
@@ -831,7 +848,7 @@ def ask(req: AskReq):
     if req.synthesize or _force_differential:
         # differential mode forces synthesis so a ranked Dx is always returned
         try:
-            answer = rag.synthesize(req.query, contexts, profile)
+            answer = rag.synthesize(req.query, _synth_contexts(contexts), profile)
         except Exception as e:
             # E4B unavailable (P3.12): degrade gracefully — empty answer, flag.
             print(f"[ask] synthesis failed (degraded): {e}", flush=True)
@@ -903,7 +920,7 @@ def ask(req: AskReq):
                         "confidence": m.get("confidence", "low"),
                     })
             if req.synthesize or _force_differential:
-                answer = rag.synthesize(req.query, contexts, profile)
+                answer = rag.synthesize(req.query, _synth_contexts(contexts), profile)
 
     # Compose human-readable notice for degraded responses.
     _notice_parts = []

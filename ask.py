@@ -411,7 +411,7 @@ def synthesize(query: str, contexts: list, profile: dict = None) -> str:
     stream = client.chat.completions.create(
         model=C.SYNTHESIS_LLM_MODEL,
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=C.LLM_MAX_TOKENS_OUT,
+        max_tokens=C.SYNTH_MAX_TOKENS_OUT,
         stream=True,
     )
     reasoning_parts = []  # E4B chain-of-thought (debug only)

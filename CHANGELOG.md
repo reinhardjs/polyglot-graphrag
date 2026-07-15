@@ -6,6 +6,33 @@ stable release; see `VERSIONING.md` for the exact rules.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com).
 
+## [1.0.2] — 2026-07-15 (synthesis latency: 22s → <3s)
+
+Performance fix folded into the `v1.0.0` tag (option C). Backward-compatible.
+
+### Fixed
+- **Synthesis latency 22.6s → ~2.2s p95.** Previously a `synthesize:true`
+  enterprise query took ~22s. Root causes found and fixed:
+  - **IPv6 resolution bug:** synthesis backends were reached via `localhost`,
+    which resolves to IPv6 `::1` first while the llama-servers bind IPv4
+    `127.0.0.1` — adding a multi-second connection retry per call. Now
+    `127.0.0.1` in `config.py` defaults.
+  - **CPU reranker on synthesis path:** the BGE reranker (`RERANK_DEVICE=cpu`)
+    was running even when synthesizing (~9.6s for a 10-candidate pool) for no
+    benefit — the LLM reads all contexts and synthesizes them itself. Now
+    skipped when `synthesize=true`.
+  - **Prompt bloat:** full (ungapped) chunks were fed to synthesis. Added
+    `MAX_SYNTH_CONTEXT_CHARS` (350), `MAX_SYNTH_CONTEXTS` (3), and
+    `SYNTH_MAX_TOKENS_OUT` (400) to bound prefill + generation.
+- **E2B is now the default synthesis backend** (was E4B). E2B on :8082 gives
+  p95 ~2.2s; E4B (:8084) gives deeper answers but ~22s on this 12 GB card and
+  is opt-in via `SYNTHESIS_LLM_*` env override.
+
+### Added
+- `scripts/bench_synth_compare.py`: compares `synthesize:false` (retrieval-only)
+  vs `synthesize:true` latency on the ora-et-labora corpus; asserts the <3s
+  synthesis target. `bench_ora_corpus.py` R4 target tightened to 3s.
+
 ## [1.0.1] — 2026-07-15 (stability + bulk-ingest hardening)
 
 Patch release folded into the `v1.0.0` tag (option C: the v1.0.0 tag now points
