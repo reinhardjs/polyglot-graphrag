@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from qdrant_client import QdrantClient
 import config as C
 
+BASE = C.BASE_DIR
 random.seed(20260715)
 
 qc = QdrantClient(url=C.QDRANT_URL)
@@ -57,10 +58,10 @@ def make_pair(did, text):
     }
 
 rows = [make_pair(d, first[d]) for d in docs[:15]]
-with open("sample_data/golden/ora-et-labora.json", "w") as f:
+with open(os.path.join(BASE, "golden", "ora-et-labora.json"), "w") as f:
     json.dump(rows, f, indent=2, ensure_ascii=False)
 
-print(f"wrote {len(rows)} golden rows -> sample_data/golden/ora-et-labora.json")
+print(f"wrote {len(rows)} golden rows -> golden/ora-et-labora.json (git-ignored)")
 for r in rows[:4]:
     print(f"  Q: {r['question']}")
     print(f"     GT: {r['ground_truth'][:80]}")

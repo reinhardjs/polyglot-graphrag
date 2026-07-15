@@ -217,16 +217,20 @@ def run():
     # ── 12. Answer QUALITY on the confidential ora-et-labora corpus ──
     def c_quality():
         # Live synthesize + score Faithfulness/Relevance/Precision/Recall
-        # over the golden dataset (run with the running daemon so it uses
-        # the E2B synthesis backend automatically).
-        golden = os.path.join(BASE, "sample_data", "golden", "ora-et-labora.json")
-        assert os.path.exists(golden), f"golden set missing: {golden}"
+        # over the golden dataset. The set lives in GOLDEN_DIR (default
+        # golden/) which is GIT-IGNORED (confidential — never
+        # committed). Override with GOLDEN_DIR / GOLDEN_FILE.
+        gdir = os.environ.get("GOLDEN_DIR", os.path.join(BASE, "golden"))
+        gfile = os.environ.get("GOLDEN_FILE", "ora-et-labora.json")
+        golden = os.path.join(gdir, gfile)
+        assert os.path.exists(golden), (
+            f"golden set missing: {golden}\n"
+            f"  → drop your confidential set at golden/{gfile} "
+            f"(git-ignored) or set GOLDEN_DIR/GOLDEN_FILE.")
         cmd = [os.path.join(BASE, "venv", "bin", "python"),
                 "evaluate_pipeline.py", golden, "--live", "--domain", "enterprise"]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         assert r.returncode == 0, f"eval exited {r.returncode}: {r.stderr[-400:]}"
-        # Defensively extract the JSON metrics object from stdout (the
-        # harness prints ONLY json to stdout now; this tolerates stray text).
         import re as _re
         _m = _re.search(r"\{.*\}", r.stdout, _re.DOTALL)
         assert _m, f"no JSON in eval stdout: {r.stdout[:200]}"
@@ -234,8 +238,6 @@ def run():
         ff = m.get("faithfulness", 0.0)
         cp = m.get("context_precision", 0.0)
         cr = m.get("context_recall", 0.0)
-        # Gate on Faithfulness (answer grounded in retrieved contexts) — the
-        # core correctness metric. Precision/Recall reported but not gating.
         assert ff >= 0.90, (
             f"faithfulness {ff:.2f} < 0.90 (n={m.get('n_samples')})")
         return (f"faith={ff:.2f} prec={cp:.2f} recall={cr:.2f} "

@@ -71,7 +71,12 @@ SNOMED_BENCHMARK.md
 .sync_state.json.lock
 .sync_state.json.tmp
 
-# local one-off SNOMED RF2 loader (not part of shipped pipeline)
+# Golden question sets (user-provided, CONFIDENTIAL — never commit)
+/golden/*.json
+/golden/**/*.json
+!/golden/README.md
+
+# Local one-off SNOMED RF2 loader (not part of shipped pipeline)
 load_snomed.py
 
 # cloned external repos (ora-et-labora etc.) - not part of this repo
