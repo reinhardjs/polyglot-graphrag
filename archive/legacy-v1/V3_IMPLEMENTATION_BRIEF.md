@@ -3,7 +3,7 @@
 **Target Agent:** hy3
 **Author:** Lead Architect
 **Date:** 2026-07-12
-**Repo:** `/mnt/data-970-plus/rag-system/`
+**Repo:** `<project-root>/`
 
 ---
 
@@ -99,11 +99,11 @@ Total            : ~5.3 GB  (well within 12 GB)
 2. Remove E2B/E4B/Phi-3/NuExtract systemd units (keep rag-gpu-daemon — we'll reconfigure it).
 3. Purge GLiREL from HF cache:
    ```bash
-   rm -rf /mnt/data-970-plus/hf_cache/models--jackboyla--glirel-large-v0/
+   rm -rf <hf-cache>/models--jackboyla--glirel-large-v0/
    ```
 4. Delete corrupted Qwen GGUF:
    ```bash
-   rm -f /mnt/data-970-plus/models/Qwen2.5-1.5B-Instruct-Q4_0.gguf
+   rm -f <data-root>/models/Qwen2.5-1.5B-Instruct-Q4_0.gguf
    ```
 5. Verify VRAM baseline: `nvidia-smi` should show <500MB used.
 
@@ -115,10 +115,10 @@ Total            : ~5.3 GB  (well within 12 GB)
 
 1. Download the Q8_0 GGUF. Use `huggingface-cli` (with resume support — curl failed 3x in testing):
    ```bash
-   /mnt/data-970-plus/rag-env/bin/pip install -q huggingface-hub[cli] 2>/dev/null
-   /mnt/data-970-plus/rag-env/bin/huggingface-cli download \
+   <legacy-venv>/bin/pip install -q huggingface-hub[cli] 2>/dev/null
+   <legacy-venv>/bin/huggingface-cli download \
      Qwen/Qwen2.5-1.5B-Instruct-GGUF qwen2.5-1.5b-instruct-q8_0.gguf \
-     --local-dir /mnt/data-970-plus/models/ --local-dir-use-symlinks False
+     --local-dir <data-root>/models/ --local-dir-use-symlinks False
    ```
    Expected: ~1.5GB, sha256 verifiable.
 
@@ -133,7 +133,7 @@ Total            : ~5.3 GB  (well within 12 GB)
    Restart=no
    User=reinhard
    ExecStart=/home/reinhard/.lmstudio/extensions/backends/llama.cpp-linux-x86_64-nvidia-cuda-avx2-2.23.1/llama-server \
-       -m /mnt/data-970-plus/models/qwen2.5-1.5b-instruct-q8_0.gguf \
+       -m <data-root>/models/qwen2.5-1.5b-instruct-q8_0.gguf \
        -c 2048 -t 12 -tb 12 --gpu-layers 999 \
        --flash-attn \
        --cache-type-k q4_0 --cache-type-v q4_0 \

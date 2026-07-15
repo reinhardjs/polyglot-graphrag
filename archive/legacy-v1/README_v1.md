@@ -246,7 +246,7 @@ Full schema and field reference in
 
 ```bash
 cd v2
-/mnt/data-970-plus/rag-env/bin/python -m pytest tests/ -q
+<legacy-venv>/bin/python -m pytest tests/ -q
 # 76 passed — all phases (unit) + cross-domain routing / CRAG (e2e, auto-skip w/o daemon)
 
 # Or use the one-shot runner:

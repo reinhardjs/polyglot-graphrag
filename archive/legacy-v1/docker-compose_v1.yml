@@ -1,5 +1,5 @@
 # GraphRAG knowledge system - database services
-# All data lives on /mnt/data-970-plus. Run from this dir:
+# All data lives on <data-root>. Run from this dir:
 #   docker compose up -d
 
 services:
@@ -9,7 +9,7 @@ services:
       - "6333:6333"   # REST
       - "6334:6334"   # gRPC
     volumes:
-      - /mnt/data-970-plus/qdrant_storage:/qdrant/storage
+      - <data-root>/qdrant_storage:/qdrant/storage
     restart: unless-stopped
 
   neo4j:
@@ -24,9 +24,9 @@ services:
       - "7474:7474"   # HTTP browser
       - "7687:7687"   # Bolt
     volumes:
-      - /mnt/data-970-plus/neo4j_data/data:/data
-      - /mnt/data-970-plus/neo4j_data/logs:/logs
-      - /mnt/data-970-plus/neo4j_data/plugins:/plugins
-      - /mnt/data-970-plus/neo4j_data/import:/import
-      - /mnt/data-970-plus/neo4j_data/licenses:/licenses
+      - <data-root>/neo4j_data/data:/data
+      - <data-root>/neo4j_data/logs:/logs
+      - <data-root>/neo4j_data/plugins:/plugins
+      - <data-root>/neo4j_data/import:/import
+      - <data-root>/neo4j_data/licenses:/licenses
     restart: unless-stopped

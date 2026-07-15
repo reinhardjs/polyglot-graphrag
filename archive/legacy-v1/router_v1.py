@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import numpy as np
 
-os.environ.setdefault("HF_HOME", "/mnt/data-970-plus/hf_cache")
+os.environ.setdefault("HF_HOME", "<hf-cache>")
 
 from sentence_transformers import SentenceTransformer
 from qdrant_client.models import PointStruct, Distance, VectorParams

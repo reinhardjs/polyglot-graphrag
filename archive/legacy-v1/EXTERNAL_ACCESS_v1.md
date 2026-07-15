@@ -67,7 +67,7 @@ Run a persistent HTTP server on the RAG machine that exposes a `/ask`
 endpoint. This loads the 3 models once and runs the full pipeline
 (embed → cache → route → search → rerank → synthesize).
 
-**File:** `/mnt/data-970-plus/rag-system/api_server.py`
+**File:** `<project-root>/api_server.py`
 
 ```python
 #!/usr/bin/env python3
@@ -80,8 +80,8 @@ from __future__ import annotations
 import os, sys, json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-os.environ.setdefault("HF_HOME", "/mnt/data-970-plus/hf_cache")
-sys.path.insert(0, "/mnt/data-970-plus/rag-system")
+os.environ.setdefault("HF_HOME", "<hf-cache>")
+sys.path.insert(0, "<project-root>")
 
 from retrieve import QueryEmbedder, answer, Reranker
 from router import SemanticRouter
@@ -131,8 +131,8 @@ if __name__ == "__main__":
 **Run it (on the RAG machine):**
 
 ```bash
-cd /mnt/data-970-plus/rag-system
-/mnt/data-970-plus/rag-env/bin/python api_server.py --port 9090 &
+cd <project-root>
+<legacy-venv>/bin/python api_server.py --port 9090 &
 ```
 
 **Query from external agent (any machine on Tailscale):**
@@ -223,9 +223,9 @@ Wants=gemma-4-e4b.service
 [Service]
 Type=simple
 User=reinhard
-Environment=HF_HOME=/mnt/data-970-plus/hf_cache
-ExecStart=/mnt/data-970-plus/rag-env/bin/python \
-  /mnt/data-970-plus/rag-system/api_server.py --port 9090
+Environment=HF_HOME=<hf-cache>
+ExecStart=<legacy-venv>/bin/python \
+  <project-root>/api_server.py --port 9090
 Restart=on-failure
 
 [Install]

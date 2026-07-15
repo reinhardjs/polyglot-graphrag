@@ -20,7 +20,7 @@ reliable JSON output. Therefore graph extraction during ingestion is done via
 LLM (Gemma 4 E2B on :8082, with GLiNER regex fallback). Gemma is used ONLY for
 answer generation during retrieval (Gemma 4 E4B on :8084).
 
-All data lives on the 458 GB NVMe at `/mnt/data-970-plus`. CPU-based embedding/
+All data lives on the 458 GB NVMe at `<data-root>`. CPU-based embedding/
 reranking models coexist with two GPU-hosted Gemma instances on `:8082` (E2B)
 and `:8084` (E4B).
 
@@ -38,7 +38,7 @@ CPU:  Jina v3 embeddings    →  1,024-d vectors, ~1.7s load
       all-MiniLM-L6-v2      →  384-d routing, ~12s load
       bge-reranker-base     →  cross-encoder, ~3.5s load
 
-Disk: /mnt/data-970-plus    →  458 GB NVMe (333 GB free)
+Disk: <data-root>    →  458 GB NVMe (333 GB free)
 ```
 
 **Model roles:**
@@ -64,14 +64,14 @@ Disk: /mnt/data-970-plus    →  458 GB NVMe (333 GB free)
 | Graph extraction       | Regex (deterministic)               | Extract entities + relationships from docs | CPU, instant |
 | KV profiles            | Sentence-window from source doc      | Dense 1-3 sentence summaries per entity | CPU, instant |
 | LLM Client             | OpenAI Python SDK                    | Talk to Gemma (E4B) on `:8084` | — |
-| Python Env             | Conda, `/mnt/data-970-plus/rag-env`  | Python 3.11 | — |
+| Python Env             | Conda, `<legacy-venv>`  | Python 3.11 | — |
 
 ---
 
 ## 3. File Layout
 
 ```
-/mnt/data-970-plus/rag-system/
+<project-root>/
 ├── config.py            # Constants, OpenAI client, Qdrant/Neo4j init
 ├── ingest.py            # Document → Qdrant + Neo4j (write mode)
 ├── router.py            # Semantic cache + MiniLM zero-shot routing
@@ -260,14 +260,14 @@ Patterns matched:
 
 ```bash
 # Start databases
-cd /mnt/data-970-plus/rag-system && docker compose up -d
+cd <project-root> && docker compose up -d
 
 # Start Gemma (E2B extraction :8082 + E4B synthesis :8084)
 sudo systemctl start gemma-4-e2b.service gemma-4-e4b.service
 
 # Ingest (uses E2B LLM extraction; GLiNER fallback)
 bash run.sh ingest /path/to/doc.md --type ADR --author alice
-bash run.sh ingest-folder /mnt/data-970-plus/rag-system/data
+bash run.sh ingest-folder <project-root>/data
 
 # Query (needs Gemma for answer generation)
 bash run.sh ask "who reported BUG-204 and what severity was it?"

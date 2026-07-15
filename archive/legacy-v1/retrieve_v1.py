@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 import time
 
-os.environ.setdefault("HF_HOME", "/mnt/data-970-plus/hf_cache")
+os.environ.setdefault("HF_HOME", "<hf-cache>")
 
 import numpy as np
 from sentence_transformers import SentenceTransformer

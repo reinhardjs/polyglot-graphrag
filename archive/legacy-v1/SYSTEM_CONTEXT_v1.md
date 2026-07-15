@@ -18,7 +18,7 @@ system — Qdrant (vector) + Neo4j (graph) — then answers multi-hop questions
 by routing through hybrid search or graph traversal, reranking the context,
 and synthesizing a final answer with Gemma 4 E4B (`:8084`, config-driven).
 
-All data on `/mnt/data-970-plus` (458 GB NVMe).
+All data on `<data-root>` (458 GB NVMe).
 
 ---
 
@@ -125,7 +125,7 @@ sudo systemctl daemon-reload
 sudo systemctl start gemma-4-e2b.service
 
 # 4. Re-ingest (now uses the new extraction model)
-bash run.sh ingest-folder /mnt/data-970-plus/rag-system/data
+bash run.sh ingest-folder <project-root>/data
 ```
 
 **Code path:** `v2/ingest.py` → `extract_graph()` → calls E2B (`:8082`) via

@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-BASE = Path("/mnt/data-970-plus")
+BASE = Path("<data-root>")
 PROJECT_ROOT = BASE / "rag-system"
 os.environ.setdefault("HF_HOME", str(BASE / "hf_cache"))
 
@@ -48,7 +48,7 @@ NEO4J_USER = "neo4j"
 NEO4J_PASS = "ragpassword123"
 
 # --- Embedding / routing / reranking (all on CPU) ---
-LATE_CHUNK_MODEL = "/mnt/data-970-plus/hf_cache/jina-v3-flat"  # jinaai/jina-embeddings-v3 (local flat)
+LATE_CHUNK_MODEL = "<hf-cache>/jina-v3-flat"  # jinaai/jina-embeddings-v3 (local flat)
 ROUTER_MODEL     = "sentence-transformers/all-MiniLM-L6-v2"
 RERANKER_MODEL   = "BAAI/bge-reranker-base"
 

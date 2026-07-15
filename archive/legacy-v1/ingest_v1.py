@@ -19,7 +19,7 @@ import re
 import os
 from pathlib import Path
 
-os.environ.setdefault("HF_HOME", "/mnt/data-970-plus/hf_cache")
+os.environ.setdefault("HF_HOME", "<hf-cache>")
 
 from config import (
     ornith_client, get_qdrant, init_collections, get_neo4j,
@@ -193,7 +193,7 @@ def _doc_profile(label: str, text: str) -> str:
 class JinaLateChunker:
     """Wraps jina-embeddings-v3 with per-sentence embedding (pragmatic late-chunking)."""
 
-    def __init__(self, model_name: str = "/mnt/data-970-plus/hf_cache/jina-v3-flat"):
+    def __init__(self, model_name: str = "<hf-cache>/jina-v3-flat"):
         self.model = SentenceTransformer(model_name, device="cpu",
                                           trust_remote_code=True)
         self.dim = self.model.get_sentence_embedding_dimension() or VECTOR_DIM

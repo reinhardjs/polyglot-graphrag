@@ -5,7 +5,7 @@ is **NOT used by the running system**.
 
 The live pipeline now operates from the repository root. The production
 GPU daemon (`rag-gpu-daemon.service`) runs `serve_gpu.py` with
-`WorkingDirectory=/mnt/data-970-plus/rag-system`.
+`WorkingDirectory=<project-root>`.
 
 ## Contents
 

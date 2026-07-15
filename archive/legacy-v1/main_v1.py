@@ -11,7 +11,7 @@ Usage:
 from __future__ import annotations
 import os, sys, argparse
 
-os.environ.setdefault("HF_HOME", "/mnt/data-970-plus/hf_cache")
+os.environ.setdefault("HF_HOME", "<hf-cache>")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import get_qdrant, init_collections, get_neo4j

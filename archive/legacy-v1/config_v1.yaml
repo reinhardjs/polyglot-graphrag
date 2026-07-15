@@ -1,7 +1,7 @@
 # GraphRAG Engineering Knowledge System - local config
 paths:
-  data_dir: /mnt/data-970-plus/rag-system/data
-  logs_dir: /mnt/data-970-plus/rag-system/logs
+  data_dir: <project-root>/data
+  logs_dir: <project-root>/logs
 
 # LLM (answer synthesis) — config-driven in v2/config.py (SYNTHESIS_LLM_*).
 # Legacy v1 reference: Gemma 4 E4B QAT Q4_0 on :8084 (was 12B on :8083).
@@ -20,21 +20,21 @@ llm:
 # Late-chunking embedding (local, long-context model).
 # bge-m3 supports 8192-token context + returns token-level embeddings.
 embedding:
-  model: /mnt/data-970-plus/hf_cache/bge-m3-flat      # BAAI/bge-m3 (local)
+  model: <hf-cache>/bge-m3-flat      # BAAI/bge-m3 (local)
   vector_dim: 1024
   late_chunk: true
   batch_size: 8
 
 # Zero-shot routing (cheap, CPU)
 router:
-  model: /mnt/data-970-plus/hf_cache/minilm-flat      # all-MiniLM-L6-v2 (local)
+  model: <hf-cache>/minilm-flat      # all-MiniLM-L6-v2 (local)
   vector_intent_label: vector   # direct facts / specific tickets
   graph_intent_label: graph     # system themes / multi-hop impact
   threshold: 0.0                # sim above which we pick the higher path
 
 # Cross-encoder rerank (CPU)
 reranker:
-  model: /mnt/data-970-plus/hf_cache/bge-reranker-flat  # BAAI/bge-reranker-base (local)
+  model: <hf-cache>/bge-reranker-flat  # BAAI/bge-reranker-base (local)
   keep_top: 0.5                 # keep top 50%, discard bottom 50%
 
 # Retrieval
