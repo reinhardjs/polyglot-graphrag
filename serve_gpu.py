@@ -472,13 +472,36 @@ def ask(req: AskReq):
     vec = _jina.encode([query_text], **encode_kw)[0].tolist()
 
     # 2. SEMANTIC CACHE (P1.5: enabled for ALL queries, not just synthesize)
+    # Cache entries are scoped by a variant key covering every flag that changes
+    # the OUTPUT (synthesize, domain, mode, min_confidence, top_k). Without this
+    # a synthesize=false entry (answer="") would be wrongly served to a later
+    # synthesize=true request, and a domain=snomed result to a domain=all one.
+    def _cache_scope() -> str:
+        dom = req.domain
+        if isinstance(dom, list):
+            dom = "all:" + ",".join(sorted(str(d).lower() for d in dom))
+        else:
+            dom = str(dom or "").lower()
+        synth = bool(req.synthesize or (req.mode == "differential"))
+        return "|".join([
+            f"synth={int(synth)}",
+            f"domain={dom}",
+            f"mode={req.mode or ''}",
+            f"minconf={req.min_confidence or ''}",
+            f"topk={req.top_k}",
+        ])
+
+    _scope = _cache_scope()
     if not req.skip_cache:
         try:
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
             qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
             if qc.collection_exists(C.COLL_CACHE):
                 hits = qc.query_points(
                     C.COLL_CACHE, query=vec, limit=1,
                     score_threshold=C.CACHE_THRESHOLD, with_payload=True,
+                    query_filter=Filter(must=[FieldCondition(
+                        key="scope", match=MatchValue(value=_scope))]),
                 ).points
                 if hits:
                     p = hits[0].payload
@@ -908,10 +931,11 @@ def ask(req: AskReq):
                 qc.upsert(
                     C.COLL_CACHE,
                     [PointStruct(
-                        id=abs(hash(req.query)) % (2**63),
+                        id=abs(hash((req.query, _scope))) % (2**63),
                         vector=vec,
                         payload={
                             "query": req.query,
+                            "scope": _scope,
                             "path": path,
                             "qdrant_hits": qdrant_hits,
                             "graph_hits": graph_hits,
