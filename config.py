@@ -204,7 +204,11 @@ EXTRACTION_READS_REASONING = False
 # Extraction prompt: sent to the EXTRACTION_LLM. {doc_id} and {text} are
 # formatted in. Change this if you swap the extraction model and it needs a
 # different prompt style (e.g. some models prefer "system" + "user" roles).
-EXTRACTION_PROMPT = (
+#
+# The default lives in prompts/extraction.md (editable without touching Python).
+# config.EXTRACTION_PROMPT loads it at import; if the file is missing, the
+# inline string below is the fallback so the system never breaks.
+_EXTRACTION_PROMPT_FALLBACK = (
     "Extract a knowledge graph from the engineering document below.\n"
     "Entities: extract names EXACTLY as they appear — do NOT translate.\n"
     "  (e.g. 'Basis Data' stays 'Basis Data', 'Database' stays 'Database').\n"
@@ -217,6 +221,14 @@ EXTRACTION_PROMPT = (
     '"type":"ASSOCIATED_WITH|DEPENDS_ON|IMPACTS|AUTHORED|REFERENCES|FIXES"}}]}}\n'
     "Document ({doc_id}):\n{text}"
 )
+def _load_extraction_prompt():
+    _path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "prompts", "extraction.md")
+    if os.path.isfile(_path):
+        with open(_path, encoding="utf-8") as _f:
+            return _f.read()
+    return _EXTRACTION_PROMPT_FALLBACK
+EXTRACTION_PROMPT = _load_extraction_prompt()
 
 # Cap the length of each retrieved context chunk fed to the synthesis LLM.
 # Must be >= the typical chunk size (~1700 chars) or the answer-bearing text

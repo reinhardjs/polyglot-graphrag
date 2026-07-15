@@ -626,7 +626,21 @@ def extract_graph_llm(doc_id: str, text: str, chunk_size: int = 512,
     if profile and profile.get("extraction", {}).get("prompt"):
         prompt_tmpl = profile["extraction"]["prompt"]
     else:
-        prompt_tmpl = C.EXTRACTION_PROMPT
+        # Synthesis-equivalent file-template resolution: a domain may name a
+        # custom extraction template file via profile[extraction][template]
+        # (e.g. "prompts/legal_extraction.md"); otherwise the shared default
+        # prompts/extraction.md is used (loaded by config.EXTRACTION_PROMPT).
+        tmpl_name = (profile or {}).get("extraction", {}).get("template")
+        if tmpl_name:
+            _tpath = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "prompts", os.path.basename(tmpl_name))
+            if os.path.isfile(_tpath):
+                with open(_tpath, encoding="utf-8") as _tf:
+                    prompt_tmpl = _tf.read()
+            else:
+                prompt_tmpl = C.EXTRACTION_PROMPT
+        else:
+            prompt_tmpl = C.EXTRACTION_PROMPT
     # Safe substitution: prompts contain literal {...} (JSON schema) that break
     # str.format(), so replace only our two tokens.
     client = OpenAI(base_url=C.EXTRACTION_LLM_BASE_URL,

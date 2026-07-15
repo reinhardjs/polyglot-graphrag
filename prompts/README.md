@@ -1,5 +1,6 @@
-# prompts/ — synthesis prompt templates
+# prompts/ — synthesis + extraction prompt templates
 
+## Synthesis (answer generation)
 Each synthesis style lives in its OWN file: `prompts/<kind>.md`. The daemon
 selects one via a domain's `synthesis.kind` in `domain_config.yaml` — there
 is NO per-domain `if` branch in `prompts.py`. To add a new synthesis style:
@@ -18,7 +19,22 @@ is NO per-domain `if` branch in `prompts.py`. To add a new synthesis style:
 3. generic fallback — "Answer using ONLY the context. Cite source numbers…"
    (also used if `kind` is unknown / file missing — a warning is logged).
 
+## Extraction (knowledge-graph extraction)
+The default extraction prompt lives in `prompts/extraction.md` (editable
+without touching Python — `config.EXTRACTION_PROMPT` loads it at import, with
+an inline fallback if the file is missing). Substitution tokens are
+`{doc_id}` and `{text}` (rendered with `.replace()`, so literal JSON `{...}`
+in the prompt is safe).
+
+A domain may override the extraction prompt two ways (in `domain_config.yaml`):
+- `extraction.prompt` — inline template string (highest precedence).
+- `extraction.template` — filename of a `prompts/<name>.md` template (e.g.
+  `legal_extraction.md`), resolved relative to `prompts/`. Used when no inline
+  `prompt` is given.
+
 ## Files
 - `clinical_dx.md` — ranked differential-diagnosis prompt for the `snomed`
   domain (SNOMED term-match + clinical-prose corpus). Selected by
   `domains.snomed.synthesis.kind: clinical_dx`.
+- `extraction.md` — default engineering knowledge-graph extraction prompt
+  (loaded by `config.EXTRACTION_PROMPT`).
