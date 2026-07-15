@@ -63,8 +63,8 @@ Performance fix folded into the `v1.0.0` tag (option C). Backward-compatible.
 
 ### Added
 - `scripts/bench_synth_compare.py`: compares `synthesize:false` (retrieval-only)
-  vs `synthesize:true` latency on the ora-et-labora corpus; asserts the <3s
-  synthesis target. `bench_ora_corpus.py` R4 target tightened to 3s.
+  vs `synthesize:true` latency on the ingested corpus; asserts the <3s
+  synthesis target. `bench_corpus.py` R4 target tightened to 3s.
 
 ## [1.0.1] — 2026-07-15 (stability + bulk-ingest hardening)
 
@@ -90,7 +90,7 @@ so the Jina embedder coexists with the E2B/E4B GGUF backends on a 12 GB card
 without OOM. Reranking 5 candidates on CPU is <50 ms.
 
 ### Added
-- `scripts/ingest_ora_docs.py`: bounded-concurrency, idempotent (if_checksum),
+- `scripts/ingest_corpus_docs.py`: bounded-concurrency, idempotent (if_checksum),
 retry-on-transient-error bulk ingester for the confidential engineering KB.
 - `scripts/test_enterprise_corpus.py`: 6-group reliability suite (accuracy,
 edge cases, multi-doc, synthesis, latency p95, concurrency) — all PASS.

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Build a golden dataset for the CONFIDENTIAL ora-et-labora corpus
+"""Build a golden dataset for a CONFIDENTIAL ingested corpus
 (enterprise domain) so we can measure synthesized-answer QUALITY
 (Faithfulness / Answer Relevance / Context Precision / Context Recall)
 via evaluate_pipeline.py --live --domain enterprise.
 
-Honest method (no confidential body text is exported): for a sample of
-real docs we derive a QUESTION from the doc's own first-chunk text and a
+The corpus name is the user's — this script only derives Q/ground_truth
+pairs from whatever docs are already ingested into `enterprise`; it does
+not hardcode any corpus identity.
 GROUND_TRUTH span that is also present in that doc. This mirrors how
-bench_ora_corpus.py builds its R2 queries, but adds a grounded
+bench_corpus.py builds its R2 queries, but adds a grounded
 ground_truth so Context Recall + Answer Relevance are measurable.
 
 The daemon fills in `answer` + `contexts` live (--live), so this file
@@ -30,7 +31,7 @@ hits = qc.scroll("enterprise", limit=9000,
 first = {}
 for h in hits:
     did = h.payload.get("doc_id", "")
-    if "ora::" not in did or h.payload.get("chunk_idx") != 0:
+    if h.payload.get("chunk_idx") != 0:
         continue
     if did not in first:
         first[did] = h.payload.get("text", "")
@@ -58,10 +59,10 @@ def make_pair(did, text):
     }
 
 rows = [make_pair(d, first[d]) for d in docs[:15]]
-with open(os.path.join(BASE, "golden", "ora-et-labora.json"), "w") as f:
+with open(os.path.join(BASE, "golden", "golden.json"), "w") as f:
     json.dump(rows, f, indent=2, ensure_ascii=False)
 
-print(f"wrote {len(rows)} golden rows -> golden/ora-et-labora.json (git-ignored)")
+print(f"wrote {len(rows)} golden rows -> golden/golden.json (git-ignored)")
 for r in rows[:4]:
     print(f"  Q: {r['question']}")
     print(f"     GT: {r['ground_truth'][:80]}")

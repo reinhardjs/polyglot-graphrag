@@ -214,14 +214,15 @@ def run():
         return f"{len(out)} parallel snomed requests, 0 errors"
     results.append(check(f"Concurrency ({CONCURRENCY_N} parallel snomed)", c_concurrency))
 
-    # ── 12. Answer QUALITY on the confidential ora-et-labora corpus ──
+    # ── 12. Answer QUALITY on the ingested (enterprise-domain) corpus ──
     def c_quality():
         # Live synthesize + score Faithfulness/Relevance/Precision/Recall
         # over the golden dataset. The set lives in GOLDEN_DIR (default
         # golden/) which is GIT-IGNORED (confidential — never
-        # committed). Override with GOLDEN_DIR / GOLDEN_FILE.
+        # committed). Override with GOLDEN_DIR / GOLDEN_FILE. The file
+        # name is the user's corpus, not a hardcoded one.
         gdir = os.environ.get("GOLDEN_DIR", os.path.join(BASE, "golden"))
-        gfile = os.environ.get("GOLDEN_FILE", "ora-et-labora.json")
+        gfile = os.environ.get("GOLDEN_FILE", "golden.json")
         golden = os.path.join(gdir, gfile)
         assert os.path.exists(golden), (
             f"golden set missing: {golden}\n"
@@ -242,7 +243,7 @@ def run():
             f"faithfulness {ff:.2f} < 0.90 (n={m.get('n_samples')})")
         return (f"faith={ff:.2f} prec={cp:.2f} recall={cr:.2f} "
                 f"(n={m.get('n_samples')})")
-    results.append(check("Answer quality (ora-et-labora, E2B synth)", c_quality))
+    results.append(check("Answer quality (golden set, E2B synth)", c_quality))
 
     # ── Print results ───────────────────────────────────────────────
     print()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 bench_synth_compare.py — Compare synthesize:false (retrieval-only) vs
-synthesize:true (LLM answer) on the REAL ora-et-labora engineering corpus,
+synthesize:true (LLM answer) on the REAL ingested corpus,
 using whichever synthesis backend the LIVE daemon is configured with.
 
 Run it twice to compare backends:
@@ -92,7 +92,7 @@ def main():
 
     label = args.label or live_backend()
     print("=" * 64)
-    print(f"SYNTHESIS COMPARE BENCHMARK — backend={label.upper()} (ora-et-labora)")
+    print(f"SYNTHESIS COMPARE BENCHMARK — backend={label.upper()} (ingested corpus)")
     print("=" * 64)
 
     # Warmup (discard first call: model/conn setup)

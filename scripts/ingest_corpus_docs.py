@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """
-ingest_ora_docs.py — Bulk-ingest the confidential engineering knowledge base
-into the rag-system `enterprise` domain.
+ingest_corpus_docs.py — Bulk-ingest a corpus of documents into a rag-system domain.
 
 Walks DOCS_ROOT recursively for *.md files and POSTs each to /ingest.
 Uses a BOUNDED worker pool so the daemon never has more than --workers embed
 jobs in flight (prevents CUDA OOM from unbounded concurrency). Each request
 carries if_checksum so re-runs are idempotent (unchanged docs -> 304).
 
+The corpus identity is supplied by the user via --source (it becomes the
+doc_id prefix and the source_repo metadata), so the pipeline is not tied to
+any specific corpus name.
+
 Usage:
-    python scripts/ingest_ora_docs.py --docs DIR --domain enterprise
-    python scripts/ingest_ora_docs.py --docs DIR --workers 3 --dry-run
+    python scripts/ingest_corpus_docs.py --docs DIR --domain enterprise --source my-corpus
+    python scripts/ingest_corpus_docs.py --docs DIR --workers 3 --dry-run
 """
 import argparse
 import hashlib
@@ -26,9 +29,9 @@ API = "http://localhost:8000/ingest"
 STATUS_API = "http://localhost:8000/ingest/status"
 
 
-def build_payload(path, docs_root, domain):
+def build_payload(path, docs_root, domain, source):
     rel = os.path.relpath(path, docs_root)
-    doc_id = "ora::" + rel.replace(os.sep, "::")
+    doc_id = f"{source}::" + rel.replace(os.sep, "::")
     text = open(path, encoding="utf-8", errors="replace").read()
     checksum = hashlib.sha256(text.encode("utf-8")).hexdigest()
     return {
@@ -38,7 +41,7 @@ def build_payload(path, docs_root, domain):
         "domain": domain,
         "extract_graph": False,
         "if_checksum": checksum,
-        "metadata": {"source_repo": "ora-et-labora", "rel_path": rel},
+        "metadata": {"source_repo": source, "rel_path": rel},
     }, doc_id
 
 
@@ -88,8 +91,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--docs",
                     default=os.path.join(os.path.dirname(os.path.dirname(
-                        os.path.abspath(__file__))), "..", "ora-et-labora", "docs"),
-                    help="path to the ora-et-labora docs dir (default: ../ora-et-labora/docs relative to repo)")
+                        os.path.abspath(__file__))), "..", "corpus-docs", "docs"),
+                    help="path to the corpus docs dir (default: ../corpus-docs/docs relative to repo)")
+    ap.add_argument("--source", default="corpus",
+                    help="corpus identity used as the doc_id prefix and source_repo "
+                         "metadata (e.g. --source my-corpus). The pipeline is corpus-agnostic.")
     ap.add_argument("--domain", default="enterprise")
     ap.add_argument("--workers", type=int, default=1,
                     help="bounded concurrent ingest tasks (default 1 = strictly serial, "
@@ -125,7 +131,7 @@ def main():
     submitted, unchanged, failed = [], [], []
 
     def worker(path):
-        payload, doc_id = build_payload(path, args.docs, args.domain)
+        payload, doc_id = build_payload(path, args.docs, args.domain, args.source)
         status, task_id = post_ingest(payload)
         return doc_id, status, task_id
 

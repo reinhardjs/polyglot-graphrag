@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-bench_ora_corpus.py — Quality-gated benchmark of the CONFIDENTIAL engineering
-corpus (ora-et-labora) ingested into the `enterprise` domain.
+bench_corpus.py — Quality-gated benchmark of a CONFIDENTIAL engineering
+corpus ingested into the `enterprise` domain.
 
 WHY THIS EXISTS
   bench_ask.py benchmarks synthetic demo queries. This script benchmarks the
@@ -30,8 +30,8 @@ No confidential body text is quoted — ground-truth is derived from doc_id
 filename stems that already exist in the ingested corpus.
 
 Run:
-  python scripts/bench_ora_corpus.py
-  python scripts/bench_ora_corpus.py --n 10 --concurrency 32 --top-k 5
+  python scripts/bench_corpus.py
+  python scripts/bench_corpus.py --n 10 --concurrency 32 --top-k 5
 """
 from __future__ import annotations
 import argparse
@@ -128,7 +128,7 @@ def get_docs():
     import config as C
     qc = QdrantClient(url=C.QDRANT_URL)
     hits = qc.scroll("enterprise", limit=9000, with_payload=["doc_id"])[0]
-    return set(p.payload["doc_id"] for p in hits if "ora::" in p.payload.get("doc_id", ""))
+    return set(p.payload["doc_id"] for p in hits)
 
 
 def main():
@@ -194,7 +194,7 @@ def main():
     first_chunk = {}
     for h in hits:
         did = h.payload.get("doc_id", "")
-        if "ora::" not in did or h.payload.get("chunk_idx") != 0:
+        if h.payload.get("chunk_idx") != 0:
             continue
         if did not in first_chunk:
             first_chunk[did] = h.payload.get("text", "")
