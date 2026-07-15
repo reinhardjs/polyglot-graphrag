@@ -422,14 +422,16 @@ def synthesize(query: str, contexts: list, profile: dict = None) -> str:
         r = getattr(delta, "reasoning_content", None) or ""
         c = getattr(delta, "content", None) or ""
         if r:
-            print(r, end="", flush=True)  # stdout for debugging
             reasoning_parts.append(r)
         if c:
             answer_parts.append(c)
-    # Print the clean answer on a new line
+    # Print reasoning trace + clean answer ONCE (not per-chunk flush — flushing
+    # stdout on every streamed token blocks the daemon event loop and makes
+    # synthesis ~10x slower than the model actually needs).
+    if reasoning_parts:
+        print("".join(reasoning_parts))
     clean = "".join(answer_parts)
     if clean:
-        print()  # separator between reasoning trace and answer
         print(clean, flush=True)
     return clean
 
