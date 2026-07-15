@@ -302,6 +302,26 @@ def run():
         return "no doc drift"
     results.append(check("Doc/code consistency (audit_docs.py)", c_docs))
 
+    # ── 14. Synthesis latency benchmark (synthesize:true p95 < 3s, 0 errors) ──
+    def c_synth_bench():
+        import subprocess as _sp
+        bench = os.path.join(BASE, "scripts", "bench_synth_compare.py")
+        assert os.path.isfile(bench), "scripts/bench_synth_compare.py missing"
+        r = _sp.run([sys.executable, bench], capture_output=True, text=True,
+                    timeout=300)
+        if r.returncode != 0:
+            # surface the FAIL line + measured p95 so the operator sees the gap
+            lines = [ln for ln in r.stdout.splitlines()
+                     if "FAIL" in ln or "BACKEND=" in ln]
+            raise AssertionError("synthesis benchmark failed:\n    "
+                                 + "\n    ".join(lines) + f"\n    (stderr: {r.stderr[:200]})")
+        # parse measured p95 from the BACKEND= summary line
+        for ln in r.stdout.splitlines():
+            if ln.startswith("  BACKEND="):
+                return ln.strip()
+        return "synthesis p95 < 3s, 0 errors"
+    results.append(check("Synthesis benchmark (p95<3s, 0 errors)", c_synth_bench))
+
     # ── Print results ───────────────────────────────────────────────
     print()
     print("=" * 72)
