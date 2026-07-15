@@ -14,7 +14,7 @@ ground_truth so Context Recall + Answer Relevance are measurable.
 The daemon fills in `answer` + `contexts` live (--live), so this file
 only needs to ship {question, ground_truth, doc_id}.
 """
-import json, os, random, sys
+import json, os, random, sys, argparse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from qdrant_client import QdrantClient
@@ -59,10 +59,15 @@ def make_pair(did, text):
     }
 
 rows = [make_pair(d, first[d]) for d in docs[:15]]
-with open(os.path.join(BASE, "golden", "golden.json"), "w") as f:
+ap = argparse.ArgumentParser()
+ap.add_argument("--out", default=os.path.join(BASE, "golden", "golden.json"),
+                help="output path (default golden/golden.json — a demo set; "
+                     "the user's confidential set is separate and never overwritten)")
+args = ap.parse_args()
+with open(args.out, "w") as f:
     json.dump(rows, f, indent=2, ensure_ascii=False)
 
-print(f"wrote {len(rows)} golden rows -> golden/golden.json (git-ignored)")
+print(f"wrote {len(rows)} golden rows -> {args.out} (git-ignored)")
 for r in rows[:4]:
     print(f"  Q: {r['question']}")
     print(f"     GT: {r['ground_truth'][:80]}")

@@ -55,6 +55,11 @@ python scripts/release-gate.py        # Check 12 reads golden/golden.json
 
 Example: `GOLDEN_FILE=my-corpus.json python scripts/release-gate.py`
 
+The shipped demo golden `self-docs-demo.json` is built from the
+auto-seeded self-docs corpus (`build_oragolden.py --out golden/self-docs-demo.json`)
+and is safe to use for a smoke-test release gate without any confidential data:
+`GOLDEN_FILE=self-docs-demo.json python scripts/release-gate.py`.
+
 ## IMPORTANT
 
 **Do NOT commit `*.json` from this directory.** They contain
