@@ -134,7 +134,7 @@ curl -s "http://localhost:6333/collections/query_cache" | python -c "import sys,
 
 ### Ingest API (v2.6.0)
 
-`domain` selects a profile (chunking, prompts, collection, entry strategy, metadata schema). Omit it for engineering defaults.
+`domain` selects a profile (chunking, prompts, collection, entry strategy, metadata schema). Omit it for enterprise defaults.
 
 ```bash
 # Single-doc ingest (non-blocking → returns task_id)

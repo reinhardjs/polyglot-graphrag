@@ -75,6 +75,7 @@ _jina_lock = threading.Lock()
 _ingest_lock = threading.Lock()
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+LOG_PREFIX = "rag-daemon" if DEVICE == "cpu" else "gpu-daemon"
 
 # ── Ingest task store (in-process, for BackgroundTasks polling) ───────────────
 # Maps task_id → status dict. Lives for the daemon's lifetime. A production
@@ -93,7 +94,7 @@ def _safe_seed(mod):
     try:
         mod.ingest()
     except Exception as e:
-        print(f"[gpu-daemon] seed ingest failed: {e}", flush=True)
+        print(f"[{LOG_PREFIX}] seed ingest failed: {e}", flush=True)
 
 
 def _load_all():
@@ -110,10 +111,10 @@ def _load_all():
     global _jina, _reranker
     from sentence_transformers import SentenceTransformer, CrossEncoder
 
-    print(f"[gpu-daemon] loading models on {DEVICE} ...", flush=True)
-    print(f"[gpu-daemon]   embed:  {C.EMBED_MODEL_NAME}", flush=True)
-    print(f"[gpu-daemon]     half: {C.EMBED_USE_HALF}", flush=True)
-    print(f"[gpu-daemon]     task: {C.EMBED_TASK_PASSAGE}/{C.EMBED_TASK_QUERY}", flush=True)
+    print(f"[{LOG_PREFIX}] loading models on {DEVICE} ...", flush=True)
+    print(f"[{LOG_PREFIX}]   embed:  {C.EMBED_MODEL_NAME}", flush=True)
+    print(f"[{LOG_PREFIX}]     half: {C.EMBED_USE_HALF}", flush=True)
+    print(f"[{LOG_PREFIX}]     task: {C.EMBED_TASK_PASSAGE}/{C.EMBED_TASK_QUERY}", flush=True)
 
     # ── Embedding model (identity + flags from config) ───
     load_kw = {"device": DEVICE}
@@ -123,22 +124,22 @@ def _load_all():
     try:
         _jina = SentenceTransformer(C.EMBED_MODEL_NAME, **load_kw)
     except Exception as e:
-        print(f"[gpu-daemon] FATAL: failed to load embedder "
+        print(f"[{LOG_PREFIX}] FATAL: failed to load embedder "
               f"'{C.EMBED_MODEL_NAME}': {e}", flush=True)
         import sys; sys.exit(1)
 
-    if C.EMBED_USE_HALF:
+    if C.EMBED_USE_HALF and DEVICE != "cpu":
         try:
             _jina = _jina.half()
         except Exception as e:
-            print(f"[gpu-daemon] WARNING: .half() failed ({e}), "
+            print(f"[{LOG_PREFIX}] WARNING: .half() failed ({e}), "
                   f"running fp32 — VRAM will be higher", flush=True)
 
     # Validate dimension
     dim = _jina.get_sentence_embedding_dimension()
     if dim != C.VECTOR_DIM:
         print(
-            f"[gpu-daemon] WARNING: model output dim={dim} "
+            f"[{LOG_PREFIX}] WARNING: model output dim={dim} "
             f"but VECTOR_DIM={C.VECTOR_DIM} — UPDATE VECTOR_DIM in config!",
             flush=True,
         )
@@ -161,10 +162,11 @@ def _load_all():
     _jina.encode(["warm"], **embed_kw)
     _reranker.predict([("warm", "warm")])
 
+    allocated = f"{torch.cuda.memory_allocated()/1e9:.1f} GB" if DEVICE != "cpu" else "N/A (CPU)"
     print(
-        f"[gpu-daemon] resident models loaded on {DEVICE} "
+        f"[{LOG_PREFIX}] resident models loaded on {DEVICE} "
         f"(GLiNER lazy-loaded on demand). "
-        f"Allocated: {torch.cuda.memory_allocated()/1e9:.1f} GB",
+        f"Allocated: {allocated}",
         flush=True,
     )
 
@@ -175,12 +177,12 @@ def _load_all():
     def _prebuild_idf():
         try:
             import domains.snomed.retrieve as S
-            print("[gpu-daemon] building SNOMED IDF lookup table ...", flush=True)
+            print(f"[{LOG_PREFIX}] building SNOMED IDF lookup table ...", flush=True)
             S._ensure_idf_cache()
-            print(f"[gpu-daemon] SNOMED IDF cache ready "
+            print(f"[{LOG_PREFIX}] SNOMED IDF cache ready "
                   f"({len(S._IDF_CACHE)} words)", flush=True)
         except Exception as e:
-            print(f"[gpu-daemon] IDF prebuild failed (lazy on first use): {e}",
+            print(f"[{LOG_PREFIX}] IDF prebuild failed (lazy on first use): {e}",
                   flush=True)
     threading.Thread(target=_prebuild_idf, daemon=True).start()
 
@@ -193,13 +195,15 @@ def _load_gliner():
     global _gliner
     if _gliner is None:
         from gliner import GLiNER
-        print(f"[gpu-daemon] lazy-loading GLiNER: {C.GLINER_MODEL_NAME} ...",
+        print(f"[{LOG_PREFIX}] lazy-loading GLiNER: {C.GLINER_MODEL_NAME} ...",
               flush=True)
-        _gliner = GLiNER.from_pretrained(C.GLINER_MODEL_NAME).to(DEVICE).half()
+        _gliner = GLiNER.from_pretrained(C.GLINER_MODEL_NAME)
+        if DEVICE != "cpu":
+            _gliner = _gliner.to(DEVICE).half()
         _gliner.predict_entities("warm", ["Microservice", "Database"])
         print(
-            f"[gpu-daemon] GLiNER resident. "
-            f"Allocated: {torch.cuda.memory_allocated()/1e9:.1f} GB",
+            f"[{LOG_PREFIX}] GLiNER resident. "
+            f"Allocated: {allocated}",
             flush=True,
         )
     return _gliner
@@ -348,7 +352,7 @@ def extract_graph(req: ExtractReq):
             # GLiNER can raise KeyError on certain spans (id_to_class_i bug).
             # Degrade gracefully — return no entities rather than 500 so the
             # caller (sliding_window) can continue with the other windows.
-            print(f"[gpu-daemon] GLiNER predict failed: {e}", flush=True)
+            print(f"[{LOG_PREFIX}] GLiNER predict failed: {e}", flush=True)
             preds = []
     nodes, edges, seen = {}, [], set()
     for sent in [s for s in re.split(r'(?<=[.!?])\s+', req.text) if s.strip()]:
@@ -394,7 +398,7 @@ def extract_entities(req: ExtractReq):
             # GLiNER can raise KeyError on certain spans (id_to_class_i bug).
             # Degrade gracefully — return no entities rather than 500 so the
             # caller (sliding_window) can continue with the other windows.
-            print(f"[gpu-daemon] GLiNER predict failed: {e}", flush=True)
+            print(f"[{LOG_PREFIX}] GLiNER predict failed: {e}", flush=True)
             preds = []
     entities = []
     seen = set()
@@ -1639,7 +1643,8 @@ def health():
     return {
         "status": status,
         "device": DEVICE,
-        "cuda_alloc_gb": round(torch.cuda.memory_allocated()/1e9, 1),
+        "cuda_alloc_gb": round(torch.cuda.memory_allocated()/1e9, 1)
+        if torch.cuda.is_available() else 0.0,
         "vram_gb": round(torch.cuda.get_device_properties(0).total_memory/1e9, 1)
         if torch.cuda.is_available() else 0.0,
         "backends": backends,
@@ -1752,10 +1757,10 @@ def on_startup():
                     size=C.VECTOR_DIM, distance=Distance.COSINE,
                 ),
             )
-            print(f"[gpu-daemon] created cache collection '{C.COLL_CACHE}'",
+            print(f"[{LOG_PREFIX}] created cache collection '{C.COLL_CACHE}'",
                   flush=True)
     except Exception as e:
-        print(f"[gpu-daemon] cache init skipped: {e}", flush=True)
+        print(f"[{LOG_PREFIX}] cache init skipped: {e}", flush=True)
 
     # Ensure Neo4j vector index exists for entity resolution
     try:
@@ -1781,11 +1786,11 @@ def on_startup():
                   "FOR (n:Entity) ON (n.name)")
             s.run("CREATE TEXT INDEX entity_id_idx IF NOT EXISTS "
                   "FOR (n:Entity) ON (n.id)")
-            print(f"[gpu-daemon] Neo4j vector index '{C.ENTITY_VECTOR_INDEX}' "
+            print(f"[{LOG_PREFIX}] Neo4j vector index '{C.ENTITY_VECTOR_INDEX}' "
                   f"ready (dim={C.VECTOR_DIM}, cosine); TEXT indexes "
                   f"entity_name_idx/entity_id_idx ready", flush=True)
     except Exception as e:
-        print(f"[gpu-daemon] Neo4j vector index init skipped: {e}", flush=True)
+        print(f"[{LOG_PREFIX}] Neo4j vector index init skipped: {e}", flush=True)
 
     # Auto-seed corpora so a non-technical user can query AS-IS.
     # For each domain in config.SEED_ON_STARTUP, if its Qdrant collection is
@@ -1802,16 +1807,16 @@ def on_startup():
             from qdrant_client import QdrantClient
             qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
             if qc.collection_exists(coll) and qc.count(coll).count > 0:
-                print(f"[gpu-daemon] seed '{domain}': collection '{coll}' "
+                print(f"[{LOG_PREFIX}] seed '{domain}': collection '{coll}' "
                       f"non-empty, skip", flush=True)
                 continue
             mod = importlib.import_module(f"domains.{domain}.ingest")
-            print(f"[gpu-daemon] seeding demo domain '{domain}' "
+            print(f"[{LOG_PREFIX}] seeding demo domain '{domain}' "
                   f"-> {coll} ...", flush=True)
             threading.Thread(target=lambda m=mod: _safe_seed(m),
                               daemon=True).start()
         except Exception as e:
-            print(f"[gpu-daemon] seed '{domain}' skipped: {e}", flush=True)
+            print(f"[{LOG_PREFIX}] seed '{domain}' skipped: {e}", flush=True)
 
 
 if __name__ == "__main__":
@@ -1824,7 +1829,7 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     if args.demo:
-        print("[gpu-daemon] --demo: seeding all demo domains ...", flush=True)
+        print(f"[{LOG_PREFIX}] --demo: seeding all demo domains ...", flush=True)
         for seed_fn in [
             ("enterprise", "domains.enterprise.seed"),
             ("legal", "domains.legal.seed"),
@@ -1837,6 +1842,6 @@ if __name__ == "__main__":
                 print(f"  [demo] {seed_fn[0]}: SKIP ({e})", flush=True)
         # snomed + clinical_prose are already populated (purge kept them);
         # re-running is idempotent (collections already non-empty → skipped).
-        print("[gpu-daemon] --demo: done. Starting daemon.", flush=True)
+        print(f"[{LOG_PREFIX}] --demo: done. Starting daemon.", flush=True)
 
     uvicorn.run(app, host="127.0.0.1", port=8000, workers=1)

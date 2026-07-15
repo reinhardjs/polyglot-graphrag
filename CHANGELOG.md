@@ -1,3 +1,19 @@
+> **Current release: `v1.0.1`** (git tag `v1.0.1`).
+
+## [1.0.1] — 2026-07-16
+
+### Changed
+- **Unified daemon** (`serve_gpu.py`): auto-detects CUDA vs CPU, guards `.half()` calls on CPU, device-aware log prefix (`gpu-daemon` / `rag-daemon`). `serve_cpu.py` is now a thin wrapper — zero future divergence.
+- **Release gate** (`scripts/release-gate.py`): device-aware thresholds — bench <2000ms on CPU (vs 400ms GPU), synth <5.0s on CPU (vs 4.0s GPU), auto-detected from `/health`.
+- **serve_cpu.py parity**: added `/v1/embeddings`, `/admin/reload`, `/metrics`, full health endpoint, unknown-domain guard, cross-domain fan-out, Prometheus counters, and fixed stale `_resolve_collections` / `process_query` bug.
+
+### Fixed
+- `serve_gpu.py`: CPU-safe `.half()` loading for Jina embedder and GLiNER. `torch.cuda.memory_allocated()` guarded with `"N/A (CPU)"` fallback.
+- `serve_cpu.py`: Missing `_jina_lock`, `OpenAIEmbedReq` model, lazy-load for `/v1/embeddings`. Default collection fallback now uses `domain_loader.get_default_domain()`.
+- `release-gate.py`: Cross-domain check `d["degraded"] is False` now properly set in all return paths.
+
+---
+
 # Changelog
 
 All notable changes to this project are documented here. This project

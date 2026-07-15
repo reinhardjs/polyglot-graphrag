@@ -696,12 +696,12 @@ def ingest_text(text: str, doc_id: str, meta: dict | None = None,
     share one code path. Returns a result dict with timings + counts.
 
     `collection` selects the Qdrant collection (multi-domain support). Defaults
-    to C.COLL_CHUNKS (engineering_chunks). The collection is created on first
+    to C.COLL_CHUNKS (clinical_prose; see config.py:COLL_CHUNKS). The collection is created on first
     use via ensure_collection().
 
     `domain` (v2.6.0): selects a profile (TOML). When set, chunking strategy,
     extraction prompt, and metadata validation are taken from the profile
-    instead of hardcoded defaults. Unknown domain → engineering profile.
+    instead of hardcoded defaults. Unknown domain → enterprise profile.
 
     If `if_checksum` is provided and matches the stored Qdrant payload checksum,
     returns {"status": "unchanged", "skipped": True} in <10ms (no re-extraction).

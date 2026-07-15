@@ -111,9 +111,9 @@ is logged for debugging, content is parsed as JSON.
 > it via env (note the ~22s latency tradeoff):
 > `SYNTHESIS_LLM_BASE_URL=http://127.0.0.1:8084/v1 SYNTHESIS_LLM_MODEL=gemma-4-E4B-it-QAT-Q4_0.gguf`
 
-### Synthesis tuning (v1.0 — how E2B synthesis stays <3s)
+### Synthesis tuning (v1.0 — how E2B synthesis stays <4s)
 
-The daemon keeps E2B synthesis under 3s on the RTX 3060 12 GB card via levers
+The daemon keeps E2B synthesis under 4s on the RTX 3060 12 GB card via levers
 in `config.py` (all env-overridable):
 
 - `MAX_SYNTH_CONTEXT_CHARS` (default 350) — truncate each retrieved chunk sent

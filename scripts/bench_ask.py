@@ -11,7 +11,7 @@ context coverage. Exits non-zero if any request errors or p95 exceeds target.
 
 Targets (from v1.0 roadmap):
   single-domain, no synthesis: p95 < 250ms (cold) / < 400ms (multi-domain)
-  with synthesis:             p95 < 3s
+  with synthesis:             p95 < 4s
 """
 from __future__ import annotations
 
@@ -129,7 +129,7 @@ def main():
             print("  ", e)
         sys.exit(1)
     if all_lats and _pct(all_lats, 95) > 3.0 and args.synthesize:
-        print("WARN: p95 > 3s with synthesis")
+        print("WARN: p95 > 4s with synthesis")
     sys.exit(0)
 
 

@@ -53,10 +53,10 @@ def _get_driver():
 def resolve_collections(collection: Optional[str | List[str]]) -> List[str]:
     """Resolve a collection request into a list of Qdrant collection names.
 
-    - None → [QDRANT_COLLECTION_DEFAULT] (engineering_chunks)
+    - None → [QDRANT_COLLECTION_DEFAULT] (clinical_prose; see config.py:COLL_CHUNKS)
     - "legal" → [QDRANT_COLLECTIONS["legal"]] (domain alias)
     - "legal_chunks" → ["legal_chunks"] (direct name, if exists)
-    - ["eng", "legal"] → [engineering_chunks, legal_chunks] (cross-domain)
+    - ["enterprise", "legal"] → [enterprise_collection, legal_chunks] (cross-domain)
     - "all" → all registered collections in QDRANT_COLLECTIONS
     """
     if collection is None:
@@ -119,7 +119,7 @@ def qdrant_search(vec: list, query_text: str = "",
     """Dense + sparse hybrid Qdrant search with RRF fusion.
 
     `collection` selects the Qdrant collection to search (multi-domain support).
-    Defaults to C.COLL_CHUNKS (engineering_chunks).
+    Defaults to C.COLL_CHUNKS (clinical_prose; see config.py:COLL_CHUNKS).
 
     Returns a list of dict records:
         {"text": str, "doc_id": str, "doc_type": str, "chunk_idx": int}

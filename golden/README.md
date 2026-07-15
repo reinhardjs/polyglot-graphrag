@@ -9,7 +9,7 @@ corpus content never gets committed to the repo.
 `self-docs-demo.json` is a **demo** golden built from the auto-seeded
 self-docs corpus (via `build_oragolden.py --out golden/self-docs-demo.json`).
 The release gate uses it by DEFAULT, so a fresh clone (which boots into the
-self-docs-only `enterprise` collection) passes 12/12 out of the box with no
+self-docs-only `enterprise` collection) passes 14/14 out of the box with no
 confidential data. It is git-ignored like all `*.json` here.
 
 ## Why this dir
@@ -66,7 +66,7 @@ Example: `GOLDEN_FILE=my-corpus.json python scripts/release-gate.py`
 The shipped demo golden `self-docs-demo.json` is built from the
 auto-seeded self-docs corpus (`build_oragolden.py --out golden/self-docs-demo.json`)
 and is the release gate's DEFAULT (matches the self-docs-only enterprise
-collection), so a fresh clone passes 12/12 with no confidential data:
+collection), so a fresh clone passes 14/14 with no confidential data:
 `python scripts/release-gate.py`. To score YOUR own corpus instead, drop it
 at `golden/<your-set>.json` and run `GOLDEN_FILE=<your-set>.json python
 scripts/release-gate.py`.

@@ -5,9 +5,9 @@ domain dicts by name. No hardcoded logic — everything derives from YAML.
 
 Usage:
     from domain_loader import get_domain, list_domains, reload_domains
-    d = get_domain("engineering")
-    d["entity_types"]   # -> ["Microservice", "Database", ...]
-    d["relation_types"] # -> ["FIXES", "AUTHORED", ...]
+    d = get_domain("enterprise")
+    d["entity_types"]   # -> ["ADR", "Runbook", "Postmortem", "RFC", "Service", "Team", ...]
+    d["relation_types"] # -> ["DOCUMENTS", "OWNS", "DEPENDS_ON", ...]
 """
 from __future__ import annotations
 
@@ -35,9 +35,9 @@ _DOMAINS: Dict[str, Any] = {}
 _DEFAULT_DOMAIN = "enterprise"  # must match domain_config.yaml `default_domain`.
 # NOTE: the YAML `default_domain` key OVERRIDES this constant at load time
 # (domain_loader reloads from YAML). This is only the fallback if the YAML
-# omits `default_domain`. `engineering` was the historical default but that
-# domain no longer exists in domain_config.yaml — `enterprise` is the primary
-# non-confidential corpus.
+# omits `default_domain`. `enterprise` is the current default (set via
+# `default_domain: enterprise` in domain_config.yaml). `engineering` was an
+# earlier experimental domain that no longer exists in the YAML.
 # Top-level config blocks (dynamic_labels, llm_fallback) exposed for runtime
 # access without re-parsing the YAML.
 _TOP_LEVEL: Dict[str, Any] = {}
@@ -121,8 +121,8 @@ def _resolve_alias(name: str) -> str:
     """Resolve a domain *alias* to its concrete target name.
 
     An alias is a `domains:<name>:` block with an `alias:` key (e.g.
-    `default: {alias: engineering}`). This lets us expose a stable public
-    name (`default`) whose underlying strategy is another domain, WITHOUT
+    `healthcare: {alias: snomed}`). This lets us expose a stable public
+    name (`healthcare`) whose underlying strategy is another domain, WITHOUT
     renaming the concrete domain (which is referenced in many places).
     Returns `name` unchanged if it is not an alias.
     """
@@ -145,7 +145,7 @@ def _ensure_loaded() -> None:
 def get_domain(name: str | None = None) -> Dict[str, Any]:
     """Return the domain config dict for `name` (or default if None).
 
-    `name` may be an *alias* (e.g. `default` → `engineering`); it is
+    `name` may be an *alias* (e.g. `healthcare` → `snomed`); it is
     resolved transparently via `_resolve_alias`. The returned dict is a
     deep copy of the concrete domain so callers can mutate it safely.
     """
