@@ -66,7 +66,7 @@ fuses them. Hits appearing in ≥2 signals get a dual-evidence boost.
 | `chunking.strategy` | `sentence` (1 chunk/sentence), `paragraph` (1/para), `section` (split on `section_header_prefix`), `fixed` (sliding window). |
 | `chunking.chunk_size` / `overlap` | Token budget / sliding-window overlap. |
 | `companions` | List of companion corpus domain names searched in parallel. |
-| `entity_types` / `relation_types` | Vocabulary for graph extraction / GLiNER fallback labels. |
+| `entity_types` / `relation_types` | **Single source of truth for the extraction vocabulary.** Flows into the LLM extraction prompt (via `{entity_types}`/`{relation_types}` tokens rendered by `ingest.py`), the structured/GLiNER extractors, and validation. Edit the vocab HERE — do NOT also hardcode it in an extraction prompt; the prompt is rendered from these values. |
 | `entry_strategy` | Graph entry: `keyword` (token overlap, falls back to vector), `vector`, `hybrid`. |
 | `metadata_schema.fields` | Declared metadata keys (unknown keys are warned, not dropped). |
 

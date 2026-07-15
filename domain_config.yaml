@@ -83,19 +83,18 @@ domains:
       - source
   legal:
     # Legal & Compliance: GDPR, SOC 2, HIPAA, contract clauses.
-    # Primary corpus = Qdrant `legal` collection (dense prose). No graph.
+    # Primary corpus = Qdrant `legal` collection (dense prose). No graph
+    # (neo4j_label: null) -> retrieval-only; synthesis prompt is prompts/legal_synthesis.md.
     collection: legal
     neo4j_label: null
     retrieval: dense_prose
-    entity_types: [Statute, Regulation, Clause, Party, Contract, Policy, Obligation]
-    relation_types: [GOVERNS, REFERENCES, OVERRIDES, OBLIGATES, AMENDS, DEFINES]
-    # Example domain: custom synthesis + extraction prompts live in prompts/.
-    # Set synthesis.kind -> prompts/legal_synthesis.md; extraction.template ->
-    # prompts/legal_extraction.md. No Python changes needed.
+    # Retrieval-only: empty graph vocab (validator still requires the keys).
+    # ingest.py falls back to config.DEFAULT_ENTITY_TYPES/RELATION_TYPES when a
+    # domain omits them, so the extraction prompt stays valid even with no graph.
+    entity_types: []
+    relation_types: []
     synthesis:
       kind: legal_synthesis
-    extraction:
-      template: legal_extraction.md
     pair_strategy: all_pairs
     min_confidence: 0.0
     chunking:
@@ -106,6 +105,12 @@ domains:
       fields:
       - title
       - source
+    # To build a LEGAL GRAPH instead of retrieval-only: set neo4j_label: LegalDoc
+    # and populate entity_types/relation_types (the extraction prompt reads them):
+    #   entity_types: [Statute, Regulation, Clause, Party, Contract, Policy, Obligation]
+    #   relation_types: [GOVERNS, REFERENCES, OVERRIDES, OBLIGATES, AMENDS, DEFINES]
+    #   extraction:
+    #     template: legal_extraction.md
   fraud:
     # Fraud Detection: transaction graph (Neo4j) + narrative companion (Qdrant).
     # Primary corpus = graph retriever (domains/fraud/retrieve.py). Companion

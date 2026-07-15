@@ -642,12 +642,23 @@ def extract_graph_llm(doc_id: str, text: str, chunk_size: int = 512,
         else:
             prompt_tmpl = C.EXTRACTION_PROMPT
     # Safe substitution: prompts contain literal {...} (JSON schema) that break
-    # str.format(), so replace only our two tokens.
+    # str.format(), so replace only our known tokens. The entity/relation
+    # VOCABULARY comes from the profile (YAML: entity_types / relation_types) —
+    # this makes domain_config.yaml the single source of truth and keeps the LLM
+    # prompt in sync with the structured extractor/validation automatically.
+    _et = (profile or {}).get("entity_types") or C.DEFAULT_ENTITY_TYPES
+    _rt = (profile or {}).get("relation_types") or C.DEFAULT_RELATION_TYPES
+    if isinstance(_et, list):
+        _et = "|".join(_et)
+    if isinstance(_rt, list):
+        _rt = "|".join(_rt)
     client = OpenAI(base_url=C.EXTRACTION_LLM_BASE_URL,
                     api_key=C.EXTRACTION_LLM_API_KEY)
     prompt = (prompt_tmpl
               .replace("{doc_id}", doc_id)
-              .replace("{text}", text[:C.EXTRACTION_CHAR_LIMIT]))
+              .replace("{text}", text[:C.EXTRACTION_CHAR_LIMIT])
+              .replace("{entity_types}", _et)
+              .replace("{relation_types}", _rt))
     try:
         resp = client.chat.completions.create(
             model=C.EXTRACTION_LLM_MODEL,

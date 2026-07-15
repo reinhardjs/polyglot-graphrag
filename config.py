@@ -201,25 +201,29 @@ GLINER_MODEL_NAME = "urchade/gliner_multi-v2.1"
 EXTRACTION_READS_REASONING = False
 
 # ── Prompt Templates (per-model overridable) ──────────────────────────────────
-# Extraction prompt: sent to the EXTRACTION_LLM. {doc_id} and {text} are
-# formatted in. Change this if you swap the extraction model and it needs a
-# different prompt style (e.g. some models prefer "system" + "user" roles).
+# Extraction prompt: sent to the EXTRACTION_LLM. Substitution tokens:
+#   {doc_id}, {text}          — document id / body (always)
+#   {entity_types}            — vocab from profile['entity_types'] (YAML)
+#   {relation_types}          — vocab from profile['relation_types'] (YAML)
+# The entity/relation VOCABULARY is the single source of truth in
+# domain_config.yaml (entity_types / relation_types). ingest.py substitutes it
+# into the prompt at render time, so the LLM prompt and the structured
+# extractor/validation can never drift apart. Edit the vocab in YAML only.
 #
 # The default lives in prompts/extraction.md (editable without touching Python).
 # config.EXTRACTION_PROMPT loads it at import; if the file is missing, the
 # inline string below is the fallback so the system never breaks.
+DEFAULT_ENTITY_TYPES = "Microservice|Database|API|Metric|Developer|Framework|Component|Bug|PR|ADR"
+DEFAULT_RELATION_TYPES = "ASSOCIATED_WITH|DEPENDS_ON|IMPACTS|AUTHORED|REFERENCES|FIXES"
 _EXTRACTION_PROMPT_FALLBACK = (
-    "Extract a knowledge graph from the engineering document below.\n"
-    "Entities: extract names EXACTLY as they appear — do NOT translate.\n"
-    "  (e.g. 'Basis Data' stays 'Basis Data', 'Database' stays 'Database').\n"
-    "Relationships: use one of ASSOCIATED_WITH, DEPENDS_ON, IMPACTS,\n"
-    "  AUTHORED, REFERENCES, FIXES.\n"
-    "Return ONLY valid JSON, no prose, no markdown:\n"
-    '{{"nodes":[{{"id":"ExactEntityName","type":"Microservice|Database|API|'
-    'Metric|Developer|Framework|Component|Bug|PR|ADR"}}],'
-    '"edges":[{{"source":"entity_a","target":"entity_b",'
-    '"type":"ASSOCIATED_WITH|DEPENDS_ON|IMPACTS|AUTHORED|REFERENCES|FIXES"}}]}}\n'
-    "Document ({doc_id}):\n{text}"
+    "Extract a knowledge graph from the document below.\\n"
+    "Entities: extract names EXACTLY as they appear — do NOT translate.\\n"
+    "Relationships: use one of {relation_types}.\\n"
+    "Return ONLY valid JSON, no prose, no markdown:\\n"
+    '{{\"nodes\":[{{\"id\":\"ExactEntityName\",\"type\":\"{entity_types}\"}}],'
+    '\"edges\":[{{\"source\":\"entity_a\",\"target\":\"entity_b\",'
+    '\"type\":\"{relation_types}\"}}]}}\\n'
+    "Document ({doc_id}):\\n{text}"
 )
 def _load_extraction_prompt():
     _path = os.path.join(os.path.dirname(os.path.abspath(__file__)),

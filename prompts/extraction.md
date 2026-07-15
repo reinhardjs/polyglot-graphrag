@@ -1,9 +1,7 @@
-Extract a knowledge graph from the engineering document below.
+Extract a knowledge graph from the document below.
 Entities: extract names EXACTLY as they appear — do NOT translate.
-  (e.g. 'Basis Data' stays 'Basis Data', 'Database' stays 'Database').
-Relationships: use one of ASSOCIATED_WITH, DEPENDS_ON, IMPACTS,
-  AUTHORED, REFERENCES, FIXES.
+Relationships: use one of {relation_types}.
 Return ONLY valid JSON, no prose, no markdown:
-{{"nodes":[{"id":"ExactEntityName","type":"Microservice|Database|API|Metric|Developer|Framework|Component|Bug|PR|ADR"}],"edges":[{"source":"entity_a","target":"entity_b","type":"ASSOCIATED_WITH|DEPENDS_ON|IMPACTS|AUTHORED|REFERENCES|FIXES"}]}}
+{{"nodes":[{"id":"ExactEntityName","type":"{entity_types}"}],"edges":[{"source":"entity_a","target":"entity_b","type":"{relation_types}"}]}}
 Document ({doc_id}):
 {text}

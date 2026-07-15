@@ -32,6 +32,15 @@ A domain may override the extraction prompt two ways (in `domain_config.yaml`):
   `legal_extraction.md`), resolved relative to `prompts/`. Used when no inline
   `prompt` is given.
 
+Substitution tokens in ANY extraction template (default, template, or inline):
+- `{doc_id}`, `{text}` — document id / body (always substituted).
+- `{entity_types}`, `{relation_types}` — the domain's vocabulary, taken from
+  `domain_config.yaml` `entity_types` / `relation_types` and substituted by
+  `ingest.py`. **Do NOT hardcode the vocab in the template** — the YAML is the
+  single source of truth, so the LLM prompt and the structured extractor/
+  validation stay in sync automatically. If a domain omits them, the
+  `config.DEFAULT_ENTITY_TYPES` / `DEFAULT_RELATION_TYPES` fallbacks are used.
+
 ## Files
 - `clinical_dx.md` — ranked differential-diagnosis prompt for the `snomed`
   domain (SNOMED term-match + clinical-prose corpus). Selected by
