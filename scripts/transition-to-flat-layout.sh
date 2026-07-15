@@ -66,7 +66,7 @@ echo "==> Removed '$SRC/' (history retained in git log)."
 
 echo
 echo "==> STEP 4 (manual, requires sudo): point systemd at the new root."
-echo "    sudo sed -i 's#WorkingDirectory=.*rag-system/$SRC#WorkingDirectory=/mnt/data-970-plus/rag-system#' \\"
+echo "    sudo sed -i 's#WorkingDirectory=.*rag-system/\$SRC#WorkingDirectory=<project-root>#' \\\\"
 echo "        /etc/systemd/system/rag-gpu-daemon.service"
 echo "    sudo systemctl daemon-reload"
 echo "    (Running PID keeps its cwd; change applies on next daemon restart.)"

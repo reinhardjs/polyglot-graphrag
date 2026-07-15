@@ -18,7 +18,7 @@
 #   bash run.sh stop          stop daemon + LLMs
 set -e
 # Anchor all paths to the project root (this script's directory) so the project
-# is portable and does not depend on a machine-specific prefix (/mnt/data-970-plus).
+# is portable and does not depend on a machine-specific absolute prefix.
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 ENV="$ROOT/venv"

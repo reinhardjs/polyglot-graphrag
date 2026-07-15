@@ -26,7 +26,7 @@ python -m spacy download en_core_web_sm   # sliding-window tokenization
 ## 1. Start the stack (boot once, then you can ask)
 
 ```bash
-cd /mnt/data-970-plus/rag-system
+cd polyglot-graphrag   # or: cd <project-root>
 
 # 1) Supporting stores (Neo4j + Qdrant) — Docker, runs in background.
 docker compose up -d

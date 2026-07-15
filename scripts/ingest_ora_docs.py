@@ -86,7 +86,10 @@ def poll(task_id, timeout=180):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--docs", default="/mnt/data-970-plus/ora-et-labora/docs")
+    ap.add_argument("--docs",
+                    default=os.path.join(os.path.dirname(os.path.dirname(
+                        os.path.abspath(__file__))), "..", "ora-et-labora", "docs"),
+                    help="path to the ora-et-labora docs dir (default: ../ora-et-labora/docs relative to repo)")
     ap.add_argument("--domain", default="enterprise")
     ap.add_argument("--workers", type=int, default=1,
                     help="bounded concurrent ingest tasks (default 1 = strictly serial, "

@@ -2,7 +2,7 @@
 
 ## Context (what you're integrating with)
 
-You're working on the polyglot-graphrag project at `/mnt/data-970-plus/rag-system/`.
+You're working on the polyglot-graphrag project (cloned to `<project-root>`).
 It ingests documents into Neo4j (knowledge graph) + Qdrant (vector chunks) and
 serves RAG queries via a GPU daemon (`serve_gpu.py`, port 8000).
 
@@ -96,9 +96,9 @@ git tracks file changes — content-hash (SHA256) based, no timestamps.
   the server truncates the extraction window but embeds all chunks.
 
 ## File placement
-- Script: `/mnt/data-970-plus/rag-system/sync_docs.py`
-- State file: `/mnt/data-970-plus/rag-system/.sync_state.json` (gitignore it)
-- Config (optional): `/mnt/data-970-plus/rag-system/sync_config.yaml`
+- Script: `<project-root>/sync_docs.py`
+- State file: `<project-root>/.sync_state.json` (gitignore it)
+- Config (optional): `<project-root>/sync_config.yaml`
 
 ## Deliverables
 1. `sync_docs.py` — the script described above.
@@ -119,7 +119,7 @@ git tracks file changes — content-hash (SHA256) based, no timestamps.
 
 ## Environment
 - The GPU daemon runs at localhost:8000 (or `RAG_DAEMON_URL` env).
-- The venv is at `/mnt/data-970-plus/rag-system/venv` (symlinked to ./venv).
+- The venv is at `<project-root>/venv` (symlinked to ./venv).
 - Python 3.12. pip install any new deps into that venv (watchdog for inotify).
 - Neo4j + Qdrant are managed via docker-compose (already running).
 

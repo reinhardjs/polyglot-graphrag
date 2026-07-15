@@ -7,7 +7,7 @@ an alias for `snomed`; both resolve to the same hybrid retriever.
 
 ## 1. Start the daemon (if not running)
 
-    cd /mnt/data-970-plus/rag-system
+    cd polyglot-graphrag   # or: cd <project-root>
     ./venv/bin/python serve_gpu.py > logs/daemon_gpu.log 2>&1 &
 
 ## 2. Ask a clinical question
