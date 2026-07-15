@@ -64,11 +64,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com).
   `entity_types`/`relation_types`.
 - `run.sh doctor`: new advisory step runs `audit_docs.py` (flags drift,
   non-fatal).
-- Docs reconciled to the actual system: `docs/API.md` (24 routes; `/reload` +
-  `/v1/embeddings` documented; stale `engineering` refs removed),
+- Docs reconciled to the actual system: `docs/API.md` (23 routes; `/admin/reload`
+  + `/v1/embeddings` documented; stale `engineering` refs removed),
   `RUN.md`, `QUICKSTART.md`, `domains/healthcare/QUICKSTART.md`,
   `docs/domains/README.md`, `docs/benchmarks/v1.0-release-readiness-*.md`
   (synthesis SLO 3s → 4s).
+- Refactor: dropped the redundant `POST /reload` alias (kept `POST /admin/reload`
+  as canonical) — `/reload` reference above is superseded.
 - Synthesis SLO relaxed to **p95 < 4s** (was 3s): investigation showed the 3s
   breach was GPU contention between the daemon's Jina embed and E2B on the
   shared 12 GB card under sustained burst (isolated /ask ≈0.27s; direct E2B
@@ -85,6 +87,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com).
 - `scripts/audit_docs.py` → PASS (0 failures).
 - `bash run.sh doctor` → shows the doc-audit step, Setup OK.
 - `scripts/release-gate.py` → **14/14 ALL SYSTEMS GO**.
+
+## [1.0.8] — 2026-07-16 (v1.0.0 publish-readiness: docs + version stamp)
+
+### Added
+- `VERSION` → `1.0.0` (was `0.1.0`); `config.__version__` reads it.
+- `VERSIONING.md` updated to reflect that `v1.0.0` is now the real
+  stable, contract-locked baseline (the earlier "reset to 0.1.0 / do not
+  recreate v1.x" note was a false start before the contracts froze).
+- Historical note added to `plans/v1.0-*.md` clarifying the SHIPPED
+  v1.0.0 differs from those planning docs (default=enterprise, E4B
+  retired, synthesis SLO <4s).
+
+### Changed
+- **Default domain corrected to `enterprise`** (the v1.0.0 entry below
+  was written when the plan still had `default → snomed`; the shipped
+  v1.0.0 uses `enterprise` as the implicit default — see `[1.0.7]`).
+- README.md: "synthesis <3s" → <4s; removed the retired **E4B** as an
+  "optional" model (it is fully retired, no opt-in path); "12 checks" → 14;
+  "default alias → snomed" → enterprise is the default; "enterprise =
+  confidential corpus" → non-confidential self-docs; "7 domains" → 4 concrete
+  +1 alias; "Two GGUF" → one (E2B).
+- QUICKSTART.md: corrected the false "snomed + clinical_prose are
+  pre-loaded" claim — only `enterprise` self-seeds on first boot; snomed/
+  clinical_prose are ingested on demand.
+- RUN.md: removed the E4B download/opt-in section (fully retired); "two
+  GGUF" → one (E2B).
+- CHANGELOG `[1.0.7]` entry: dropped the redundant `POST /reload`
+  alias reference (consolidated to `/admin/reload`).
+- `scripts/audit_docs.py`: fixed two false-positive checks — the
+  `healthcare` alias is `alias: snomed` (no quotes, was asserting quoted);
+  the live no-domain `/ask` check now queries a self-docs-grounded question
+  ("how does hybrid retrieval fuse Qdrant and Neo4j") so it passes on a
+  freshly-seeded install instead of requiring the old pre-self-docs corpus.
+
+### Verified
+- `scripts/audit_docs.py` → PASS (0 failures) after the doc fixes.
+- `config.__version__` == `1.0.0`.
 
 ## [1.0.5] — 2026-07-15 (new-user restructure: doctor + de-coupled paths)
 

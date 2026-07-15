@@ -11,7 +11,7 @@ a Neo4j knowledge graph + a Qdrant vector store, then answers questions by
 fusing both.
 
 > **Status: STABLE (`1.0.0`).** Enterprise MVP. 4-domain federated retrieval,
-> verified baseline (retrieval p95=89ms, synthesis <3s). Backwards-compatible
+> verified baseline (retrieval p95=89ms, synthesis <4s). Backwards-compatible
 > API. See [VERSIONING.md](VERSIONING.md), [CHANGELOG.md](CHANGELOG.md), and
 > [the roadmap](plans/v1.0-enterprise-mvp-roadmap.md).
 
@@ -47,17 +47,15 @@ project's own `docs/` (tagged `self-docs`) — so you can ask questions about
 the system immediately, e.g. `bash run.sh ask "how does hybrid retrieval
 work" --domain enterprise`, before you've added any of your own data.
 
-**You must download one model file** (not in the repo — too large / license):
+**One model file is required** (not in the repo — too large / license):
 - `gemma-4-E2B-it-QAT-Q4_0.gguf` → extraction + answer synthesis (HuggingFace `lmstudio-community/gemma-4-E2B-it-QAT-GGUF`)
 
 Put it in `<project-root>/models/`. `run.sh` finds it automatically.
 
-> **Optional deeper answers:** the larger `gemma-4-E4B-it-QAT-Q4_0.gguf`
-> (HuggingFace `lmstudio-community/gemma-4-E4B-it-QAT-GGUF`) may be
-> placed in `models/` and enabled at runtime via the `SYNTHESIS_LLM_*`
-> environment variables for longer, deeper answers (~22s p95 on the
-> 12 GB card). It is **not required** — E2B handles synthesis by default
-> at ~2.2s p95.
+> **Retired:** the larger `gemma-4-E4B-it-QAT-Q4_0.gguf` was retired — it
+> gave ~22s answers for no measurable quality gain on the 12 GB card, so
+> E2B now serves BOTH extraction and synthesis at ~2.2s p95. E4B is no
+> longer started (its systemd unit is disabled).
 
 **Ask a question immediately** (a demo corpus is auto-seeded on startup):
 
@@ -95,8 +93,9 @@ confirmed by more than one — see [docs/domains/README.md](docs/domains/README.
 
 ## Quality gate (before you ship)
 
-`scripts/release-gate.py` runs 12 checks (health, retrieval-latency p95 < 400ms,
-synthesis non-empty, answer quality, concurrency). The answer-quality check
+`scripts/release-gate.py` runs 14 checks (health, retrieval-latency p95 < 400ms,
+synthesis non-empty, synthesis-latency p95 < 4s, answer quality, concurrency,
+doc/code consistency). The answer-quality check
 enforces **faithfulness ≥ 0.85** AND **context_precision ≥ 0.50** against the
 golden set:
 
@@ -120,14 +119,17 @@ proxy — so a fresh clone stays green without those heavy extras.
 
 ## Explore (next steps, in order)
 
-1. **Ask with the SNOMED clinical graph** — `domain:"snomed"` (or omit `domain`
-   to hit the `default` alias → snomed). It runs SNOMED term-matching + the
-   `clinical_prose` semantic companion in parallel for differential diagnosis.
-   See [QUICKSTART.md](QUICKSTART.md).
-2. **Ingest your own docs into a NEW domain** — copy `domains/clinical_prose/`
+1. **Ask with the `enterprise` domain (default)** — omit `domain` or pass
+   `domain:"enterprise"`. On first boot it auto-seeds itself with this
+   project's own `docs/` (tagged `self-docs`), so you can ask how the
+   system works immediately. See [QUICKSTART.md](QUICKSTART.md).
+2. **Add the SNOMED clinical graph + companion** — `snomed` (terminology graph)
+   and `clinical_prose` are NOT auto-loaded; ingest them when you want
+   clinical/differential answers (see [QUICKSTART.md §3](QUICKSTART.md)).
+3. **Ingest your own docs into a NEW domain** — copy `domains/clinical_prose/`
    (or `domains/snomed/`) and edit `domain_config.yaml`. No daemon code change
    needed. See [docs/domains/README.md](docs/domains/README.md).
-3. **Understand the architecture** — [ARCHITECTURE.md](ARCHITECTURE.md).
+4. **Understand the architecture** — [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
@@ -146,11 +148,12 @@ proxy — so a fresh clone stays green without those heavy extras.
 | Evolve the data model safely | [MIGRATION.md](MIGRATION.md) |
 | Contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
-> **Configured domains.** The deployment ships with **7 domains**:
-> `snomed` (graph-only terminology), `clinical_prose` (medicine prose companion),
-> `enterprise` (engineering knowledge base — the confidential corpus),
-> `legal`, `fraud` (graph + vector), plus `default` and `healthcare` (both alias
-> to `snomed`). `domain="all"` fans out to every concrete domain. To add a new
+> **Configured domains.** The deployment ships with **4 concrete domains** plus
+> 1 alias: `enterprise` (default — auto-seeded with this project's own
+> `docs/`, non-confidential self-docs/ADR corpus), `snomed` (clinical
+> terminology graph), `clinical_prose` (medicine prose companion),
+> `legal`, `fraud` (graph + vector), and `healthcare` (alias → `snomed`).
+> `domain="all"` fans out to every concrete domain. To add a new
 > corpus, copy an existing `domains/<name>/` plugin and register it in
 > `domain_config.yaml` — the federated factory picks it up with no daemon-code
 > changes.
@@ -163,6 +166,6 @@ proxy — so a fresh clone stays green without those heavy extras.
   (`serve_cpu.py`) but is slow.
 - **Docker + docker compose** (Neo4j + Qdrant).
 - **Python 3.11** venv.
-- Two GGUF model files (above).
+- **One GGUF model file** — `gemma-4-E2B-it-QAT-Q4_0.gguf` (extraction + synthesis). Optional: add more domains' models as needed.
 
 Full detail, including VRAM budgets and known limitations, in [RUN.md §1](RUN.md).

@@ -45,36 +45,31 @@ bash run.sh health
 When `run.sh health` shows green, the system is ready. Stop later with
 `bash run.sh stop` (daemon + E2B) and `docker compose down` (stores).
 
-## 2. Ask immediately (snomed + clinical_prose are pre-loaded)
+## 2. Ask immediately (enterprise self-docs are auto-seeded)
 
-You don't have to ingest anything to try it. The `snomed` graph and the
-`clinical_prose` companion are already populated:
+You don't have to ingest anything to try it. On first startup the **`enterprise`**
+domain (the default) auto-seeds itself with this project's *own documentation*
+(the `docs/` tree, tagged `self-docs`) — so you can immediately ask
+questions about how the GraphRAG system itself works, with no external corpus:
+
 ```bash
-# Full pipeline: SNOMED term-match + clinical_prose semantic + E2B writes the answer
-bash run.sh ask "chest pain and shortness of breath"
+# Full pipeline on the system's own docs (default domain = enterprise)
+bash run.sh ask "how does hybrid retrieval fuse Qdrant and Neo4j"
+# equivalent raw curl (omit domain to use default enterprise):
+curl -s -X POST 127.0.0.1:8000/ask -H 'Content-Type: application/json' \
+  -d '{"query":"how does hybrid retrieval fuse Qdrant and Neo4j","synthesize":true}'
 
 # Retrieval only (no LLM answer — fast, works even if E2B is off)
-bash run.sh retrieve "fever and rash with joint pain"
+bash run.sh retrieve "how does hybrid retrieval work"
 ```
 
-The **`enterprise`** domain is also auto-seeded on first startup with the
-system's *own documentation* (the `docs/` tree, tagged `self-docs`) — so you
-can immediately ask questions about how the GraphRAG system itself works,
-with no external corpus required:
-```bash
-bash run.sh ask "what is the ask pipeline and how does it fuse Qdrant and Neo4j" --domain enterprise
-```
-(Idempotent: it only seeds when the collection is empty, and skips docs that
-already exist. Point it at your own corpus anytime with `ingest_corpus_docs.py`.)
+> The SNOMED clinical graph (`snomed`) and its `clinical_prose` companion are
+> **NOT** auto-loaded. They are populated on demand — see §3 to ingest them
+> (or any corpus of your own) before asking clinical questions.
 
-Raw curl equivalents (omit `domain` to use the default `enterprise` domain):
-```bash
-curl -s -X POST 127.0.0.1:8000/ask -H 'Content-Type: application/json' \
-  -d '{"query":"chest pain and shortness of breath","domain":"snomed","synthesize":true}'
-
-curl -s -X POST 127.0.0.1:8000/ask -H 'Content-Type: application/json' \
-  -d '{"query":"fever and rash","synthesize":false}'
-```
+(Idempotent: enterprise only seeds when its collection is empty, and skips docs
+that already exist. Point it at your own corpus anytime with
+`ingest_corpus_docs.py`.)
 
 ## 3. Add your own corpus (optional)
 

@@ -22,8 +22,8 @@ server-side (embed → Qdrant||Neo4j → rerank → E2B synthesis) in ONE HTTP c
 import os
 
 # ── Version ─────────────────────────────────────────────────────────────────
-# Single source of truth is the VERSION file at the project root. This is an
-# EXPERIMENTAL 0.x.x project (we are NOT at 1.0). See VERSIONING.md.
+# Single source of truth is the VERSION file at the project root.
+# This is the v1.0.0 stable release (contract frozen). See VERSIONING.md.
 def _read_version() -> str:
     vf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")
     try:

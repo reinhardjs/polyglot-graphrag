@@ -88,7 +88,8 @@ def check_domain_config(a):
             "enterprise has neo4j_label: EnterpriseDoc")
     a.check("default_domain: enterprise" in txt,
             "default_domain: enterprise")
-    a.check("alias: snomed" in txt, "healthcare alias -> snomed present")
+    a.check("alias: snomed" in txt or 'alias: "snomed"' in txt,
+            "healthcare alias -> snomed present")
     # the removed 'default:' alias block must be gone
     a.check(not re.search(r"^\s{2}default:\s*\n\s{4}alias:", txt, re.MULTILINE),
             "no 'default:' alias block (was default->snomed)")
@@ -234,19 +235,21 @@ def check_live_endpoints(a, url):
     except Exception as e:
         a.check(False, f"/v1/embeddings reachable ({e})")
 
-    # no-domain /ask resolves to enterprise
+    # no-domain /ask resolves to enterprise (self-docs seeded on first boot)
     try:
         req = urllib.request.Request(
             f"{url}/ask",
-            data=json.dumps({"query": "what does the Basis Data architecture do?",
+            data=json.dumps({"query":
+                              "how does hybrid retrieval fuse Qdrant and Neo4j",
                               "synthesize": True}).encode(),
             headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=30) as r:
             data = json.load(r)
-        # enterprise corpus answer should reference Basis Data / entity resolution
-        ans = (data.get("answer") or "")
-        a.check("Basis Data" in ans or "Basis" in ans,
-                "no-domain /ask resolves to enterprise (Basis Data answer)")
+        # enterprise self-docs corpus should reference Qdrant / Neo4j
+        # (synthesis may render them UPPERCASE — compare case-insensitively)
+        ans = (data.get("answer") or "").lower()
+        a.check("qdrant" in ans or "neo4j" in ans,
+                "no-domain /ask resolves to enterprise (Qdrant/Neo4j answer)")
     except Exception as e:
         a.check(False, f"no-domain /ask reachable ({e})")
 

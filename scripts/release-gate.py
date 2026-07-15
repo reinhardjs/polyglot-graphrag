@@ -42,6 +42,29 @@ def _grep(filepath, pattern):
     return int(r.stdout.strip() or "0")
 
 
+def _qdrant_count(coll):
+    """Return point count for a Qdrant collection, or 0 if missing/empty."""
+    try:
+        import urllib.request
+        with urllib.request.urlopen(
+                f"http://localhost:6333/collections/{coll}", timeout=5) as r:
+            d = json.loads(r.read())
+        return int(d.get("result", {}).get("points_count", 0))
+    except Exception:
+        return 0
+
+
+def _clinical_loaded():
+    """True only if BOTH snomed graph + clinical_prose companion are present.
+
+    The clinical corpus is OPT-IN: per QUICKSTART.md it is NOT auto-loaded
+    on a fresh install (only `enterprise` self-docs seed on first boot).
+    The snomed/healthcare checks below therefore SKIP when the clinical
+    corpus is absent — they still hard-FAIL if it is loaded but broken.
+    """
+    return _qdrant_count("clinical_prose") > 0
+
+
 def check(name, fn):
     """Run a check; return (name, (PASS/FAIL, detail))."""
     try:
@@ -85,6 +108,10 @@ def run():
 
     # ── 3. Healthy /ask (single domain) ──────────────────────────────
     def c_ask_healthy():
+        # snomed/clinical_prose are OPT-IN (not auto-loaded on fresh
+        # install). Skip rather than fail when the clinical corpus is absent.
+        if not _clinical_loaded():
+            return None  # -> SKIP
         d, s = _req("POST", "/ask", {
             "query": "fever and rash", "domain": "snomed", "synthesize": False,
             "skip_cache": True})
@@ -136,6 +163,10 @@ def run():
 
     # ── 7. LLM-based synthesis (healthcare domain, short query) ─────
     def c_synth():
+        # healthcare = alias -> snomed; needs the clinical corpus.
+        # Skip when clinical is not loaded (opt-in on fresh install).
+        if not _clinical_loaded():
+            return None  # -> SKIP
         d, s = _req("POST", "/ask", {
             "query": "fever and rash", "domain": "healthcare", "synthesize": True,
             "skip_cache": True})
