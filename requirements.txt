@@ -2,43 +2,49 @@
 # Install into a venv:  python3 -m venv venv && source venv/bin/activate
 #                       pip install -r requirements.txt
 #
-# NOTE: torch is pinned to the CUDA 12.1 build. The extra-index-url below
+# NOTE: torch is pinned to the CUDA 12.1 build. The --extra-index-url below
 # points pip at the PyTorch CUDA wheel index so `pip install` resolves it.
 # On a CPU-only box, drop the --extra-index-url line and use torch==2.3.1.
+#
+# All versions are PINNED to a known-good, mutually-compatible set
+# (Python 3.11). A fresh install reproduces the verified-working environment.
+# Do not widen these to >= — newer transformers/sentence-transformers have
+# import-incompatibility (e.g. NameError in transformers.integrations.accelerate).
 
 --extra-index-url https://download.pytorch.org/whl/cu121
 
 # ── Runtime (the FastAPI daemon on :8000) ──────────────────────────────
-fastapi>=0.139.0
-uvicorn>=0.51.0
-pydantic>=2.13.4
-requests>=2.34.2
+fastapi==0.139.0
+uvicorn==0.51.0
+pydantic==2.13.4
+requests==2.34.2
 
 # ── Vector store + graph db clients ────────────────────────────────────
-qdrant-client>=1.18.0
-neo4j>=6.2.0
-openai>=2.45.0          # OpenAI-compatible client for the llama.cpp E2B/E4B servers
+qdrant-client==1.18.0
+neo4j==6.2.0
+openai==2.45.0             # OpenAI-compatible client for the llama.cpp E2B/E4B servers
 
 # ── Embeddings / NER / rerank (serve_gpu.py, GPU) ──────────────────────
-sentence-transformers>=5.6.0   # Jina v3 embeddings + BGE reranker (CrossEncoder)
+sentence-transformers==5.6.0   # Jina v3 embeddings + BGE reranker (CrossEncoder)
 torch==2.3.1+cu121
-transformers>=4.49.0
-gliner>=0.2.22            # GLiNER multi v2.1 zero-shot NER
-spacy>=3.8.14            # sliding_window sentence tokenization
-numpy>=2.4.6
-PyYAML>=6.0.3
-
-# ── File-sync daemon (sync_docs.py --watch) ───────────────────────────
-watchdog>=6.0.0
+transformers==4.49.0          # PINNED: newer versions break sentence-transformers import
+gliner==0.2.22               # GLiNER multi v2.1 zero-shot NER
+spacy==3.8.14               # sliding_window sentence tokenization
+numpy==2.4.6
+einops==0.8.2               # required by jina-embeddings-v3
+PyYAML==6.0.3
 
 # ── Pulled in transitively (pinned for build stability) ───────────────
-filelock>=3.29.0
-huggingface_hub>=0.36.2
-safetensors>=0.8.0
-tokenizers>=0.21.4
-scipy>=1.17.1
-scikit-learn>=1.9.0
-tqdm>=4.68.4
+filelock==3.29.0
+huggingface_hub==0.36.2
+safetensors==0.8.0
+tokenizers==0.21.4
+scipy==1.17.1
+scikit-learn==1.9.0
+tqdm==4.68.4
+accelerate==1.6.0          # transformers dependency
+# ── File-sync daemon (sync_docs.py --watch) ───────────────────────────
+watchdog==6.0.0
 
 # ── Test-only (optional: `pip install -r requirements.txt` includes them) ─
-pytest>=9.1.1
+pytest==9.1.1

@@ -19,7 +19,8 @@ fusing both.
 
 ## Try it in 5 minutes (zero knowledge required)
 
-You need an NVIDIA GPU (RTX 3060 12 GB tested), Docker, and Python 3.11.
+You need an NVIDIA GPU (RTX 3060 12 GB tested), Docker, and **Python 3.11**
+(`run.sh` auto-creates the venv with `python3.11` if present).
 
 ```bash
 # 1) Clone + venv

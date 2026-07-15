@@ -57,13 +57,37 @@ detect_llama_bin() {
 
 LLAMA_BIN="$(detect_llama_bin)"
 
+# ── venv: create + install if missing or broken ──────────────────────────────
+ensure_venv() {
+  if [ ! -x "$PY" ]; then
+    # Prefer Python 3.11 (the verified-working interpreter); fall back to python3.
+    local py="${PYTHON3:-$(command -v python3.11 || command -v python3)}"
+    echo "Creating venv ($ENV) with $py ..."
+    "$py" -m venv "$ENV" || { echo "  FAILED to create venv — install python3.11-venv." >&2; return 1; }
+  fi
+  # Verify key imports; install only if something is missing.
+  if ! "$PY" -c "import fastapi, qdrant_client, neo4j, requests" >/dev/null 2>&1; then
+    echo "Installing Python dependencies (pip install -r requirements.txt) ..."
+    "$ENV/bin/pip" install --quiet -r "$ROOT/requirements.txt" || {
+      echo "  FAILED pip install — check network / requirements.txt." >&2; return 1; }
+    "$PY" -m spacy download en_core_web_sm >/dev/null 2>&1 || \
+      echo "  (note: spacy model download skipped/failed — run: $PY -m spacy download en_core_web_sm)"
+  fi
+  return 0
+}
+
 # ── doctor: report exactly what is missing, exit non-zero if broken ───────────
 cmd_doctor() {
   local fail=0
   echo "=== polyglot-graphrag setup check ==="
   # venv
-  if [ -x "$PY" ]; then echo "  [ok]  venv        ($ENV)"; else
-    echo "  [MISSING] venv — create it:"; echo "    python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt"; fail=1; fi
+  if [ -x "$PY" ] && "$PY" -c "import fastapi, qdrant_client, neo4j, requests" >/dev/null 2>&1; then
+    echo "  [ok]  venv        ($ENV — deps present)"
+  else
+    echo "  [MISSING] venv/deps — run:  bash run.sh setup"
+    echo "           (or: python3 -m venv venv && pip install -r requirements.txt)"
+    fail=1
+  fi
   # docker + stores
   if command -v docker >/dev/null 2>&1; then
     if docker compose ps >/dev/null 2>&1; then echo "  [ok]  docker + compose"; else
@@ -114,6 +138,7 @@ start_llm() {
 }
 
 start_daemon() {
+  ensure_venv || { echo "venv setup failed — run 'bash run.sh doctor'." >&2; return 1; }
   if curl -s --max-time 2 http://127.0.0.1:8000/health >/dev/null 2>&1; then
     echo "GPU daemon already running"; return 0; fi
   echo "Starting GPU daemon (Jina/BGE on GPU, GLiNER lazy)..."
@@ -156,6 +181,7 @@ cmd_retrieve() {
 
 case "${1:-help}" in
   doctor)   cmd_doctor ;;
+  setup)    ensure_venv && echo "Setup complete — next: docker compose up -d && bash run.sh serve" ;;
   serve)    cmd_doctor || true; start_llm 8082 "$E2B_MODEL" "$ROOT/logs/llm_e2b.log" "$E2B_CTX" || true; start_daemon ;;
   ask)      shift; cmd_ask "$@" ;;
   retrieve) shift; cmd_retrieve "$@" ;;
@@ -165,6 +191,7 @@ case "${1:-help}" in
             echo "Stopped daemon + E2B. (E4B :8084 is retired.)" ;;
   *)        echo "Usage:"
             echo "  bash run.sh doctor              check setup, show what's missing"
+            echo "  bash run.sh setup               create venv + install dependencies"
             echo "  bash run.sh serve               start models + daemon"
             echo "  bash run.sh ask \"your question\"  ask (starts stack if needed)"
             echo "  bash run.sh retrieve \"query\"    retrieval-only (no synthesis)"

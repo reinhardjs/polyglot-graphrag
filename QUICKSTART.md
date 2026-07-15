@@ -15,11 +15,11 @@ Download ONE GGUF into `<project-root>/models/` (it's NOT in the repo):
 > quality gain on the 12 GB card; E2B is ~2.2s p95).
 
 Everything else (Neo4j, Qdrant, Jina embed, BGE rerank, llama.cpp server) is
-pulled or installed automatically. You do need a Python venv:
+pulled or installed automatically. You need **Python 3.11** (the venv is
+created with `python3.11` automatically). Create the venv with one command:
 ```bash
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-python -m spacy download en_core_web_sm   # sliding-window tokenization
+bash run.sh setup      # creates venv + installs pinned requirements
+# (or manually: python3.11 -m venv venv && pip install -r requirements.txt)
 ```
 
 Then run the setup checker — it tells you exactly what is missing:

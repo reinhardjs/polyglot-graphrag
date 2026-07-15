@@ -14,13 +14,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com).
 > **answer-quality release gate (12/12 checks)**, the **git-ignored
 > `golden/` question drop-zone**, and **`enterprise` auto-seeds the
 > system's own `docs/` (self-docs) on first startup** — are all part of
-> the shipped `v1.0.0`. The internal increments `1.0.1`–`1.0.4` below were
+> the shipped `v1.0.0`. The internal increments `1.0.1`–`1.0.5` below were
 > pre-release refinements folded into the `v1.0.0` tag. The substantive changes
 > — **E4B retired (E2B serves extraction + synthesis)**, **BGE reranker on GPU**,
 > **answer-quality release gate (12/12)**, the **git-ignored `golden/` drop-zone**,
 > **`enterprise` auto-seeds the system's own `docs/` (self-docs) on first
-> startup**, and the **`run.sh doctor` guided-setup + friendly error flow** — are
-> all part of `v1.0.0`.
+> startup**, the **`run.sh doctor` guided-setup + friendly error flow**, and the
+> **self-healing `venv` (Python 3.11, pinned deps)** — are all part of `v1.0.0`.
+
+## [1.0.6] — 2026-07-15 (venv self-heals; pinned Python 3.11 deps)
+
+### Added
+- `bash run.sh setup` — creates the venv with `python3.11` (preferred) and
+  installs dependencies in one command.
+- `run.sh` `ensure_venv()` auto-creates the venv on first `serve`/`ask` if
+  missing, and re-installs only if key imports are absent.
+
+### Changed
+- `requirements.txt`: all ML deps PINNED to a verified-working, mutually
+  compatible set (Python 3.11). `transformers==4.49.0` is pinned because
+  newer releases break the `sentence-transformers` import; `einops` added
+  (required by jina-embeddings-v3). A fresh `pip install` now reproduces the
+  known-good environment instead of drifting to incompatible latest versions.
+- Removed the machine-specific `venv -> /mnt/data-970-plus/rag-env` symlink;
+  the venv is now a real, portable, locally-built environment.
+
+> See the `[1.0.1]`–`[1.0.5]` entries for detail on earlier increments.
 
 ## [1.0.5] — 2026-07-15 (new-user restructure: doctor + de-coupled paths)
 
