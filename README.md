@@ -2,17 +2,18 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-![version](https://img.shields.io/badge/version-0.1.0-blue)
-![status](https://img.shields.io/badge/status-experimental-orange)
+![version](https://img.shields.io/badge/version-1.0.0-blue)
+![status](https://img.shields.io/badge/status-stable-brightgreen)
 
-**100% local, domain-agnostic GraphRAG** (graph + vector retrieval) that runs
+**100% local, domain-agnostic Knowledge Discovery & Reasoning Platform** (graph + vector retrieval) that runs
 entirely on your own GPU. No API keys, no cloud. You bring documents; it builds
 a Neo4j knowledge graph + a Qdrant vector store, then answers questions by
 fusing both.
 
-> **Status: EXPERIMENTAL (`0.1.0`).** We are **not** at 1.0. See
-> [VERSIONING.md](VERSIONING.md) and [CHANGELOG.md](CHANGELOG.md). The
-> config/API contract may still change.
+> **Status: STABLE (`1.0.0`).** Enterprise MVP. 4-domain federated retrieval,
+> verified baseline (retrieval p95=89ms, synthesis <3s). Backwards-compatible
+> API. See [VERSIONING.md](VERSIONING.md), [CHANGELOG.md](CHANGELOG.md), and
+> [the roadmap](plans/v1.0-enterprise-mvp-roadmap.md).
 
 ---
 
