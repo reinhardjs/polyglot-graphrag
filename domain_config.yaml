@@ -139,17 +139,6 @@ domains:
     metadata_schema:
       fields:
       - pattern
-  # ── PUBLIC DEFAULT ALIAS ───────────────────────────────────────────────
-  # `default` resolves to the `snomed` strategy (the only primary domain after
-  # the engineering corpus was purged). A non-technical user querying AS-IS
-  # (no `domain`) gets snomed retrieval.
-  default:
-    alias: snomed
-    display_name: "Default (SNOMED)"
-    description: >-
-      The out-of-the-box domain after purge. Uses the SNOMED knowledge graph
-      (SnomedConcept Neo4j label) + clinical_prose companion with term-match +
-      semantic hybrid retrieval.
   # `healthcare` is a friendly public name for the SNOMED clinical domain
   # (so the v1.0 domain list reads healthcare/enterprise/fraud/legal).
   healthcare:
@@ -159,4 +148,8 @@ domains:
       Clinical diagnosis via SNOMED CT terminology graph + clinical_prose
       companion. Identical strategy to snomed; exposed as a clear public name.
 # Default domain for unqualified `/ask` calls (no `domain` field sent).
-default_domain: default
+# Explicit (no `default:` alias indirection) so it is unambiguous: a
+# no-domain query hits `enterprise` — the populated, non-confidential primary
+# corpus. SNOMED remains available via `domain: snomed` / `domain: healthcare`,
+# but is NOT the implicit default (its data is confidential / access-controlled).
+default_domain: enterprise

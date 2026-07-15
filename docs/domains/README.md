@@ -39,8 +39,10 @@ curl -s -X POST http://127.0.0.1:8000/ask -H "Content-Type: application/json" \
   -d '{"query":"who reported BUG-204?","domain":"engineering","synthesize":true}'
 ```
 
-If `domain` is omitted, the system defaults to `engineering` (sentence chunking,
-`engineering_chunks` collection, keyword graph entry).
+If `domain` is omitted, the system defaults to `enterprise` (the primary,
+non-confidential corpus — `enterprise` Qdrant collection, dense prose
+retrieval). SNOMED is available via `domain: snomed` / `domain: healthcare` but
+is NOT the implicit default (its data is confidential / access-controlled).
 
 ## Primary corpus vs companion (secondary) corpus
 
@@ -74,11 +76,12 @@ fuses them. Hits appearing in ≥2 signals get a dual-evidence boost.
 
 | Domain | Collection | Chunking | Companions | Notes |
 |--------|-----------|----------|------------|-------|
-| `engineering` | `engineering_chunks` | sentence | `engineering_docs` | Default primary domain. |
-| `snomed` | (graph-only) | — | `clinical_prose` | Term-match diagnosis over SNOMED + prose. |
-| `engineering_docs` | `engineering_docs` | fixed (1024) | — | Companion: this repo's `docs/`. |
-| `clinical_prose` | `clinical_prose` | fixed | — | Companion: Wikipedia medicine prose. |
-| `example_companion` | (template) | — | — | Copy to start a new companion. |
+| `enterprise` | `enterprise` | fixed | — | **Default** primary domain (non-confidential). ADRs, runbooks, postmortems, RFCs. |
+| `snomed` | (graph-only) | — | `clinical_prose` | Term-match diagnosis over SNOMED + prose. Confidential / access-controlled. |
+| `healthcare` | (alias → snomed) | — | `clinical_prose` | Friendly public name for the SNOMED clinical domain. |
+| `clinical_prose` | `clinical_prose` | fixed | — | Companion: Wikipedia medicine prose (semantic symptom→disease). |
+| `legal` | `legal` | fixed | — | GDPR/SOC2/HIPAA/contracts. Retrieval-only (neo4j_label: null). |
+| `fraud` | `fraud` (graph) | none | `fraud` | Transaction graph (Neo4j) + narrative companion. |
 
 ## Adding a new domain
 

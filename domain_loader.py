@@ -32,7 +32,12 @@ _REQUIRED_KEYS = [
 
 _LOCK = threading.Lock()
 _DOMAINS: Dict[str, Any] = {}
-_DEFAULT_DOMAIN = "engineering"
+_DEFAULT_DOMAIN = "enterprise"  # must match domain_config.yaml `default_domain`.
+# NOTE: the YAML `default_domain` key OVERRIDES this constant at load time
+# (domain_loader reloads from YAML). This is only the fallback if the YAML
+# omits `default_domain`. `engineering` was the historical default but that
+# domain no longer exists in domain_config.yaml — `enterprise` is the primary
+# non-confidential corpus.
 # Top-level config blocks (dynamic_labels, llm_fallback) exposed for runtime
 # access without re-parsing the YAML.
 _TOP_LEVEL: Dict[str, Any] = {}
