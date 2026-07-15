@@ -2,12 +2,12 @@
 config.py — Central configuration for the GraphRAG Engineering Knowledge Base.
 
 Production-grade, 100% LOCAL. ALL models run on GPU (RTX 3060, 12 GB):
-  E2B extraction (:8082, systemd)   ≈ 1.5 GB
-  E4B synthesis  (:8084, systemd)   ≈ 3.0 GB
+  E2B (:8082, user-systemd)  ≈ 1.5 GB  — serves BOTH extraction AND synthesis
+  E4B (:8084) RETIRED — was synthesis (~22s p95); E2B replaced it (~2.2s) in v1.0.2
   Auxiliary models (:8000, serve_gpu.py FastAPI daemon, fp16 preloaded at startup):
     Jina v3, BGE reranker-v2-m3 ≈ 4.0 GB (GLiNER lazy-loaded on demand)
   ────────────────────────────────────────────────────────────────────
-  Total GPU                      ≈ 10.6 GB  (1.4 GB headroom)
+  Total GPU (E2B + daemon)     ≈ 8.5 GB  (4.1 GB headroom)
 
 Entity resolution is vector-driven via Jina v3's cross-lingual embeddings
 stored in Neo4j. No hardcoded CANON_MAP — "Basis Data", "Database", and

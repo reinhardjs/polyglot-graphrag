@@ -29,7 +29,9 @@ mkdir -p "$HF_HOME"
 docker compose up -d
 
 # 6. Start the GPU daemon + LLMs
-sudo systemctl start gemma-4-e2b.service gemma-4-e4b.service rag-gpu-daemon.service
+systemctl --user start gemma-4-e2b.service   # E2B serves BOTH extraction + synthesis
+#   (E4B :8084 is RETIRED — synthesis runs on E2B since v1.0.2)
+sudo systemctl start rag-gpu-daemon.service
 #   — or:  cd v2 && bash run.sh serve
 ```
 

@@ -97,18 +97,77 @@ cd <project-root>
 # 1) Supporting stores (Neo4j + Qdrant) — Docker
 docker compose up -d
 
-# 2) GPU LLMs (Gemma E2B on :8082, E4B on :8084) + the FastAPI pipeline daemon
-#    in ONE command. This is the recommended path — it launches llama-server
-#    directly (no systemd/sudo needed) and waits for each service to be ready.
+# 2) GPU LLM (Gemma 4 E2B on :8082) — systemd-managed (user unit)
+#    E2B serves BOTH extraction (ingest) AND synthesis (ask). It is started by
+#    the user-systemd unit `gemma-4-e2b.service` (auto-starts on login,
+#    restarts on crash). If it isn't running, `run.sh serve` starts it as a
+#    fallback. E4B (:8084) is RETIRED — E2B synthesis is ~2.2s p95; E4B was
+#    ~22s on this 12 GB card for no quality gain.
+#
+#    Manage it directly:
+#      systemctl --user status gemma-4-e2b.service
+#      systemctl --user restart gemma-4-e2b.service
+#      journalctl --user -u gemma-4-e2b.service -f
+#    (For headless reboot survival: `sudo loginctl enable-linger reinhard`)
 bash run.sh serve
 
-# 3) Health check (all three must be up)
+# 3) Health check (E2B + daemon must be up)
 bash run.sh health
 ```
 
 > The `run.sh` helper launches E2B with `--ctx-size 32768` (required so the
 > parallel sliding-window extractor doesn't overflow the shared KV cache — see
-> §3) and exports `SW_EXTRACT_WORKERS=4`. No sudo, no systemd units needed.
+> §3) and exports `SW_EXTRACT_WORKERS=4`. If E2B is already up under systemd,
+> `run.sh serve` skips starting it (idempotent). No sudo needed for the
+> user-level systemd unit.
+
+## 2b. Model server setup (systemd, no sudo)
+
+The E2B llama-server is managed by a **user-level systemd unit** (no root
+needed). This replaces the old "start it manually / via run.sh" approach and
+gives auto-start-on-login + crash-restart + journald logging.
+
+**Unit file:** `~/.config/systemd/user/gemma-4-e2b.service`
+```ini
+[Unit]
+Description=Gemma 4 E2B QAT Q4_0 Server (serves BOTH ingest extraction + synthesis)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/reinhard/.lmstudio/extensions/backends/llama.cpp-linux-x86_64-nvidia-cuda-avx2-2.23.1/llama-server \
+  --model /home/reinhard/.lmstudio/models/lmstudio-community/gemma-4-E2B-it-QAT-Q4_0.gguf \
+  --host 127.0.0.1 --port 8082 \
+  --gpu-layers 999 --ctx-size 32768 --reasoning off
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+```
+
+**Commands:**
+```bash
+systemctl --user daemon-reload
+systemctl --user enable gemma-4-e2b.service   # auto-start on login
+systemctl --user start  gemma-4-e2b.service   # start now
+systemctl --user status gemma-4-e2b.service
+journalctl --user -u gemma-4-e2b.service -f   # live logs
+```
+
+**Reboot survival:** user services don't run on a bare reboot until you log in
+(`Linger=no`). For headless reboot survival, run once with sudo:
+```bash
+sudo loginctl enable-linger reinhard
+```
+After that the unit starts at boot without a login.
+
+**Why E2B-only:** synthesis was switched from E4B (:8084) to E2B (:8082) in
+v1.0.2 — E4B synthesis was ~22s p95 (hardware-bound ~80 tok/s on the 12 GB
+card) while E2B is ~2.2s for equally-good cited answers. The E4B system unit
+(`gemma-4-e4b.service`) is left `disabled` and is not started.
 
 Handy `run.sh` subcommands:
 ```bash

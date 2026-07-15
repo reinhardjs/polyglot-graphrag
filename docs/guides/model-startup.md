@@ -11,8 +11,8 @@ file, and why each parameter is set the way it is.
 ## Table of Contents
 
 - [Model Files](#model-files)
-- [Gemma 4 E2B (Extraction LLM) — :8082](#gemma-4-e2b-extraction-llm--8082)
-- [Gemma 4 E4B (Synthesis LLM) — :8084](#gemma-4-e4b-synthesis-llm--8084)
+- [Gemma 4 E2B (Extraction + Synthesis LLM) — :8082](#gemma-4-e2b-extraction-llm--8082)
+- [Gemma 4 E4B (RETIRED — was Synthesis LLM) — :8084](#gemma-4-e4b-retired--8084)
 - [GPU Auxiliary Daemon — :8000](#gpu-auxiliary-daemon--8000)
 - [CPU Fallback Daemon](#cpu-fallback-daemon)
 - [Neo4j + Qdrant (Docker)](#neo4j--qdrant-docker)
@@ -100,24 +100,21 @@ is logged for debugging, content is parsed as JSON.
 
 ---
 
-## Gemma 4 E4B (Synthesis LLM) — :8084
+## Gemma 4 E4B (RETIRED — was Synthesis LLM) — :8084
 
-> **Live config.** The deployed E4B is launched by `gemma-4-e4b.service`
-> (systemd). Its actual `ExecStart` is shown below — this is the source of
-> truth for restarts. Synthesis latency on this 12 GB card is ~20 s for a
-> detailed ~800-token answer (E4B Q4_0 generates ~80 tok/s) — a HARDWARE
-> limit, not a code defect.
+> **RETIRED in v1.0.2.** E4B is no longer started. Synthesis now runs on E2B
+> (:8082), which gives p95 ~2.2s vs E4B's ~22s on this 12 GB card for equally
+> good cited answers. The `gemma-4-e4b.service` system unit is left `disabled`
+> and is not started. This section is kept for reference only.
 >
-> **Default synthesis backend is E2B (:8082), not E4B.** For v1.0 the daemon
-> uses E2B for synthesis (p95 ~2.2s steady-state on this card) — see the
-> synthesis-tuning note below. E4B remains available via
+> If you ever want E4B's deeper answers back, start it and point the daemon at
+> it via env (note the ~22s latency tradeoff):
 > `SYNTHESIS_LLM_BASE_URL=http://127.0.0.1:8084/v1 SYNTHESIS_LLM_MODEL=gemma-4-E4B-it-QAT-Q4_0.gguf`
-> for deeper answers at the cost of ~22s latency.
 
-### Synthesis tuning (v1.0 — how <3s is achieved)
+### Synthesis tuning (v1.0 — how E2B synthesis stays <3s)
 
-The daemon keeps E2B synthesis under 3s on the RTX 3060 12 GB card via three
-levers in `config.py` (all env-overridable):
+The daemon keeps E2B synthesis under 3s on the RTX 3060 12 GB card via levers
+in `config.py` (all env-overridable):
 
 - `MAX_SYNTH_CONTEXT_CHARS` (default 350) — truncate each retrieved chunk sent
   to the generator, slashing prompt prefill.
@@ -130,7 +127,7 @@ levers in `config.py` (all env-overridable):
   resolves to IPv6 `::1` first while the llama-servers bind IPv4, causing a
   multi-second connection retry per call.
 
-### Server command (matches gemma-4-e4b.service)
+### Server command (reference — E4B, not started by default)
 
 ```bash
 /home/reinhard/.lmstudio/extensions/backends/llama.cpp-linux-x86_64-nvidia-cuda-avx2-2.23.1/llama-server \
@@ -295,34 +292,29 @@ Step 2: (one-time) cd v2 && bash run.sh ingest sample_data
         Reads sample_data/ → extracts entities → writes to Qdrant + Neo4j
         ~2-5 min (depends on number of docs; E2B extraction is GPU-bound)
 
-Step 3: sudo systemctl start gemma-4-e2b.service
-        llama-server (E2B) :8082
-        ~45s load  →  2.6 GB VRAM
-        Verify: curl http://localhost:8082/v1/models
+Step 3: systemctl --user start gemma-4-e2b.service
+        llama-server (E2B) :8082 — serves BOTH extraction AND synthesis
+        ~45s load  →  1.5 GB VRAM
+        Verify: curl http://127.0.0.1:8082/v1/models
+        (user-systemd unit; auto-starts on login. For headless reboot survival:
+         sudo loginctl enable-linger reinhard. E4B :8084 is RETIRED — not started.)
 
-Step 4: sudo systemctl start gemma-4-e4b.service
-        llama-server (E4B) :8084
-        ~90s load  →  4.7 GB VRAM
-        Verify: curl http://localhost:8084/v1/models
-
-Step 5: sudo systemctl start rag-gpu-daemon.service
+Step 4: bash run.sh serve   (or sudo systemctl start rag-gpu-daemon.service)
         python serve_gpu.py :8000
-        ~30s load  →  3.9 GB VRAM
+        ~30s load  →  4.0 GB VRAM (Jina + BGE-reranker on CPU)
         Verify: curl http://127.0.0.1:8000/health
 
-Total VRAM: 2.6 + 4.7 + 3.9 = 11.2 GB (out of 12 GB)
-Total time: ~2.5 minutes from cold start
+Total VRAM: 1.5 (E2B) + 4.0 (daemon) ≈ 5.5 GB idle / ~8.5 GB under load
+Total time: ~1.5 minutes from cold start
 ```
 
 ### VRAM allocation timeline
 
 ```
-                    E2B loads            E4B loads            Daemon loads
-                 ┌──────────┐        ┌──────────┐        ┌─────────────────┐
-11 GB ┤                                             ▄▄▄▄▄█ daemon active
-10 GB ┤                                   ▄▄▄▄▄▄▄▄█▄▄▄▄▄▄█ daemon + E4B active
- 9 GB ┤                         ▄▄▄▄▄▄▄▄█▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄█ E4B loading + daemon
- 8 GB ┤               ▄▄▄▄▄▄▄▄█▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ E4B loading
+                    E2B loads            Daemon loads
+                 ┌──────────┐        ┌─────────────────┐
+ 9 GB ┤                                             ▄▄▄▄▄█ daemon active
+ 8 GB ┤                                   ▄▄▄▄▄▄▄▄█▄▄▄▄▄▄█ daemon active (load)
  7 GB ┤     ▄▄▄▄▄▄▄▄█ E2B loaded
  6 GB ┤  ▄▄▄▄█ E2B loading
  5 GB ┤
@@ -364,13 +356,14 @@ limit what the model can process:
 - **E2B (extraction):** needs large context for long documents (patent
   filings, medical records, code files). 128K fits the longest single
   document with room for the prompt schema.
-- **E4B (synthesis):** the synthesis prompt includes the query + ALL
-  retrieved contexts (5 × ~4K tokens) + instructions + answer format.
-  With a hypothetical 32K context, you'd hit the ceiling when contexts
-  are long. 128K is future-proof.
+- **E4B (synthesis, RETIRED):** the synthesis prompt includes the query + ALL
+  retrieved contexts + instructions + answer format. With a hypothetical 32K
+  context, you'd hit the ceiling when contexts are long. 128K was future-proof.
+  (E4B is no longer started; E2B now handles synthesis with `MAX_SYNTH_CONTEXTS=3`
+  and `MAX_SYNTH_CONTEXT_CHARS=350` capping the prompt, so context pressure is low.)
 
-The VRAM cost of 128K is ~0.5 GB (E2B) + ~0.8 GB (E4B) in Q4_0 KV cache.
-This is acceptable.
+The VRAM cost of 128K is ~0.5 GB (E2B) in Q4_0 KV cache. E4B's ~0.8 GB no
+longer applies since it is retired. This is acceptable.
 
 ### Why `--parallel 8` when VRAM is tight
 
@@ -407,9 +400,9 @@ torch.cuda.OutOfMemoryError: CUDA out of memory.
 
 **Fix:** stop one service temporarily:
 ```bash
-sudo systemctl stop rag-gpu-daemon.service        # frees ~3.9 GB
-sudo systemctl stop gemma-4-e4b.service            # frees ~4.7 GB
-sudo systemctl stop gemma-4-e2b.service            # frees ~2.6 GB
+sudo systemctl stop rag-gpu-daemon.service        # frees ~4.0 GB
+systemctl --user stop gemma-4-e2b.service         # frees ~1.5 GB (E2B = extraction + synthesis)
+# gemma-4-e4b.service is RETIRED (disabled) — not running, nothing to stop
 ```
 
 ### "Application startup failed" — serve_gpu.py
@@ -422,7 +415,7 @@ journalctl -u rag-gpu-daemon.service --no-pager -n 30
 ```
 
 If you see `torch.cuda.OutOfMemoryError`, the LLMs are already using all
-available VRAM. This is normal — start in order (E2B → E4B → daemon) and
+available VRAM. This is normal — start in order (E2B → daemon) and
 verify VRAM stays under 11.5 GB after each step.
 
 ### "cannot kill" — process owned by another user
@@ -438,12 +431,11 @@ sudo pkill -f "llama-server"
 
 ### LLM server doesn't respond after loading
 
-If `curl http://localhost:8082/v1/models` hangs or returns empty, the
+If `curl http://127.0.0.1:8082/v1/models` hangs or returns empty, the
 model may have crashed during loading. Check:
 
 ```bash
-journalctl -u gemma-4-e2b.service --no-pager -n 30
-journalctl -u gemma-4-e4b.service --no-pager -n 30
+journalctl --user -u gemma-4-e2b.service --no-pager -n 30
 ```
 
 Common causes:

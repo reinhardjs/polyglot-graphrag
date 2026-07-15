@@ -6,7 +6,7 @@ is running). They are SLOW (involve LLM extraction + embed) — run separately:
     cd <project-root>
     ./venv/bin/python -m pytest tests/test_e2e_chunking.py -q
 
-Requires: rag-gpu-daemon ( :8000 ) + gemma-4-e2b ( :8082 ) + gemma-4-e4b ( :8084 ).
+Requires: rag-gpu-daemon ( :8000 ) + gemma-4-e2b ( :8082, serves BOTH extraction + synthesis ). E4B ( :8084 ) is retired.
 """
 import sys, os, time, json, requests
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

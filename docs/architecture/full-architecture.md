@@ -263,8 +263,8 @@
 
 | Service | Port | Model | VRAM | Type | Start |
 |---------|------|-------|------|------|-------|
-| `gemma-4-e2b` | :8082 | Gemma E2B QAT Q4_0 | ~1.5 GB | forking | boot |
-| `gemma-4-e4b` | :8084 | Gemma E4B QAT Q4_0 | ~3.0 GB | forking | boot |
+| `gemma-4-e2b` | :8082 | Gemma E2B QAT Q4_0 | ~1.5 GB | forking (user-systemd) | login (or boot w/ linger) |
+| `gemma-4-e4b` | :8084 | Gemma E4B QAT Q4_0 | RETIRED | disabled | n/a |
 | `orphit-9b` | :8081 | Ornith 9B Q4_K_M | ~5.5 GB | forking | manual |
 | `gemma-12b` | :8083 | Gemma 4 12B (legacy) | ~5 GB | — | manual |
 

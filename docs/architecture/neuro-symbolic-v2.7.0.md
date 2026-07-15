@@ -81,12 +81,9 @@ previous one, so order matters.
   │     │  ~1.5 GB VRAM│  ~45s to load.                            │
   │     └──────────────┘                                            │
   │                                                                  │
-  │  4. sudo systemctl start gemma-4-e4b.service                   │
-  │     ┌──────────────┐                                            │
-  │     │  Gemma E4B   │  Synthesizer LLM — reads query + context, │
-  │     │  :8084       │  produces cited answer.                   │
-  │     │  ~3.0 GB VRAM│  ~90s to load.                            │
-  │     └──────────────┘                                            │
+  │  4. (E2B also serves synthesis) — E4B (:8084) is RETIRED.        │
+  │     Synthesis runs on E2B since v1.0.2 (~2.2s p95 vs E4B's ~22s). │
+  │     The gemma-4-e4b.service unit is disabled and not started.     │
   │                                                                  │
   │  5. sudo systemctl start rag-gpu-daemon.service                │
   │     ┌──────────────────────────────────────────────────────┐   │
@@ -98,7 +95,7 @@ previous one, so order matters.
   │     │  ~30s to load (embed + rerank on GPU)                │   │
   │     └──────────────────────────────────────────────────────┘   │
   │                                                                  │
-  │  TOTAL: ~10.6 GB VRAM — ~2.5 min from cold start               │
+  │  TOTAL: ~5.5 GB VRAM idle / ~8.5 GB under load — ~1.5 min from cold start │
   └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -113,19 +110,18 @@ docker compose up -d
 # ── 2. (one-time) Ingest sample data ──────────────────────────────────
 cd v2 && bash run.sh ingest sample_data
 
-# ── 3. LLMs — each takes 45-90s to load ──────────────────────────────
-sudo systemctl start gemma-4-e2b.service
+# ── 3. LLMs — E2B serves BOTH extraction AND synthesis ─────────────────
+#    (user-systemd unit; auto-starts on login. E4B :8084 is RETIRED.)
+systemctl --user start gemma-4-e2b.service
 # Verify (wait for "Ready"):
-#   curl http://localhost:8082/v1/models  → returns model list
+#   curl http://127.0.0.1:8082/v1/models  → returns model list
 
-sudo systemctl start gemma-4-e4b.service
-# Verify (wait for "Ready"):
-#   curl http://localhost:8084/v1/models  → returns model list
+# (E4B gemma-4-e4b.service is disabled — not started; synthesis runs on E2B.)
 
-# ── 4. GPU daemon — embed + rerank on GPU ────────────────────────────
+# ── 4. Daemon ───────────────────────────────────────────────────────────
 sudo systemctl start rag-gpu-daemon.service
 # Verify:
-#   curl http://127.0.0.1:8000/health  → {"status":"ok","device":"cuda","cuda_alloc_gb":2.3}
+#   curl http://127.0.0.1:8000/health
 
 # ── 5. All running? ──────────────────────────────────────────────────
 bash run.sh health

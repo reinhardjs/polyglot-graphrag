@@ -2,8 +2,11 @@
 # run.sh — orchestrates the GraphRAG v3 pipeline.
 #
 # GPU LLMs (Gemma 4 family, on the RTX 3060):
-#   Extraction  -> Gemma 4 E2B QAT on :8082  (systemd gemma-4-e2b.service)
-#   Synthesis   -> Gemma 4 E4B QAT on :8084  (systemd gemma-4-e4b.service)
+#   E2B QAT on :8082 — serves BOTH extraction (ingest) AND synthesis (ask).
+#   E4B (:8084) is RETIRED — E2B handles synthesis (p95 ~2.2s) and E4B gave
+#   ~22s for no quality gain on this 12 GB card. E2B is managed by systemd
+#   (user unit gemma-4-e2b.service); run.sh only starts it as a fallback if
+#   the systemd unit isn't already running.
 # GPU auxiliary daemon (Jina / MiniLM / BGE-reranker / GLiNER lazy) on :8000.
 #
 # Services:
@@ -58,21 +61,18 @@ start_llm() {
   echo "  :$port FAILED — see $log" >&2
 }
 
-# E2B (extraction) needs a LARGE context: sliding_window sends several long
-# windows concurrently, and llama.cpp shares ONE KV cache across parallel slots.
-# With the default 8192 the concurrent windows overflow → HTTP 500. 32768 gives
-# headroom so SW_EXTRACT_WORKERS>1 actually parallelizes. E4B (synthesis) stays
-# at 8192 (single short prompt per /ask).
+# E2B serves both extraction AND synthesis. Large context: sliding_window
+# sends several long windows concurrently, and llama.cpp shares ONE KV cache
+# across parallel slots. With the default 8192 the concurrent windows overflow
+# → HTTP 500. 32768 gives headroom so SW_EXTRACT_WORKERS>1 actually parallelizes.
 E2B_CTX="${E2B_CTX:-32768}"
-E4B_CTX="${E4B_CTX:-8192}"
 # Parallel sliding-window extraction workers. Bound by E2B's shared KV cache;
 # 4 is the sweet spot on a 12GB card with E2B_CTX=32768 (~2x faster than seq).
 export SW_EXTRACT_WORKERS="${SW_EXTRACT_WORKERS:-4}"
 
 start_llms() {
-  echo "Starting GPU LLMs (extraction E2B :8082, synthesis E4B :8084)..."
+  echo "Starting GPU LLM (E2B :8082 — extraction + synthesis)..."
   start_llm 8082 "$e2b_model" "$ROOT/logs/llm_e2b.log" "$E2B_CTX"
-  start_llm 8084 "$e4b_model" "$ROOT/logs/llm_e4b.log" "$E4B_CTX"
 }
 
 start_daemon() {
@@ -92,8 +92,7 @@ start_daemon() {
 
 cmd_health() {
   echo "=== LLMs ==="
-  curl -s --max-time 2 http://localhost:8082/v1/models >/dev/null && echo "E2B :8082  up" || echo "E2B :8082  DOWN"
-  curl -s --max-time 2 http://localhost:8084/v1/models >/dev/null && echo "E4B :8084  up" || echo "E4B :8084  DOWN"
+  curl -s --max-time 2 http://127.0.0.1:8082/v1/models >/dev/null && echo "E2B :8082  up (extraction + synthesis)" || echo "E2B :8082  DOWN"
   echo "=== Daemon ==="
   curl -s http://127.0.0.1:8000/health 2>/dev/null || echo "Daemon :8000 DOWN"
   echo "=== VRAM ==="
@@ -120,9 +119,10 @@ case "$1" in
   retrieve) shift; cmd_retrieve "$@" ;;
   health)  cmd_health ;;
   stop)    [ -f "$DAEMON_PID" ] && kill "$(cat "$DAEMON_PID")" 2>/dev/null && rm -f "$DAEMON_PID"
-           # Stop llama-server processes we started (extraction E2B / synthesis E4B)
+           # Stop the E2B llama-server (extraction + synthesis). If E2B is
+           # running under the systemd user unit, stop it there instead:
+           #   systemctl --user stop gemma-4-e2b.service
            pkill -f "llama-server.*--port 8082" 2>/dev/null || true
-           pkill -f "llama-server.*--port 8084" 2>/dev/null || true
-           echo "Stopped daemon + LLMs" ;;
+           echo "Stopped daemon + E2B (E4B :8084 is retired)" ;;
   *)       echo "Usage: bash run.sh {llms|serve|ingest [dir]|ask \"query\"|retrieve \"query\"|health|stop}" ;;
 esac

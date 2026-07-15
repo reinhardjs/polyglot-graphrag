@@ -6,6 +6,30 @@ stable release; see `VERSIONING.md` for the exact rules.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com).
 
+## [1.0.3] — 2026-07-15 (E4B retired, E2B-only + systemd)
+
+### Changed
+- **E4B (:8084) retired.** Synthesis now runs on E2B (:8082), which serves
+  BOTH extraction AND synthesis. E4B gave ~22s p95 for no quality gain on the
+  12 GB card; E2B is ~2.2s. The `gemma-4-e4b.service` system unit is left
+  `disabled` and is not started. (Deeper answers remain available opt-in via
+  `SYNTHESIS_LLM_*` env pointing at a manually-started E4B.)
+- **E2B is now managed by a user-level systemd unit**
+  (`~/.config/systemd/user/gemma-4-e2b.service`) — no sudo needed. Gives
+  auto-start-on-login, crash-restart (`Restart=on-failure`), and journald logs.
+  For headless reboot survival: `sudo loginctl enable-linger reinhard`.
+- `run.sh` no longer starts E4B; it starts E2B only as a fallback if the
+  systemd unit isn't already running (idempotent).
+
+### Docs
+- RUN.md: new "§2b Model server setup (systemd, no sudo)" section; startup
+  steps reflect E2B-only + user-systemd.
+- docs/architecture/{architecture,full-architecture}.md + model-startup.md +
+  neuro-symbolic-v2.7.0.md + CONTRIBUTING.md: E4B marked RETIRED, E2B
+  shown as extraction+synthesis, VRAM totals corrected (~8.5 GB under load).
+- config.py header + tests/test_e2e_chunking.py comment updated.
+
+
 ## [1.0.2] — 2026-07-15 (synthesis latency: 22s → <3s)
 
 Performance fix folded into the `v1.0.0` tag (option C). Backward-compatible.

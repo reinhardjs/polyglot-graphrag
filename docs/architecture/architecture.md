@@ -32,8 +32,8 @@ offload, no external API calls.
 ### Models (GPU)
 | Model | Service | Port | VRAM | Role |
 |-------|---------|------|------|------|
-| Gemma 4 E2B QAT Q4_0 | systemd gemma-4-e2b | :8082 | ~1.5 GB | Entity/edge extraction (JSON, primary) |
-| Gemma 4 E4B QAT Q4_0 | systemd gemma-4-e4b | :8084 | ~3.0 GB | Answer synthesis |
+| Gemma 4 E2B QAT Q4_0 | systemd gemma-4-e2b (user) | :8082 | ~1.5 GB | Entity/edge extraction (JSON, primary) **AND** answer synthesis |
+| Gemma 4 E4B QAT Q4_0 | RETIRED (gemma-4-e4b disabled) | :8084 | — | Was answer synthesis (~22s p95); replaced by E2B (~2.2s) in v1.0.2 |
 | jina-embeddings-v3 fp16 | serve_gpu.py | :8000 | ~3.0 GB | Query & doc embedding (late-chunking) |
 | bge-reranker-v2-m3 fp16 | serve_gpu.py | :8000 | ~1.0 GB | Cross-encoder reranking |
 | gliner_multi-v2.1 fp16 | serve_gpu.py | :8000 | ~1.6 GB | NER graph extractor (lazy, fallback) |
@@ -94,8 +94,8 @@ user query
 ```
 Model                    | VRAM (GB) | Notes
 -------------------------|-----------|------
-Gemma E2B QAT Q4_0       | 1.5       | systemd, :8082
-Gemma E4B QAT Q4_0       | 3.0       | systemd, :8084
+Gemma E2B QAT Q4_0       | 1.5       | systemd (user), :8082 — extraction + synthesis
+Gemma E4B QAT Q4_0       | —         | RETIRED, :8084 (disabled)
 jina-embeddings-v3 fp16  | 3.0       | daemon, shared
 bge-reranker-v2-m3       | 0.0 (CPU) | daemon, CPU (`RERANK_DEVICE="cpu"`)
 GLiNER fp16 (lazy)       | 1.6       | daemon, loaded only on extract_graph
