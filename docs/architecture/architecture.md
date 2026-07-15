@@ -97,15 +97,17 @@ Model                    | VRAM (GB) | Notes
 Gemma E2B QAT Q4_0       | 1.5       | systemd, :8082
 Gemma E4B QAT Q4_0       | 3.0       | systemd, :8084
 jina-embeddings-v3 fp16  | 3.0       | daemon, shared
-bge-reranker-v2-m3 fp16  | 1.0       | daemon, shared
+bge-reranker-v2-m3       | 0.0 (CPU) | daemon, CPU (`RERANK_DEVICE="cpu"`)
 GLiNER fp16 (lazy)       | 1.6       | daemon, loaded only on extract_graph
 CUDA context + overhead  | 0.5       |                          |
 |-------------------------|-----------|------|
-| TOTAL                    | 10.6      | / 12 GB |
+| TOTAL (GPU)              | 9.6       | / 12 GB |
 ```
-> GLiNER not in this total — only loaded if `/extract_graph` is called (ingest fallback), adding ~1.6 GB.
+> Reranker runs on CPU to free VRAM headroom for Jina + E2B/E4B on the 12 GB
+> card. GLiNER not in the GPU total — only loaded if `/extract_graph` is called
+> (ingest fallback), adding ~1.6 GB.
 
-## Performance (RTX 3060, all models on GPU, v2.6.0)
+## Performance (RTX 3060 12 GB; embedding + LLM backends on GPU, reranker on CPU, v2.6.0)
 
 | Stage | GPU (serve_gpu.py) | CPU (serve_cpu.py, standalone) |
 |-------|-------------------|-------------------------------|

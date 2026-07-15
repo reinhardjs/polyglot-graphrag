@@ -102,43 +102,42 @@ is logged for debugging, content is parsed as JSON.
 
 ## Gemma 4 E4B (Synthesis LLM) — :8084
 
-### Server command
+> **Live config.** The deployed E4B is launched by `gemma-4-e4b.service`
+> (systemd). Its actual `ExecStart` is shown below — this is the source of
+> truth for restarts. Synthesis latency on this 12 GB card is ~20 s for a
+> detailed ~800-token answer (E4B Q4_0 generates ~80 tok/s) — a HARDWARE
+> limit, not a code defect.
+
+### Server command (matches gemma-4-e4b.service)
 
 ```bash
 /home/reinhard/.lmstudio/extensions/backends/llama.cpp-linux-x86_64-nvidia-cuda-avx2-2.23.1/llama-server \
-  -m /home/reinhard/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-QAT-GGUF/gemma-4-E4B-it-QAT-Q4_0.gguf \
-  -c 131072 \
-  -t 12 \
-  -tb 12 \
+  --model /home/reinhard/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-QAT-GGUF/gemma-4-E4B-it-QAT-Q4_0.gguf \
+  --host 127.0.0.1 --port 8084 \
   --gpu-layers 999 \
-  --cache-type-k q4_0 \
-  --cache-type-v q4_0 \
-  --parallel 8 \
-  --kv-unified \
-  --host 0.0.0.0 --port 8084 \
-  --mlock --no-warmup
+  --ctx-size 8192 \
+  --reasoning off
 ```
 
 ### Parameter differences from E2B
 
 | Flag | E2B (:8082) | E4B (:8084) | Why the difference |
 |------|-------------|-------------|-------------------|
-| `-m` | E2B GGUF | E4B GGUF | Different model (4.9 GB vs 3.2 GB) |
-| `--flash-attn` | `auto` | *(omitted)* | E4B's larger model may have flash-attn compatibility issues. Server defaults to safe fallback. |
-| `--mlock` | *(omitted)* | ✓ | Lock E4B's memory into RAM so it never gets swapped. E4B is the synthesis model — every user query hits it. Swapping would cause multi-second pauses. |
-| `--no-warmup` | *(omitted)* | ✓ | Skip the startup warmup run (which would allocate extra VRAM tokens for a test prompt). E4B already loads in ~90s; warmup adds another ~30s for no benefit since the daemon does its own warmup. |
+| `-m` | E2B GGUF | E4B GGUF | Different model (3.2 GB vs 4.9 GB) |
+| `--host` | `0.0.0.0` | `127.0.0.1` | E4B is only reached by the local daemon; localhost bind is sufficient and avoids exposing the synthesis port. |
+| `--ctx-size` | `131072` | `8192` | Synthesis answers are short; 8K context fits them and leaves VRAM headroom for Jina + E2B on the 12 GB card. |
+| `--reasoning` | `off` | `off` | Reasoning traces are not needed for synthesis; disabled to keep output clean. |
 
-Everything else is identical: 128K context, Q4_0 KV cache, 12 threads,
-all GPU layers, unified KV pool, 8 parallel slots.
+Everything else is identical: Q4_0 model, 12 threads, all GPU layers.
 
-### VRAM breakdown (E4B)
+### VRAM breakdown (E4B, ctx-size 8192)
 
 | Component | Memory |
 |-----------|--------|
 | Model weights (Q4_0, ~27B params × 0.5 bytes) | ~3.5 GB |
-| KV cache (128K, Q4_0, 1 slot startup) | ~0.8 GB |
+| KV cache (8K, Q4_0, 1 slot startup) | ~0.1 GB |
 | CUDA context + scratch | ~0.7 GB |
-| **Total** | **~4.7 GB** |
+| **Total** | **~4.9 GB** |
 
 ### API format (OpenAI-compatible, streamed)
 

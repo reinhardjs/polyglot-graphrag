@@ -1,12 +1,50 @@
 # Changelog
 
 All notable changes to this project are documented here. This project
-adheres to [Semantic Versioning](https://semver.org) **within the 0.x.x
-experimental series** — see `VERSIONING.md` for the exact rules (they are
-relaxed vs. strict SemVer during 0.x).
+adheres to [Semantic Versioning](https://semver.org). v1.0.0 is the first
+stable release; see `VERSIONING.md` for the exact rules.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com).
 
+## [1.0.1] — 2026-07-15 (stability + bulk-ingest hardening)
+
+Patch release folded into the `v1.0.0` tag (option C: the v1.0.0 tag now points
+at this commit). All changes are backward-compatible fixes.
+
+### Fixed
+- **Concurrency 500s (CUDA OOM):** the Jina embedding model was shared on the
+GPU with no serialization. Under parallel `/ask` (or parallel ingest) the
+`.encode()` calls collided and OOM'd. Added `_jina_lock` around every embed
+call (query, doc-batch, `/embed_late`, `/embed_query`).
+- **Bulk-ingest reliability:** the ingest background task now holds a global
+`_ingest_lock` so only ONE ingest pipeline (delete → embed → graph) runs at a
+time — eliminates intermittent CUDA OOM from overlapping ingest tasks.
+- **Large-doc ingestion OOM:** `/embed_late` embedded ALL chunks in one giant
+tensor (4042 chunks for a 220 KB doc → OOM). Now batched (64 chunks/batch)
+with bounded peak VRAM.
+- **Self-HTTP loopback removed:** `ingest_text` no longer POSTs to the daemon's
+own `/embed_late` endpoint (which starved the daemon's own threadpool under
+large-doc load). It embeds in-process via the shared `embed_late.py` helper.
+- **Reranker offloaded to CPU (`RERANK_DEVICE="cpu"`):** frees ~2.5 GB GPU VRAM
+so the Jina embedder coexists with the E2B/E4B GGUF backends on a 12 GB card
+without OOM. Reranking 5 candidates on CPU is <50 ms.
+
+### Added
+- `scripts/ingest_ora_docs.py`: bounded-concurrency, idempotent (if_checksum),
+retry-on-transient-error bulk ingester for the confidential engineering KB.
+- `scripts/test_enterprise_corpus.py`: 6-group reliability suite (accuracy,
+edge cases, multi-doc, synthesis, latency p95, concurrency) — all PASS.
+- `scripts/release-gate.py` concurrency regression check (was 10 → 11 checks).
+
+## Versioning rules (summary)
+
+- Series: `1.x.x` (stable). v1.0.0 was tagged 2026-07-15.
+- `1.MINOR.PATCH`:
+- `MINOR` bumps on a **breaking config / API contract change**.
+- `PATCH` bumps for backward-compatible fixes/additions and new domains
+  added behind existing contracts.
+- Tags are created with `git tag -a vX.Y.Z -m "..."` and pushed with
+`git push origin --tags`. No automated release tooling is used yet.
 ## [1.0.0] — 2026-07-15 (enterprise MVP)
 
 First stable, domain-agnostic, enterprise-grade release. Four operational
@@ -126,42 +164,3 @@ tags (the project had not reached a stable 1.0).
 - P3.14 Prometheus `/metrics` endpoint (no extra deps) emits request counts,
   latencies, and degraded flags for scraping.
 
-## [1.0.1] — 2026-07-15 (stability + bulk-ingest hardening)
-
-Patch release folded into the `v1.0.0` tag (option C: the v1.0.0 tag now points
-at this commit). All changes are backward-compatible fixes.
-
-### Fixed
-- **Concurrency 500s (CUDA OOM):** the Jina embedding model was shared on the
-GPU with no serialization. Under parallel `/ask` (or parallel ingest) the
-`.encode()` calls collided and OOM'd. Added `_jina_lock` around every embed
-call (query, doc-batch, `/embed_late`, `/embed_query`).
-- **Bulk-ingest reliability:** the ingest background task now holds a global
-`_ingest_lock` so only ONE ingest pipeline (delete → embed → graph) runs at a
-time — eliminates intermittent CUDA OOM from overlapping ingest tasks.
-- **Large-doc ingestion OOM:** `/embed_late` embedded ALL chunks in one giant
-tensor (4042 chunks for a 220 KB doc → OOM). Now batched (64 chunks/batch)
-with bounded peak VRAM.
-- **Self-HTTP loopback removed:** `ingest_text` no longer POSTs to the daemon's
-own `/embed_late` endpoint (which starved the daemon's own threadpool under
-large-doc load). It embeds in-process via the shared `embed_late.py` helper.
-- **Reranker offloaded to CPU (`RERANK_DEVICE="cpu"`):** frees ~2.5 GB GPU VRAM
-so the Jina embedder coexists with the E2B/E4B GGUF backends on a 12 GB card
-without OOM. Reranking 5 candidates on CPU is <50 ms.
-
-### Added
-- `scripts/ingest_ora_docs.py`: bounded-concurrency, idempotent (if_checksum),
-retry-on-transient-error bulk ingester for the confidential engineering KB.
-- `scripts/test_enterprise_corpus.py`: 6-group reliability suite (accuracy,
-edge cases, multi-doc, synthesis, latency p95, concurrency) — all PASS.
-- `scripts/release-gate.py` concurrency regression check (was 10 → 11 checks).
-
-## Versioning rules (summary)
-
-- Series: `1.x.x` (stable). v1.0.0 was tagged 2026-07-15.
-- `1.MINOR.PATCH`:
-- `MINOR` bumps on a **breaking config / API contract change**.
-- `PATCH` bumps for backward-compatible fixes/additions and new domains
-  added behind existing contracts.
-- Tags are created with `git tag -a vX.Y.Z -m "..."` and pushed with
-`git push origin --tags`. No automated release tooling is used yet.

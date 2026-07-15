@@ -86,9 +86,10 @@ free-text disease descriptions SNOMED's structured graph cannot express.
 
 ### Schema stubs (configured, NOT yet seeded)
 
-None after the engineering corpus was purged — only `snomed` (+ `clinical_prose`
-companion) remains configured. To add a new corpus, copy `domains/snomed/` or
-`domains/clinical_prose/` and register it in `domain_config.yaml`.
+The active domains are `snomed` (graph-only) + `clinical_prose` companion,
+`enterprise` (the ingested engineering knowledge base), `legal`, and `fraud`.
+To add a new corpus, copy `domains/snomed/` or `domains/clinical_prose/` and
+register it in `domain_config.yaml`.
 
 ### Companion — what it is
 
