@@ -249,15 +249,24 @@ def run():
         # on every run and still fails. This removes flake without masking
         # real regressions.
         best = None
+        # Drain child stderr to a file, capture only stdout. ragas emits large
+        # per-sample progress output on stderr; with capture_output=True the
+        # 64KB OS pipe buffer fills and the child BLOCKS on write while the
+        # parent waits to read -> deadlock (0% CPU hang). Redirecting stderr
+        # to a file keeps the pipe drained so the child can finish.
+        _eval_err = os.path.join(BASE, "logs", "eval_ragas_stderr.log")
         for attempt in range(3):
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            assert r.returncode == 0, f"eval exited {r.returncode}: {r.stderr[-400:]}"
+            with open(_eval_err, "ab") as ef:
+                r = subprocess.run(cmd, stdout=subprocess.PIPE,
+                                   stderr=ef, text=True, timeout=400)
+            assert r.returncode == 0, (
+                f"eval exited {r.returncode}: see {_eval_err}")
             import re as _re
             _m = _re.search(r"\{.*\}", r.stdout, _re.DOTALL)
             assert _m, f"no JSON in eval stdout: {r.stdout[:200]}"
             m = json.loads(_m.group(0))
             ff = m.get("faithfulness", 0.0)
-            if best is None or ff > best["ff"]:
+            if best is None or ff > best.get("faithfulness", 0.0):
                 best = m
             if ff >= 0.90:
                 break  # strong run — no need to retry

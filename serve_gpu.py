@@ -285,6 +285,33 @@ def embed_query(req: EmbedQueryReq):
     return {"vector": vec.tolist(), "text_used": text}
 
 
+# OpenAI-compatible embeddings endpoint so external tools (ragas, etc.) can
+# use the daemon's already-loaded Jina model without a second embeddings
+# server. Accepts {"input": str | list[str], "model": "..."} and returns the
+# OpenAI-shaped {"data": [{"embedding": [...]}, ...], "model": "..."}.
+class OpenAIEmbedReq(BaseModel):
+    input: str | list[str]
+    model: Optional[str] = None
+
+
+@app.post("/v1/embeddings")
+def openai_embeddings(req: OpenAIEmbedReq):
+    texts = req.input if isinstance(req.input, list) else [req.input]
+    from query_modulator import QueryModulator
+    mod = [QueryModulator.moderate(t, domain=None) for t in texts]
+    encode_kw = {"convert_to_numpy": True, "show_progress_bar": False}
+    if C.EMBED_TASK_QUERY:
+        encode_kw["task"] = C.EMBED_TASK_QUERY
+    with _jina_lock:
+        vecs = _jina.encode(mod, **encode_kw)
+    return {
+        "object": "list",
+        "data": [{"object": "embedding", "index": i,
+                  "embedding": vecs[i].tolist()} for i in range(len(vecs))],
+        "model": req.model or C.EMBED_MODEL_NAME,
+    }
+
+
 @app.post("/rerank")
 def rerank(req: RerankReq):
     if not req.docs:

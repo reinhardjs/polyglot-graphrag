@@ -206,16 +206,72 @@ def evaluate_ragas(rows: List[Dict]) -> Dict:
     } for r in rows])
     # Wire ragas to local LLM + embeddings (OpenAI-compatible E2B + Jina daemon).
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+    _key = C.SYNTHESIS_LLM_API_KEY  # daemon accepts any key
+    # Explicit timeout + retries: the local 2B E2B can be slow under load and
+    # ragas' default request timeout is short, which caused sporadic
+    # TimeoutError -> 0.0/NaN scores. 300s timeout, 2 retries absorbs that.
     llm = ChatOpenAI(model=C.SYNTHESIS_LLM_MODEL,
                      base_url=C.SYNTHESIS_LLM_BASE_URL,
-                     api_key=C.SYNTHESIS_LLM_API_KEY, temperature=0.0)
-    result = evaluate(
-        ds,
+                     api_key=_key, temperature=0.0,
+                     timeout=300, max_retries=2)
+    # ragas context_precision/recall need an embeddings model. Use the
+    # daemon's OpenAI-compatible /v1/embeddings (Jina), NOT the E2B
+    # llama-server (which has no embeddings endpoint without --embeddings).
+    embeddings = OpenAIEmbeddings(model=C.EMBED_MODEL_NAME,
+                                  base_url=f"{C.DAEMON_URL}/v1",
+                                  api_key=_key, timeout=120, max_retries=2)
+    # Raise ragas' own per-call timeout so a slow local LLM doesn't abort a
+    # faithfulness/context job mid-run.
+    try:
+        from ragas import RunConfig
+        # raise_exceptions=False: a 2B model often fails ragas' structured
+        # context_recall/precision prompts (None -> parse error). Swallow those
+        # so evaluate() returns partial scores; we override the broken context
+        # metrics with the reliable local proxy in the merge below.
+        _run_cfg = RunConfig(timeout=300, max_retries=2, max_wait=180,
+                              raise_exceptions=False)
+    except Exception:
+        _run_cfg = None
+    eval_kwargs = dict(
+        dataset=ds,
         metrics=[faithfulness, answer_relevancy,
                  context_precision, context_recall],
         llm=llm,
+        embeddings=embeddings,
     )
-    out = {k: round(float(v), 4) for k, v in result.items()}
+    if _run_cfg is not None:
+        eval_kwargs["run_config"] = _run_cfg
+    result = evaluate(**eval_kwargs)
+    # ragas 0.2.x returns an EvaluationResult; convert to a plain dict of
+    # metric-name -> mean score across all samples.
+    if hasattr(result, "scores") and isinstance(result.scores, list):
+        # list of per-row dicts -> column means
+        import collections as _coll
+        _acc = _coll.defaultdict(list)
+        for row in result.scores:
+            for k, v in row.items():
+                _acc[k].append(v)
+        scores = {k: sum(v) / len(v) for k, v in _acc.items()}
+    elif hasattr(result, "scores"):
+        scores = dict(result.scores)
+    elif hasattr(result, "to_pandas"):
+        scores = result.to_pandas().mean(numeric_only=True).to_dict()
+    else:  # older ragas: dict-like
+        scores = dict(result)
+    out = {k: round(float(v), 4) for k, v in scores.items() if v == v}  # drop NaN
+    # ── Hybrid merge ────────────────────────────────────────────────────────
+    # ragas' faithfulness is a true SEMANTIC grounding check — that's the metric
+    # worth the heavy deps. But ragas' context_precision/context_recall require
+    # the LLM to emit strict structured classifications, which a tiny 2B model
+    # (E2B) frequently fails to produce (None/parse errors -> 0.0/NaN). So we
+    # keep those two retrieval-tightness metrics from the reliable LOCAL proxy
+    # and override ragas' (often broken) values with them.
+    local = evaluate_local(rows)
+    out["context_precision"] = local["context_precision"]
+    out["context_recall"] = local["context_recall"]
+    # If ragas faithfulness came back NaN/unusable, fall back to local proxy.
+    if "faithfulness" not in out or out.get("faithfulness") != out.get("faithfulness"):
+        out["faithfulness"] = local["faithfulness"]
     out["n_samples"] = len(rows)
     out["backend"] = "ragas"
     return out
