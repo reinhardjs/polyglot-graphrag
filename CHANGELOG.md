@@ -11,9 +11,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com).
 > folded into the `v1.0.0` tag rather than shipped as separate versions.
 > The substantive changes from those increments — **E4B retired (E2B
 > serves extraction + synthesis)**, **BGE reranker moved to GPU**,
-> **answer-quality release gate (12/12 checks)**, and the **git-ignored
-> `golden/` question drop-zone** — are all part of the shipped `v1.0.0`.
+> **answer-quality release gate (12/12 checks)**, the **git-ignored
+> `golden/` question drop-zone**, and **`enterprise` auto-seeds the
+> system's own `docs/` (self-docs) on first startup** — are all part of
+> the shipped `v1.0.0`.
 > See the `[1.0.1]`–`[1.0.3]` entries for detail.
+
+## [1.0.4] — 2026-07-15 (self-docs first-run seed)
+
+### Added
+- `domains/enterprise/seed.py` now seeds the **repo's own `docs/` tree**
+  (tagged `source=self-docs`) into the `enterprise` domain, so a fresh user
+  gets a queryable KB of how the system works with zero external corpus.
+- `SEED_ON_STARTUP = ["enterprise"]` in `config.py`: the daemon auto-seeds
+  self-docs on first boot (only when the collection is empty; idempotent via
+  content checksum). `serve_gpu.py --demo` also triggers it.
+- `domains/enterprise/ingest.py` falls back to the self-docs seed when called
+  without an explicit `source` list (what the startup hook does).
+
+### Changed
+- QUICKSTART.md / README.md: document the first-run self-docs KB.
+
+> **Current release: `v1.0.0`** (git tag `v1.0.0`). The internal
+> increments `1.0.1`–`1.0.4` below were pre-release refinements that were
+> folded into the `v1.0.0` tag rather than shipped as separate versions.
+> The substantive changes from those increments — **E4B retired (E2B
+> serves extraction + synthesis)**, **BGE reranker moved to GPU**,
+> **answer-quality release gate (12/12 checks)**, the **git-ignored
+> `golden/` question drop-zone**, and the **`enterprise` auto-seeds the
+> system's own `docs/` (self-docs) on first startup** — are all part of
+> the shipped `v1.0.0`.
 
 ## [1.0.3] — 2026-07-15 (E4B retired, E2B-only + systemd)
 

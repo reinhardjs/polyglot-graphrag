@@ -273,7 +273,9 @@ ENTITY_VECTOR_INDEX = "entity_vector_idx"
 # them auto-populate on boot. Set to [] to disable auto-seed entirely.
 # Companion corpora auto-seeded on daemon startup (if their Qdrant collection is
 # empty). Left empty after the engineering corpus purge — the only remaining
-# domain is `snomed` (graph-only, collection=null) with companion
-# `clinical_prose` (bulk-seeded on demand, not auto-seeded here).
-SEED_ON_STARTUP = []
+# Auto-seed on first startup: for each listed domain whose Qdrant collection
+# is empty, run its ingester in a background thread so a fresh user gets a
+# queryable KB immediately. `enterprise` seeds the system's OWN docs/ tree
+# (self-docs) — zero external corpus required for a first-run smoke test.
+SEED_ON_STARTUP = ["enterprise"]
 

@@ -38,6 +38,11 @@ bash run.sh serve        # Gemma E2B (:8082, extraction+synthesis) + daemon (:80
 bash run.sh health       # confirm both are up
 ```
 
+On first startup the **`enterprise`** domain auto-seeds itself with this
+project's own `docs/` (tagged `self-docs`) — so you can ask questions about
+the system immediately, e.g. `bash run.sh ask "how does hybrid retrieval
+work" --domain enterprise`, before you've added any of your own data.
+
 **You must download one model file** (not in the repo — too large / license):
 - `gemma-4-E2B-it-QAT-Q4_0.gguf` → extraction + answer synthesis (HuggingFace `lmstudio-community/gemma-4-E2B-it-QAT-GGUF`)
 
