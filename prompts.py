@@ -1,6 +1,6 @@
 """Shared synthesis-prompt builder (v2.6.0 REQ-5, federated 2026-07).
 
-Single source of truth for the E4B answer-generation prompt. Used by
+Single source of truth for the answer-generation (synthesis) prompt. Used by
 ask.py:synthesize() (streaming /ask) and retrieve_json.py:_synthesize_nonstream()
 (Hermes plugin).
 
@@ -38,7 +38,7 @@ def _load_template(kind: str) -> str | None:
 
 def build_synthesis_prompt(query: str, contexts: list,
                            profile: dict = None) -> str:
-    """Build the E4B synthesis prompt.
+    """Build the synthesis (E2B) prompt.
 
     contexts: list of retrieved text blocks (already in order).
     profile:  domain profile dict (domain_loader.get_domain result) or None.

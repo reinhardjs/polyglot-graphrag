@@ -44,7 +44,7 @@ flowchart TD
     N -- yes --> O[persist to Neo4j: Differential -HAS_CANDIDATE-> DxCandidate -MATCHES_CONCEPT-> SnomedDescription]
     N -- no --> P
     O --> P{synthesize? or mode==differential}
-    P -- yes --> Q[E4B synthesis -> ranked differential answer]
+    P -- yes --> Q[E2B synthesis -> ranked differential answer]
     P -- no --> R[return contexts only]
     Q --> S[return result + differential_persisted flag]
     R --> S

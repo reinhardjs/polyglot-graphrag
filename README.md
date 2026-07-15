@@ -64,8 +64,8 @@ INGEST:  doc.md ──► chunk ──► embed (Jina) ──► Qdrant (vectors
                       │
                       └──► extract entities/relations (Gemma E2B) ──► Neo4j (graph)
 
-ASK:     query ──► embed ──► Qdrant (similar text) + Neo4j (related entities)
-                     ──► rerank (BGE) ──► (optional) Gemma E4B writes the answer
+ASK:     query ─► embed ─► Qdrant (similar text) + Neo4j (related entities)
+                     ─► rerank (BGE) ─► (E2B) writes the answer
 ```
 
 Two stores, searched together:

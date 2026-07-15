@@ -29,7 +29,7 @@ and (optionally) asks a language model to write a natural-language answer.
 
         ┌─────────────── ASK ───────────────────┐
  query ─► embed ─► Qdrant (vector) + Neo4j (graph) ─► rerank (BGE) ─► answer
-                                                    (Gemma E4B, optional)
+                                                     (Gemma E2B, does extraction + synthesis)
         └────────────────────────────────────────┘
 ```
 
@@ -40,10 +40,10 @@ and (optionally) asks a language model to write a natural-language answer.
 | Requirement | Why | Minimum |
 |-------------|-----|---------|
 | **NVIDIA GPU** | Embeddings + both LLMs run on CUDA | RTX 3060 12 GB (tested) |
-| **~12 GB VRAM free** | E2B (~2.3 GB) + daemon models (Jina/MiniLM/BGE ~2.5 GB) | 8 GB *will* stutter |
+| **~12 GB VRAM free** | E2B (~1.5 GB) + daemon models (Jina/MiniLM/BGE ~4.0 GB) | 8 GB *will* stutter |
 | **Docker + docker compose** | Runs Neo4j + Qdrant | any recent version |
 | **Python 3.11 venv** | Runs the FastAPI daemon + ingest | 3.11 |
-| **~25 GB disk** | models (E2B 3.3 GB, E4B 5.1 GB) + docker images + data | 30 GB |
+| **~20 GB disk** | models (E2B 3.3 GB) + docker images + data | 30 GB |
 - **Linux** | llama.cpp CUDA build | Ubuntu 22.04 (tested) |
 
 ### Install Python dependencies
@@ -75,17 +75,18 @@ too large, and license/distribution constraints):
    - Source: HuggingFace `lmstudio-community/gemma-4-E4B-it-QAT-GGUF`
    - Place at: `<project-root>/models/gemma-4-E4B-it-QAT-Q4_0.gguf`
 
-> **What is "Gemma E2B"?** Gemma 4 is Google's open model family. **E2B** =
+> What is "Gemma E2B"? Gemma 4 is Google's open model family. **E2B** =
 > the "Extraction 2-Billion-parameter" variant — small/fast, used here to pull
-> entities & relationships out of text. **E4B** = 4-Billion variant, used to
-> *write* the final answer. Both run locally via **llama.cpp** (a C++
-> engine that serves GGUF-format models over an OpenAI-compatible HTTP API).
-> Nothing leaves your machine.
+> entities & relationships out of text AND to write the final cited answer
+> (synthesis runs on E2B since v1.0.2; the larger E4B was retired — it gave
+> ~22s answers for no quality gain on the 12 GB card, E2B is ~2.2s p95).
+> Both ran locally via **llama.cpp** (a C++ engine that serves GGUF-format
+> models over an OpenAI-compatible HTTP API). Nothing leaves your machine.
 
-> **Limitation — synthesis needs E4B.** If E4B is NOT running, `/ask` with
-> `synthesize:true` returns a 500 error. Use `synthesize:false` for
-> retrieval-only (contexts only, no LLM-written answer). This is by design, not
-> a bug — see "Known limitations" at the bottom.
+> **Note — synthesis no longer needs a second model.** Before v1.0.2, `/ask`
+> with `synthesize:true` returned a 500 if E4B was down. Now E2B handles
+> synthesis too, so `/ask` with `synthesize:true` works whenever E2B is up
+> (which it is, via the systemd unit). Use `synthesize:false` for retrieval-only.
 
 ---
 
@@ -270,13 +271,13 @@ curl http://localhost:8000/ingest/status/$TID
 ## 4. Ask / retrieve (the flow)
 
 ```bash
-# Retrieval + synthesis (needs E4B on :8084):
-curl -s -X POST http://localhost:8000/ask \
+# Retrieval + synthesis (E2B on :8082 does both):
+curl -s -X POST http://127.0.0.1:8000/ask \
   -H "Content-Type: application/json" \
   -d '{"query":"chest pain and shortness of breath","domain":"snomed","synthesize":true}'
 
-# Retrieval only (no E4B needed):
-curl -s -X POST http://localhost:8000/ask \
+# Retrieval only (no LLM answer):
+curl -s -X POST http://127.0.0.1:8000/ask \
   -H "Content-Type: application/json" \
   -d '{"query":"chest pain","synthesize":false}'
 ```
@@ -288,8 +289,8 @@ curl -s -X POST http://localhost:8000/ask \
 3. **Neo4j** — expand the entity subgraph around matched concepts (graph
    retrieval adds relational context vectors can't).
 4. **Rerank** — BGE reranker scores fused candidates by relevance.
-5. **Synthesize** (if `synthesize:true`) — top contexts → **Gemma E4B** writes
-   the answer. If E4B is down → 500 (use `synthesize:false`).
+5. **Synthesize** (if `synthesize:true`) — top contexts → **Gemma E2B** writes
+   the answer (E2B serves BOTH extraction AND synthesis since v1.0.2).
 
 Response contract: `{query, source, path, qdrant_hits, graph_hits,
 n_contexts, contexts[], answer?}`.
@@ -298,13 +299,9 @@ n_contexts, contexts[], answer?}`.
 
 ## 5. Known limitations (must read)
 
-- **E4B synthesis needs E4B running.** `synthesize:true` 500s unless E4B
-  (`:8084`) is up. Use `synthesize:false` for retrieval-only. `bash run.sh
-  serve` starts E4B by default, so this is only an issue if you skipped it.
-- **VRAM is tight on 12 GB.** E2B (~2.3 GB) + daemon models (Jina/MiniLM/BGE
-  ~2.5 GB) + E4B (~3.6 GB) ≈ 11 GB. All three fit on a 12 GB card but leave
-  little headroom; avoid concurrent heavy ingest + many parallel queries. To
-  free VRAM, run E4B only when needed or offload the BGE reranker to CPU.
+- **VRAM is comfortable on 12 GB.** E2B (~1.5 GB) + daemon models (Jina/MiniLM/BGE
+  ~4.0 GB, GLiNER lazy) ≈ 5.5 GB idle / ~8.5 GB under load. The retired
+  E4B (~4.9 GB) is no longer loaded, leaving ample headroom.
 - **Single-doc `/ingest` is async** — always poll `/ingest/status/{task_id}`.
   `sync_docs.py` handles polling internally.
 - **Cross-lingual** matching uses Jina v3 alignment; very different scripts may

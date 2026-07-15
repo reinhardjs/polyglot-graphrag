@@ -2,7 +2,7 @@
 
 All endpoints are served by the daemon on **`http://localhost:8000`** (configurable
 via `DAEMON_URL`). The daemon hosts the auxiliary models (Jina embed, BGE rerank,
-GLiNER, E2B extraction via llama.cpp, E4B synthesis) and the retrieval/ingest API.
+GLiNER, E2B extraction + synthesis via llama.cpp) and the retrieval/ingest API.
 
 > Base URL: `http://localhost:8000`. All request/response bodies are JSON
 > (`Content-Type: application/json`) unless noted. This is the **authoritative**
@@ -209,7 +209,7 @@ curl -s -X DELETE "localhost:8000/differential?query=<query>"
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/ask` | Hybrid retrieval (+ optional E4B synthesis) |
+| POST | `/ask` | Hybrid retrieval (+ E2B synthesis) |
 | GET | `/doc/{collection}` | Reconstruct full doc from chunks by `doc_id` |
 | POST | `/embed_query` | Embed a query string |
 | POST | `/rerank` | BGE rerank over candidates |

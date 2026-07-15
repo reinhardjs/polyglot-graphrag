@@ -16,7 +16,7 @@
                 ┌─────────────────────────── ASK ──────────────────────────────┐
  query ─► embed ─► [Qdrant vectors] + [Neo4j graph] + [companion collections]
                 │        (federated.assemble runs all in parallel, tagged _signal)
-                └► rerank (BGE) ─► fuse + dual-evidence boost ─► Gemma E4B writes answer
+                └► rerank (BGE) ► fuse + dual-evidence boost ► E2B writes answer
 ```
 
 Two stores, searched together:
@@ -143,7 +143,7 @@ can see which domain/companion each context came from.
 
 ## 7. Known gaps (experimental)
 
-- `synthesize:true` needs E4B (`:8084`); else use `synthesize:false`.
+- `synthesize:true` works whenever E2B (:8082) is up (it serves both extraction and synthesis); else use `synthesize:false`.
 - VRAM is tight on 12 GB — avoid concurrent heavy ingest + many parallel queries.
 - Non-`snomed` domains are untested stubs unless you add and seed them.
 - `/ask` is stateless (no multi-turn memory).

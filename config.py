@@ -17,7 +17,7 @@ serve_cpu.py is a CPU-only fallback for machines without CUDA torch.
 serve_gpu.py is the primary daemon (loaded at startup, GPU-resident).
 
 The daemon exposes a unified /ask endpoint that runs the full pipeline
-server-side (embed → Qdrant||Neo4j → rerank → E4B synthesis) in ONE HTTP call.
+server-side (embed → Qdrant||Neo4j → rerank → E2B synthesis) in ONE HTTP call.
 """
 import os
 
@@ -86,7 +86,7 @@ DAEMON_ASK         = f"{DAEMON_URL}/ask"
 # ── GPU LLM Endpoints (llama.cpp / OpenAI-compatible, via systemd) ───────────
 # OVERRIDE any of these to swap models without touching code.
 # Extraction: smaller model for structured JSON entity/edge output.
-EXTRACTION_LLM_BASE_URL = "http://localhost:8082/v1"
+EXTRACTION_LLM_BASE_URL = "http://127.0.0.1:8082/v1"
 EXTRACTION_LLM_API_KEY  = "not-needed"
 EXTRACTION_LLM_MODEL    = "gemma-4-E2B_q4_0-it.gguf"
 

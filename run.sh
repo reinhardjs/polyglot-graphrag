@@ -12,7 +12,7 @@
 # Services:
 #   bash run.sh serve       start LLMs + GPU daemon
 #   bash run.sh ingest [dir]  re-populate Qdrant + Neo4j
-#   bash run.sh ask "query"  full pipeline: embed → retrieve → rerank → E4B synth
+#   bash run.sh ask "query"  full pipeline: embed → retrieve → rerank → E2B synth
 #   bash run.sh retrieve "query"  retrieval-only (contexts, no synthesis)
 #   bash run.sh health        check all services
 #   bash run.sh stop          stop daemon + LLMs

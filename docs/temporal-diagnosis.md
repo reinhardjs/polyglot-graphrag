@@ -37,7 +37,7 @@ flowchart TD
     K --> L{dual_signal_only?}
     L -- yes --> M[Keep dual candidates only<br/>fallback if none]
     L -- no --> N[Rank all candidates]
-    N --> O[E4B synthesis -> ranked differential]
+    N --> O[E2B synthesis -> ranked differential]
 
     C --> I
 ```

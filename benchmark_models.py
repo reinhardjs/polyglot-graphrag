@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config as C
 
-CURRENT_URL = "http://localhost:8082/v1"
+CURRENT_URL = "http://127.0.0.1:8082/v1"
 MOBILE_URL = "http://localhost:8083/v1"
 
 # Sample engineering doc with known entities/edges

@@ -2,7 +2,8 @@
 ask.py — CLI retriever implementing Parallel Hybrid Fusion.
 
 NO torch / transformers imports. All model work is delegated to the GPU daemon
-(serve_gpu.py FastAPI :8000) or the GPU LLMs (E2B :8082 / E4B :8084).
+| (serve_gpu.py FastAPI :8000) or the GPU LLM (E2B :8082, which serves
+| both extraction and synthesis).
 The CLI itself only does HTTP, threading, and string assembly.
 
 Flow:

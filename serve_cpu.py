@@ -322,7 +322,7 @@ def ask(req: AskReq):
                       "chunk_idx": pool[i].get("chunk_idx", -1)}
                      for i, _ in ranked]
 
-    # 4. Synthesize with E4B (:8084)
+    # 4. Synthesize (E2B backend, separate process)
     answer = ""
     if req.synthesize:
         answer = rag.synthesize(req.query, contexts, profile)

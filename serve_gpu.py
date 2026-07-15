@@ -142,7 +142,8 @@ def _load_all():
 
     # ── Reranker ───
     # Loaded on RERANK_DEVICE (cpu by default) to keep GPU VRAM free for the
-    # Jina embedder + E2B/E4B GGUF backends that share the 12 GB card.
+    # Jina embedder + E2B GGUF backend (the only model server; it serves
+    # both extraction and synthesis) that share the 12 GB card.
     _reranker = CrossEncoder(C.RERANK_MODEL_NAME, device=C.RERANK_DEVICE)
     if C.RERANK_USE_HALF and C.RERANK_DEVICE != "cpu":
         try:
@@ -842,7 +843,7 @@ def ask(req: AskReq):
                     for idx, (i, _) in enumerate(ranked)]
     rerank_scores = [s for _, s in ranked]
 
-    # 5. Synthesize with E4B (separate process)
+    # 5. Synthesize (E2B, separate process)
     answer = ""
     degraded = bool(_failed)
     if req.synthesize or _force_differential:
@@ -850,14 +851,14 @@ def ask(req: AskReq):
         try:
             answer = rag.synthesize(req.query, _synth_contexts(contexts), profile)
         except Exception as e:
-            # E4B unavailable (P3.12): degrade gracefully — empty answer, flag.
+            # Synthesis backend unavailable (P3.12): degrade gracefully — empty answer, flag.
             print(f"[ask] synthesis failed (degraded): {e}", flush=True)
             degraded = True
             answer = ""
 
     # Numbered contexts (citation-ready) — present whether or not synthesis
     # runs, so synthesize:false consumers (Hermes rag_query, etc.) get [1]/[2]
-    # markers that match what E4B would cite.
+    # markers that match what the synthesis backend would cite.
     contexts_numbered = [f"[{i+1}] {c}" for i, c in enumerate(contexts)]
 
     # Bibliography: map each [n] -> source doc. Dedup by doc_id; assign the
@@ -930,7 +931,7 @@ def ask(req: AskReq):
             f"domain(s) '{_dom_list}' failed; results exclude {'it' if len(_failed)==1 else 'them'}")
     if degraded and answer == "" and (req.synthesize or _force_differential):
         _notice_parts.append(
-            "synthesis unavailable (E4B unreachable); returned retrieval-only results")
+            "synthesis unavailable (backend unreachable); returned retrieval-only results")
     _notice = "; ".join(_notice_parts) if _notice_parts else ""
 
     result = {
@@ -960,7 +961,7 @@ def ask(req: AskReq):
 
     # 6. Store in cache (P1.5: enabled for ALL queries).
     # Do NOT cache degraded results, or a synthesis that was requested but came
-    # back empty (E4B down mid-request) — caching that empty answer would poison
+    # back empty (synthesis backend down mid-request) — caching that empty answer would poison
     # every repeat. Retrieval-only calls (synthesize=false) legitimately have an
     # empty answer and MUST still be cached.
     _synth_requested = bool(req.synthesize or _force_differential)

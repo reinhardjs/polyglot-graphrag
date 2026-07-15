@@ -32,7 +32,7 @@ hermes
 └──────────────┘                     │  Jina embed         │
                                      │  Qdrant + Neo4j     │
                                      │  BGE rerank         │
-                                     │  E4B synth          │
+                                     │  E2B synth (extract + answer) │
                                      └─────────────────────┘
 ```
 
@@ -53,7 +53,7 @@ Location: `~/.hermes/plugins/rag/`
 ## Tool behavior
 
 - **When Hermes auto-invokes**: The schema description signals the tool covers engineering KB questions. Hermes targets `rag_query` for queries about bugs, ADRs, PRs, components, and developers.
-- **`synthesize` parameter**: `false` returns contexts only (~0.2s). Hermes reasons over the raw passages and drafts its own answer. `true` adds E4B synthesis (~6s total) — the answer comes from the KB directly.
+- **`synthesize` parameter**: `false` returns contexts only (~0.2s). Hermes reasons over the raw passages and drafts its own answer. `true` adds E2B synthesis (~2.2s p95) — the answer comes from the KB directly.
 - **`check_requirements()`**: Pings `GET /health` on the daemon. If unreachable, the tool is disabled (Hermes won't offer it).
 - **Output format**: JSON string — `{"query": "...", "n_contexts": 5, "contexts": [...], "answer": ""}`. Hermes parses this and uses the contexts to answer.
 
@@ -82,4 +82,4 @@ All produce correct, sourced answers via `rag_query`:
 | `rag_query` not offered | Daemon down or plugin disabled | `curl http://127.0.0.1:8000/health`; `hermes plugins enable rag` |
 | Returns HTTP error | Daemon unreachable | Check `RAG_DAEMON_URL`, verify daemon process |
 | Returns empty contexts | KB not ingested | `bash run.sh ingest sample_data` |
-| Slow response | E4B synthesis (6s) | Set `synthesize:false` for fast retrieval (~0.2s) |
+| Slow response | E2B synthesis (~2.2s p95) | Set `synthesize:false` for fast retrieval (~0.2s) |

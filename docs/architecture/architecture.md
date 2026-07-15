@@ -129,7 +129,7 @@ Cache hit (synthesize=true): <0.01s — 50× faster than cold.
 
 3. **Configurable entry selection (v2.6.0 REQ-6)** — the Neo4j entry node is chosen per domain profile: `keyword` (word-overlap, ~1ms, effective for 95% of queries with technical IDs like `bug-204`), `vector` (embed query + candidate names, cosine — needed for natural-language queries like "chest pain treatment"), or `hybrid` (both in parallel; keyword when overlap≥2 else vector). The keyword path auto-falls back to vector when overlap finds zero candidates, so NL queries never silently return nothing.
 
-4. **One-call `/ask` API** — a single HTTP POST runs the full pipeline. Embed + rerank run IN-PROCESS on the resident GPU models (no HTTP self-loop). Only E4B synthesis is a cross-process call.
+4. **One-call `/ask` API** — a single HTTP POST runs the full pipeline. Embed + rerank run IN-PROCESS on the resident GPU models (no HTTP self-loop). Only synthesis is a cross-process call (to the E2B llama-server).
 
 5. **Portable Hermes integration** — the rag plugin calls `POST /ask` over HTTP. `RAG_DAEMON_URL` env override allows any Hermes agent on any machine to use the KB.
 

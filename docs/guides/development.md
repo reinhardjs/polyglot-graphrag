@@ -61,7 +61,8 @@ cd <project-root>
 docker compose -f ../docker-compose.yml up -d
 
 # 2. Start LLMs (systemd, boot-only)
-sudo systemctl start gemma-4-e2b.service gemma-4-e4b.service
+systemctl --user start gemma-4-e2b.service   # E2B serves BOTH extraction + synthesis
+#   (E4B :8084 is RETIRED — synthesis runs on E2B since v1.0.2)
 
 # 3. Start daemon (GPU)
 <project-root>/venv/bin/python serve_gpu.py
