@@ -11,8 +11,8 @@ VRAM budget on RTX 3060 (12 GB), shared with the LLM endpoints:
     GLiNER (lazy)         ~1.6 GB  (config: GLINER_MODEL_NAME)
     -------------------------------
     Aux subtotal          ~5.6 GB  <- this daemon
-    + E2B (:8082)         ~1.5 GB  (config: EXTRACTION_LLM)
-    + E4B (:8084)         ~3.0 GB  (config: SYNTHESIS_LLM)
+    + E2B (:8082)         ~1.5 GB  (config: EXTRACTION_LLM + SYNTHESIS_LLM)
+    + E4B (:8084)         ~3.0 GB  (opt-in via SYNTHESIS_LLM_* env; idle by default)
     -------------------------------
     Grand total           ~10.1 GB
 
@@ -1575,14 +1575,14 @@ def health():
         backends["neo4j"] = "ok"
     except Exception as e:
         backends["neo4j"] = f"down:{type(e).__name__}"
-    # E4B synthesis (reachable?)
+    # Synthesis backend (reachable?)
     try:
         import requests
         r = requests.get(f"{C.SYNTHESIS_LLM_BASE_URL.replace('/v1','')}/health",
                          timeout=3)
-        backends["e4b"] = "ok" if r.status_code < 500 else f"down:{r.status_code}"
+        backends["synthesis"] = "ok" if r.status_code < 500 else f"down:{r.status_code}"
     except Exception as e:
-        backends["e4b"] = f"down:{type(e).__name__}"
+        backends["synthesis"] = f"down:{type(e).__name__}"
 
     # Per-domain runnable status (does the domain resolve + have a retriever?)
     domains = {}
