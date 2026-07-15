@@ -9,9 +9,10 @@ Usage:
     python scripts/release-gate.py
     python scripts/release-gate.py --verbose   # show per-check details
     python scripts/release-gate.py --all-domains  # run full 20x benches
+    python scripts/release-gate.py --load        # 24-parallel concurrency hammer
 """
 
-import json, os, subprocess, sys, time, urllib.request
+import json, os, subprocess, sys, time, threading, urllib.request, urllib.error
 
 OK = "\033[92mPASS\033[0m"
 FAIL = "\033[91mFAIL\033[0m"
@@ -22,6 +23,10 @@ os.chdir(BASE)
 
 VERBOSE = "--verbose" in sys.argv
 BENCH_N = 20 if "--all-domains" in sys.argv else 5
+# How many parallel /ask requests to fire in the concurrency check. Keep this
+# modest — it's a regression guard for the embedding-lock fix, not a full load
+# test. Bump with --load if you want a heavier hammer.
+CONCURRENCY_N = 24 if "--load" in sys.argv else 12
 
 
 def _req(method, path, body=None):
@@ -173,6 +178,41 @@ def run():
         assert len(_domains_configs) >= 4, f"domains dir count={len(_domains_configs)}"
         return f"domains dirs: {', '.join(_domains_configs)}"
     results.append(check("Code claims integrity", c_code_claims))
+
+    # ── 11. Concurrent load (regression guard for embedding-lock fix) ──
+    def c_concurrency():
+        queries = [
+            "fever and rash", "chest pain", "diabetes mellitus",
+            "myocardial infarction", "pneumonia", "hypertension", "asthma",
+            "stroke", "sepsis", "fracture", "headache", "cough",
+        ]
+        payloads = [{"query": q, "domain": "snomed", "synthesize": False,
+                     "skip_cache": True} for q in queries]
+        # Cycle through payloads to reach CONCURRENCY_N parallel requests.
+        batch = (payloads * ((CONCURRENCY_N // len(payloads)) + 1))[:CONCURRENCY_N]
+        out = []
+        def _fire(p):
+            req = urllib.request.Request(
+                "http://localhost:8000/ask",
+                data=json.dumps(p).encode(),
+                headers={"Content-Type": "application/json"}, method="POST")
+            try:
+                r = urllib.request.urlopen(req, timeout=30)
+                d = json.loads(r.read())
+                out.append((r.status, d.get("degraded", False)))
+            except urllib.error.HTTPError as e:
+                out.append((e.code, True))
+            except Exception as e:
+                out.append((0, True))
+        threads = [threading.Thread(target=_fire, args=(p,)) for p in batch]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        errs = [s for s, _ in out if s != 200]
+        assert not errs, f"{len(errs)}/{len(out)} requests returned non-200: {errs[:5]}"
+        return f"{len(out)} parallel snomed requests, 0 errors"
+    results.append(check(f"Concurrency ({CONCURRENCY_N} parallel snomed)", c_concurrency))
 
     # ── Print results ───────────────────────────────────────────────
     print()
