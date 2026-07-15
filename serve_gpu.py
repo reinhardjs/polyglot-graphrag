@@ -29,10 +29,9 @@ Endpoints:
     DELETE /ingest/{doc_id}        remove a document (Qdrant + Neo4j)
     GET  /ingest                    list ingested documents (per collection)
     GET  /collections               list Qdrant collections + point counts
-    POST /reload            reload domain_config.yaml from disk (no restart)
-    POST /admin/reload     alias for /reload
+    POST /admin/reload     reload domain_config.yaml from disk (no restart)
   Multi-domain: pass `collection` (str | list | "all") to /ask and /ingest.
-  After editing domain_config.yaml, call POST /reload so profile/collection/
+  After editing domain_config.yaml, call POST /admin/reload so profile/collection/
   default-domain changes take effect without restarting the daemon.
 """
 import os
@@ -1566,29 +1565,13 @@ def admin_domains():
     }
 
 
-@app.post("/reload")
-def reload():
-    """Reload domain_config.yaml from disk without restarting the daemon.
-
-    Plain alias for /admin/reload (easier to remember). Call this after
-    editing domain_config.yaml so profile/collection/default changes take
-    effect without a manual daemon restart.
-    """
-    import domain_loader
-    try:
-        domain_loader.reload_domains()
-        return {
-            "status": "reloaded",
-            "domains": domain_loader.list_domains(),
-            "default_domain": domain_loader.get_default_domain(),
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"reload failed: {e}")
-
-
 @app.post("/admin/reload")
 def admin_reload():
-    """Reload domain_config.yaml from disk without restarting the daemon."""
+    """Reload domain_config.yaml from disk without restarting the daemon.
+
+    After editing domain_config.yaml, call this so profile/collection/
+    default-domain changes take effect without a manual daemon restart.
+    """
     import domain_loader
     try:
         domain_loader.reload_domains()

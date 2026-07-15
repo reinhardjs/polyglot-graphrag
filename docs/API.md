@@ -200,16 +200,9 @@ curl localhost:8000/domains
 Entity/relation types, pair strategy, min_confidence, collection, neo4j_label
 per domain (from `domain_config.yaml`).
 
-### `POST /reload` — reload `domain_config.yaml` without restart
-Plain alias for `/admin/reload` (easier to remember). After editing
-`domain_config.yaml`, call this so profile/collection/default-domain changes
-take effect without restarting the daemon.
-```bash
-curl -s -X POST localhost:8000/reload
-# → {"status":"reloaded","domains":[...],"default_domain":"enterprise"}
-```
-
 ### `POST /admin/reload` — reload `domain_config.yaml` without restart
+After editing `domain_config.yaml`, call this so profile/collection/
+default-domain changes take effect without restarting the daemon.
 ```bash
 curl -s -X POST localhost:8000/admin/reload
 # → {"status":"reloaded","domains":[...],"default_domain":"enterprise"}
@@ -228,7 +221,7 @@ curl -s -X DELETE "localhost:8000/differential?query=<query>"
 
 ---
 
-## Endpoint summary (24 routes)
+## Endpoint summary (23 routes)
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -252,7 +245,6 @@ curl -s -X DELETE "localhost:8000/differential?query=<query>"
 | GET | `/profiles` | Domain profiles |
 | GET | `/domains` | Per-domain runnable/ingestable status |
 | GET | `/admin/domains` | Domain schema summary |
-| POST | `/reload` | Reload `domain_config.yaml` (no restart) |
-| POST | `/admin/reload` | Reload `domain_config.yaml` |
+| POST | `/admin/reload` | Reload `domain_config.yaml` (no restart) |
 | GET | `/differentials` | List persisted differentials |
 | DELETE | `/differential` | Delete a differential |

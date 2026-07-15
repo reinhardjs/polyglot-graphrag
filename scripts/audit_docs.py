@@ -116,7 +116,7 @@ def check_api_md(a):
         a.check(stale not in txt,
                 f"docs/API.md does not contain stale '{stale}'")
     # new endpoints documented
-    a.check("/reload" in txt, "docs/API.md documents /reload")
+    a.check("/admin/reload" in txt, "docs/API.md documents /admin/reload")
     a.check("/v1/embeddings" in txt, "docs/API.md documents /v1/embeddings")
     # admin reload example must report enterprise default
     a.check('"default_domain": "enterprise"' in txt or '"default_domain":"enterprise"' in txt,
@@ -209,16 +209,16 @@ def check_live_endpoints(a, url):
     import json
     import urllib.request
 
-    # /reload returns status=reloaded
+    # /admin/reload returns status=reloaded
     try:
-        req = urllib.request.Request(f"{url}/reload", method="POST")
+        req = urllib.request.Request(f"{url}/admin/reload", method="POST")
         with urllib.request.urlopen(req, timeout=10) as r:
             data = json.load(r)
         a.check(data.get("status") == "reloaded"
                 and data.get("default_domain") == "enterprise",
-                "/reload returns status=reloaded, default_domain=enterprise")
+                "/admin/reload returns status=reloaded, default_domain=enterprise")
     except Exception as e:
-        a.check(False, f"/reload reachable ({e})")
+        a.check(False, f"/admin/reload reachable ({e})")
 
     # /v1/embeddings returns OpenAI-shaped vectors
     try:
