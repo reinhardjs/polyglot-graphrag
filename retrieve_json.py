@@ -34,6 +34,7 @@ def _synthesize_nonstream(query: str, contexts: list, profile: dict = None) -> s
         model=C.SYNTHESIS_LLM_MODEL,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=C.LLM_MAX_TOKENS_OUT,
+        temperature=C.SYNTH_TEMPERATURE,
     )
     msg = resp.choices[0].message
     return (getattr(msg, "content", None) or getattr(msg, "reasoning_content", None) or "").strip()

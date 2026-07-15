@@ -413,6 +413,7 @@ def synthesize(query: str, contexts: list, profile: dict = None) -> str:
         model=C.SYNTHESIS_LLM_MODEL,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=C.SYNTH_MAX_TOKENS_OUT,
+        temperature=C.SYNTH_TEMPERATURE,
         stream=True,
     )
     reasoning_parts = []  # model chain-of-thought (debug only)

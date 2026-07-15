@@ -219,18 +219,26 @@ EXTRACTION_PROMPT = (
 )
 
 # Cap the length of each retrieved context chunk fed to the synthesis LLM.
-# The full chunk (~1700 chars) is needed for retrieval/rerank/citations, but
-# the generator only needs a capped excerpt to summarize + cite — truncating
-# slashes prompt prefill time and keeps synthesis under the latency target
-# (E2B: ~5.7s full prompt -> ~1.1s truncated; E4B likewise). Set 0 to disable.
-MAX_SYNTH_CONTEXT_CHARS = int(os.environ.get("MAX_SYNTH_CONTEXT_CHARS", "350"))
+# Must be >= the typical chunk size (~1700 chars) or the answer-bearing text
+# gets truncated away and the model wrongly abstains ("not in the context").
+# A prior value of 350 literally cut chunks mid-sentence and broke factual
+# answers whose key fact sat past char 350. 1800 keeps whole chunks while
+# still bounding pathological giant contexts. Set 0 to disable capping.
+MAX_SYNTH_CONTEXT_CHARS = int(os.environ.get("MAX_SYNTH_CONTEXT_CHARS", "1800"))
 # Cap the NUMBER of contexts sent to synthesis. The LLM only needs the top few
 # most-relevant chunks; sending all reranked candidates just inflates prefill.
-MAX_SYNTH_CONTEXTS = int(os.environ.get("MAX_SYNTH_CONTEXTS", "3"))
+MAX_SYNTH_CONTEXTS = int(os.environ.get("MAX_SYNTH_CONTEXTS", "4"))
 # Max tokens the synthesis LLM may generate. Lower = faster answers (caps
 # generation time, the dominant cost for small models like E2B). 512 is plenty
 # for a cited summary of 3 short context excerpts.
 SYNTH_MAX_TOKENS_OUT = int(os.environ.get("SYNTH_MAX_TOKENS_OUT", "400"))
+
+# Synthesis sampling temperature. RAG synthesis is a faithful-extraction task,
+# not creative writing: a non-zero temperature makes the small E2B model
+# randomly abstain ("context does not contain…") even when the answer is
+# present in the retrieved context. Pin to 0.0 for deterministic, grounded
+# answers. Override via env only if you deliberately want more variation.
+SYNTH_TEMPERATURE = float(os.environ.get("SYNTH_TEMPERATURE", "0.0"))
 
 # ── Context / token budgeting ────────────────────────────────────────────────
 MAX_TOKENS_CONTEXT = 4096
