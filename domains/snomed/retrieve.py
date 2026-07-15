@@ -32,6 +32,14 @@ import config as C
 REL_EDGE_TYPES = ["246090004", "47429007", "363702006"]
 EXPAND_BOOST = 2.0  # additive score per symptom→disorder expansion edge (absorbs old EDGE_BOOST)
 
+# Per-keyword candidate cap. A single broad SNOMED keyword (e.g. "disorder" →
+# 86K concepts) would otherwise explode all_matched_cids and make the Cypher
+# IN $ids expansion + name fetch take 10s+. Capping each keyword to the top-N
+# highest-IDF concepts bounds the worst case while leaving realistic diagnostic
+# queries (fever=442, rash=87, pain=1053) fully precise. Raised well above any
+# legitimate multi-symptom query.
+MAX_CIDS_PER_KEYWORD = 1500
+
 # Later days weigh more: a disorder spanning many days gets amplified.
 DAY_WEIGHTS = [1.0, 1.5, 2.0, 2.5, 3.0]
 
@@ -231,6 +239,10 @@ def retrieve_symptoms(query: str, top_k: int = 5) -> list:
             idf, cids = _idf_lookup(kw)
             if not cids or idf <= 0:
                 continue
+            # Bound the per-keyword candidate set so a single broad term
+            # ("disorder" → 86K concepts) can't explode the expansion/fetch.
+            if len(cids) > MAX_CIDS_PER_KEYWORD:
+                cids = cids[:MAX_CIDS_PER_KEYWORD]
             kw_data.append((kw, idf, set(cids)))
 
         all_matched_cids = set()
@@ -326,6 +338,8 @@ def retrieve_temporal(presentation: dict, top_k: int = 5) -> list:
                 idf, cids = _idf_lookup(kw)
                 if not cids or idf <= 0:
                     continue
+                if len(cids) > MAX_CIDS_PER_KEYWORD:
+                    cids = cids[:MAX_CIDS_PER_KEYWORD]
 
                 all_matched_cids.update(cids)
                 add_score = idf * day_weight

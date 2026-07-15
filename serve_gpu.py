@@ -58,6 +58,12 @@ _gliner = None
 import threading
 _gliner_lock = threading.Lock()
 
+# The Jina embedding model is NOT thread-safe: concurrent .encode() calls share
+# the same GPU workspace and collide (CUDA OOM under parallel /ask traffic).
+# Serialize all embedding inference behind this lock. The GLiNER lock above is
+# a separate model and does NOT cover Jina — both need their own serializer.
+_jina_lock = threading.Lock()
+
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ── Ingest task store (in-process, for BackgroundTasks polling) ───────────────
@@ -255,7 +261,8 @@ def embed_late(req: EmbedLateReq):
     encode_kw = {"convert_to_numpy": True, "show_progress_bar": False}
     if C.EMBED_TASK_PASSAGE:
         encode_kw["task"] = C.EMBED_TASK_PASSAGE
-    vecs = _jina.encode(chunks, **encode_kw)
+    with _jina_lock:
+        vecs = _jina.encode(chunks, **encode_kw)
     return {
         "doc_id": req.doc_id,
         "chunks": [
@@ -274,7 +281,8 @@ def embed_query(req: EmbedQueryReq):
     encode_kw = {"convert_to_numpy": True, "show_progress_bar": False}
     if C.EMBED_TASK_QUERY:
         encode_kw["task"] = C.EMBED_TASK_QUERY
-    vec = _jina.encode([text], **encode_kw)[0]
+    with _jina_lock:
+        vec = _jina.encode([text], **encode_kw)[0]
     return {"vector": vec.tolist(), "text_used": text}
 
 
@@ -471,7 +479,8 @@ def ask(req: AskReq):
     encode_kw = {"convert_to_numpy": True, "show_progress_bar": False}
     if C.EMBED_TASK_QUERY:
         encode_kw["task"] = C.EMBED_TASK_QUERY
-    vec = _jina.encode([query_text], **encode_kw)[0].tolist()
+    with _jina_lock:
+        vec = _jina.encode([query_text], **encode_kw)[0].tolist()
 
     # 2. SEMANTIC CACHE (P1.5: enabled for ALL queries, not just synthesize)
     # Cache entries are scoped by a variant key covering every flag that changes
