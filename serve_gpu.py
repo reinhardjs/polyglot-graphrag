@@ -894,9 +894,13 @@ def ask(req: AskReq):
     _record_metric("degraded" if degraded else "ok", _time.time() - _t0)
 
     # 6. Store in cache (P1.5: enabled for ALL queries).
-    # Do NOT cache degraded/empty results (e.g. E4B was down mid-request) —
-    # caching an empty answer would poison every repeat of that query.
-    _cache_worthy = (answer != "" and not degraded)
+    # Do NOT cache degraded results, or a synthesis that was requested but came
+    # back empty (E4B down mid-request) — caching that empty answer would poison
+    # every repeat. Retrieval-only calls (synthesize=false) legitimately have an
+    # empty answer and MUST still be cached.
+    _synth_requested = bool(req.synthesize or _force_differential)
+    _synth_failed = _synth_requested and answer == ""
+    _cache_worthy = (not degraded) and (not _synth_failed)
     if not req.skip_cache and _cache_worthy:
         try:
             qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
