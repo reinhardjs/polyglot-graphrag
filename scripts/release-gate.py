@@ -214,6 +214,34 @@ def run():
         return f"{len(out)} parallel snomed requests, 0 errors"
     results.append(check(f"Concurrency ({CONCURRENCY_N} parallel snomed)", c_concurrency))
 
+    # ── 12. Answer QUALITY on the confidential ora-et-labora corpus ──
+    def c_quality():
+        # Live synthesize + score Faithfulness/Relevance/Precision/Recall
+        # over the golden dataset (run with the running daemon so it uses
+        # the E2B synthesis backend automatically).
+        golden = os.path.join(BASE, "sample_data", "golden", "ora-et-labora.json")
+        assert os.path.exists(golden), f"golden set missing: {golden}"
+        cmd = [os.path.join(BASE, "venv", "bin", "python"),
+                "evaluate_pipeline.py", golden, "--live", "--domain", "enterprise"]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        assert r.returncode == 0, f"eval exited {r.returncode}: {r.stderr[-400:]}"
+        # Defensively extract the JSON metrics object from stdout (the
+        # harness prints ONLY json to stdout now; this tolerates stray text).
+        import re as _re
+        _m = _re.search(r"\{.*\}", r.stdout, _re.DOTALL)
+        assert _m, f"no JSON in eval stdout: {r.stdout[:200]}"
+        m = json.loads(_m.group(0))
+        ff = m.get("faithfulness", 0.0)
+        cp = m.get("context_precision", 0.0)
+        cr = m.get("context_recall", 0.0)
+        # Gate on Faithfulness (answer grounded in retrieved contexts) — the
+        # core correctness metric. Precision/Recall reported but not gating.
+        assert ff >= 0.90, (
+            f"faithfulness {ff:.2f} < 0.90 (n={m.get('n_samples')})")
+        return (f"faith={ff:.2f} prec={cp:.2f} recall={cr:.2f} "
+                f"(n={m.get('n_samples')})")
+    results.append(check("Answer quality (ora-et-labora, E2B synth)", c_quality))
+
     # ── Print results ───────────────────────────────────────────────
     print()
     print("=" * 72)

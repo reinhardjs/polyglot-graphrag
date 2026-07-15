@@ -1,0 +1,77 @@
+[
+  {
+    "question": "what does the transaction service.md document describe?",
+    "ground_truth": "— `arttha_prepaidcardmgmt_transaction_webservice` > **Coverage status:** ✅ Verified against source code (Session",
+    "doc_id": "ora::products::bni-new-prepaid::codebase::transaction-service.md"
+  },
+  {
+    "question": "what does the application config.md document describe?",
+    "ground_truth": "Application & System Configuration > **Coverage status:** ✅ Complete (verified against",
+    "doc_id": "ora::products::bni-new-prepaid::codebase::backoffice-modules::application-config.md"
+  },
+  {
+    "question": "what does the adr guidelines.md document describe?",
+    "ground_truth": "Record (ADR) Guidelines ## Purpose Architecture Decision Records (ADRs) capture important",
+    "doc_id": "ora::guidelines::architecture::adr-guidelines.md"
+  },
+  {
+    "question": "what does the DF 0113 atmterm tid space handling.md document describe?",
+    "ground_truth": "ATM term file TID format: spaces cause `TID_INVALID` | Field |",
+    "doc_id": "ora::products::bni-new-prepaid::codebase::fix-guides::DF-0113-atmterm-tid-space-handling.md"
+  },
+  {
+    "question": "what does the card management.md document describe?",
+    "ground_truth": "Module > **Coverage status:** ✅ Complete > **Source packages:** > -",
+    "doc_id": "ora::products::bni-new-prepaid::codebase::backoffice-modules::card-management.md"
+  },
+  {
+    "question": "what does the otp.md document describe?",
+    "ground_truth": "OTP (One-Time Password) > **Coverage status:** ✅ Complete > **Source packages:**",
+    "doc_id": "ora::products::bni-new-prepaid::codebase::backoffice-modules::otp.md"
+  },
+  {
+    "question": "what does the new joiner guide.md document describe?",
+    "ground_truth": "Prepaid — New Joiner's \"Connect the Dots\" Guide > **Audience:** You've",
+    "doc_id": "ora::products::bni-new-prepaid::new-joiner-guide.md"
+  },
+  {
+    "question": "what does the onboarding.md document describe?",
+    "ground_truth": "Prepaid — Onboarding Guide Welcome to the BNI New Prepaid engineering",
+    "doc_id": "ora::products::bni-new-prepaid::onboarding.md"
+  },
+  {
+    "question": "what does the NEXT_document settlement service.md document describe?",
+    "ground_truth": "Document Settlement Service Codebase > **Status:** 📋 READY — Create as",
+    "doc_id": "ora::prompts::NEXT_document-settlement-service.md"
+  },
+  {
+    "question": "what does the changelog.md document describe?",
+    "ground_truth": "Prepaid — Changelog All notable changes to the BNI New Prepaid",
+    "doc_id": "ora::products::bni-new-prepaid::changelog.md"
+  },
+  {
+    "question": "what does the DF 0099 card txn offline purchase report pool starvation.md document describe?",
+    "ground_truth": "DF-0099 — CardTxnOfflinePurchaseReport JDBC Fetch Bottleneck & Session Handling Bug >",
+    "doc_id": "ora::products::bni-new-prepaid::codebase::fix-guides::DF-0099-card-txn-offline-purchase-report-pool-starvation.md"
+  },
+  {
+    "question": "what does the manual evidence collection checklist.md document describe?",
+    "ground_truth": "— Manual Evidence Collection Checklist **Purpose**: Prove that the **pre-prod (production",
+    "doc_id": "ora::evidences::incidents::INC-2026-01-30-cassandra-data-inconsistency::01-METHODOLOGY::manual-evidence-collection-checklist.md"
+  },
+  {
+    "question": "what does the DF 0096 journal id field validation.md document describe?",
+    "ground_truth": "DF-0096 — Journal ID field validation (numeric only, max 6 digits)",
+    "doc_id": "ora::products::bni-new-prepaid::codebase::fix-guides::DF-0096-journal-id-field-validation.md"
+  },
+  {
+    "question": "what does the failover evidence 2026 07 07.md document describe?",
+    "ground_truth": "Inconsistency — Failover Evidence **Date**: 2026-07-07 **Cluster**: Local (node1-node6, 100.111.120.21-.26) **Load**",
+    "doc_id": "ora::evidences::incidents::INC-2026-01-30-cassandra-data-inconsistency::00-KNOWLEDGE-BASE::failover-evidence-2026-07-07.md"
+  },
+  {
+    "question": "what does the file transfer service.md document describe?",
+    "ground_truth": "Service — `arttha_prepaidcardmanagment_filetransferservice` > **Coverage status:** ✅ 100% verified against source",
+    "doc_id": "ora::products::bni-new-prepaid::codebase::file-transfer-service.md"
+  }
+]

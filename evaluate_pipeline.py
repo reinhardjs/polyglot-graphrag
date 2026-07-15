@@ -251,7 +251,7 @@ def main():
 
     if args.live:
         print(f"Generating answers live via {C.DAEMON_URL}/ask "
-              f"(domain={args.domain}, crag={args.crag}) ...")
+              f"(domain={args.domain}, crag={args.crag}) ...", file=sys.stderr)
         rows = generate_live(rows, domain=args.domain, crag=args.crag)
 
     backend = args.backend
