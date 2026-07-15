@@ -29,11 +29,14 @@ python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 python -m spacy download en_core_web_sm
 
-# 2) Start the two stores (Neo4j + Qdrant)
+# 2) Check your setup — prints exactly what is missing, if anything:
+bash run.sh doctor
+
+# 3) Start the two stores (Neo4j + Qdrant)
 docker compose up -d
 
-# 3) Start the models + daemon. This needs TWO GGUF files you download
-#    yourself (see below). If you already have them in ./models, just run:
+# 4) Start the model + daemon. Needs ONE GGUF (E2B) — `doctor` tells you
+#    where to put it (or set E2B_MODEL=/path). If it's already in ./models:
 bash run.sh serve        # Gemma E2B (:8082, extraction+synthesis) + daemon (:8000)
 bash run.sh health       # confirm both are up
 ```

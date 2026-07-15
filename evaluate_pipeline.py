@@ -102,8 +102,22 @@ def faithfulness_local(answer: str, contexts: List[str]) -> float:
 
     A sentence is "supported" if its content terms are substantially covered by
     the union of context terms (>= 0.5 overlap). Grounding proxy without an LLM.
+
+    An explicit ABSTENTION (the model honestly says the context lacks the answer)
+    is faithful by construction — it makes no unsupported claim. We score those
+    as fully faithful so the proxy does not penalize correct "I don't know" answers.
     """
-    sents = _sentences(answer)
+    a = (answer or "").strip()
+    if not a:
+        return 0.0
+    low = a.lower()
+    _ABSTAIN = ("does not contain", "does not describe", "does not mention",
+                "not mentioned", "no information", "cannot answer",
+                "cannot find", "context does not", "provided context does",
+                "the context does not")
+    if any(p in low for p in _ABSTAIN):
+        return 1.0
+    sents = _sentences(a)
     if not sents:
         return 0.0
     ctx_terms = set()

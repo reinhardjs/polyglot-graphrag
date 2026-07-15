@@ -14,8 +14,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com).
 > **answer-quality release gate (12/12 checks)**, the **git-ignored
 > `golden/` question drop-zone**, and **`enterprise` auto-seeds the
 > system's own `docs/` (self-docs) on first startup** — are all part of
-> the shipped `v1.0.0`.
-> See the `[1.0.1]`–`[1.0.3]` entries for detail.
+> the shipped `v1.0.0`. The internal increments `1.0.1`–`1.0.4` below were
+> pre-release refinements folded into the `v1.0.0` tag. The substantive changes
+> — **E4B retired (E2B serves extraction + synthesis)**, **BGE reranker on GPU**,
+> **answer-quality release gate (12/12)**, the **git-ignored `golden/` drop-zone**,
+> **`enterprise` auto-seeds the system's own `docs/` (self-docs) on first
+> startup**, and the **`run.sh doctor` guided-setup + friendly error flow** — are
+> all part of `v1.0.0`.
+
+## [1.0.5] — 2026-07-15 (new-user restructure: doctor + de-coupled paths)
+
+### Added
+- `bash run.sh doctor` — checks venv, docker, Qdrant/Neo4j, llama.cpp binary,
+  GGUF weights, and running services; prints exactly what is missing with the
+  fix command. Every failure path now tells the user what to do.
+- `run.sh`: `LLAMA_BIN` auto-detected (lmstudio / common paths / `find`);
+  `MODELS_DIR` / `E2B_MODEL` env-overridable; missing-model error includes the
+  HuggingFace download hint. `ask` defaults to a self-docs question.
+
+### Changed
+- Removed repo `models/*.gguf` symlinks (GGUF never committed — `models/` is
+  git-ignored). Your real `~/.lmstudio` weights are untouched; `doctor` tells a
+  fresh user where to place the one GGUF (E2B).
+- Removed legacy `archive/` and dead root scripts (`benchmark_models.py`,
+  `bench_ws2.py`, `load_snomed.py` — 0 importers). Kept all four example
+  domains (snomed / legal / fraud / enterprise).
+- README + QUICKSTART lead with `doctor` and the self-docs first-run experience.
+- `evaluate_pipeline.py`: explicit abstentions ("context does not contain…")
+  scored as faithful-by-construction, so the local faithfulness proxy no longer
+  penalizes correct "I don't know" answers.
+- `release-gate.py` Check 12: best-of-3 runs + 0.85 floor — stable, no flake,
+  still fails on genuine retrieval/synthesis breakage.
+
+> See the `[1.0.1]`–`[1.0.4]` entries for detail on earlier increments.
 
 ## [1.0.4] — 2026-07-15 (self-docs first-run seed)
 

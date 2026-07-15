@@ -1,14 +1,13 @@
-# QUICKSTART — ask the SNOMED clinical graph (5 minutes)
+# QUICKSTART — ask in 5 minutes
 
 This is the shortest path from zero to a working query. The system ships with
-the **`snomed`** domain (a SNOMED CT terminology graph in Neo4j) plus its
-**`clinical_prose`** companion (Wikipedia medicine articles in Qdrant) already
-loaded — so you can ask differential-diagnosis questions immediately. Full
-detail in [RUN.md](RUN.md).
+four example domains — **`snomed`** (clinical terminology graph), **`enterprise`**
+(auto-seeded with this project's own docs on first boot), **`legal`**, and
+**`fraud`** — so you can ask questions immediately. Full detail in [RUN.md](RUN.md).
 
-## 0. One-time: get the model files
+## 0. One-time: get the model file + check setup
 
-Download two GGUFs into `<project-root>/models/` (they're NOT in the repo):
+Download ONE GGUF into `<project-root>/models/` (it's NOT in the repo):
 - `gemma-4-E2B-it-QAT-Q4_0.gguf` ← extraction + answer writing (HuggingFace `lmstudio-community/gemma-4-E2B-it-QAT-GGUF`)
 
 > Only E2B is needed — it serves BOTH entity/edge extraction AND answer
@@ -23,7 +22,12 @@ pip install -r requirements.txt
 python -m spacy download en_core_web_sm   # sliding-window tokenization
 ```
 
-## 1. Start the stack (boot once, then you can ask)
+Then run the setup checker — it tells you exactly what is missing:
+```bash
+bash run.sh doctor
+```
+If `doctor` reports `[MISSING]` items, fix them (it prints the exact command),
+then re-run. When it says "Setup OK", continue.
 
 ```bash
 cd polyglot-graphrag   # or: cd <project-root>

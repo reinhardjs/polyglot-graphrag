@@ -439,7 +439,7 @@ def synthesize(query: str, contexts: list, profile: dict = None) -> str:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    q = sys.argv[1] if len(sys.argv) > 1 else "who reported BUG-204?"
+    q = sys.argv[1] if len(sys.argv) > 1 else "how does the ask pipeline work?"
     vec = embed_query(q)
     q_res, g_res = parallel_retrieve(vec, q)
     ctx = condense(q, q_res, g_res)
