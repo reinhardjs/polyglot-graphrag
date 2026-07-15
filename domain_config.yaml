@@ -9,6 +9,28 @@ llm_fallback:
   min_dropped: 1
 
 domains:
+  enterprise:
+    # Enterprise Knowledge Management: ADRs, runbooks, postmortems, RFCs.
+    # DEFAULT domain (see default_domain below). Primary corpus = Qdrant
+    # `enterprise` collection (dense prose) + a Neo4j graph (neo4j_label:
+    # EnterpriseDoc) so entities/edges are extracted and queryable.
+    collection: enterprise
+    neo4j_label: EnterpriseDoc
+    retrieval: dense_prose
+    # Graph vocabulary for the enterprise KG (rendered into the extraction
+    # prompt by ingest.py — single source of truth, do NOT hardcode in prompt).
+    entity_types: [ADR, Runbook, Postmortem, RFC, Service, Team, Component, Incident]
+    relation_types: [DOCUMENTS, OWNS, DEPENDS_ON, CAUSED_BY, MITIGATES, REFERENCES, IMPLEMENTS]
+    pair_strategy: all_pairs
+    min_confidence: 0.0
+    chunking:
+      strategy: fixed
+      chunk_size: 512
+      overlap: 64
+    metadata_schema:
+      fields:
+      - title
+      - source
   snomed:
     # SNOMED CT terminology graph. Retrieval = symptom keyword term-matching
     # against SnomedDescription.term with IDF weighting (domains/snomed/retrieve.py).
@@ -63,24 +85,6 @@ domains:
       - title
       - source
       - url
-  enterprise:
-    # Enterprise Knowledge Management: ADRs, runbooks, postmortems, RFCs.
-    # Primary corpus = Qdrant `enterprise` collection (dense prose). No graph.
-    collection: enterprise
-    neo4j_label: null
-    retrieval: dense_prose
-    entity_types: []
-    relation_types: []
-    pair_strategy: all_pairs
-    min_confidence: 0.0
-    chunking:
-      strategy: fixed
-      chunk_size: 512
-      overlap: 64
-    metadata_schema:
-      fields:
-      - title
-      - source
   legal:
     # Legal & Compliance: GDPR, SOC 2, HIPAA, contract clauses.
     # Primary corpus = Qdrant `legal` collection (dense prose). No graph
