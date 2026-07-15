@@ -57,6 +57,33 @@ detection) behind one federated `/ask` API.
 ### Removed
 - Legacy `engineering` corpus (purged; SNOMED + clinical_prose retained).
 
+### Fixed
+- **Cache poisoning**: degraded/empty synthesis results are no longer cached
+  (would otherwise poison every repeat of that query).
+- **Differential cache round-trip**: `diagnoses` is now stored in AND returned
+  from the cache (cached `mode=differential` reads returned 0 diagnoses before).
+- **`synthesize=false` cache regression**: the cache-worthiness guard was
+  `answer != ""`, which blocked all retrieval-only calls (they legitimately
+  have an empty answer) from caching. Now only skips when synthesis was
+  *requested but failed*.
+- **Cache variant-scoping**: cache entries are now keyed by a `scope` covering
+  every output-affecting flag (`synthesize`, `domain`, `mode`, `min_confidence`,
+  `top_k`). Previously keyed on query text alone, so a `synthesize=false` entry
+  (answer="") was wrongly served to a later `synthesize=true` request, and a
+  `domain=snomed` result could leak into `domain=all`.
+- **Synthesis latency (healthcare)**: tightened `prompts/clinical_dx.md` to a
+  concise ≤5-candidate ranked differential (≤250 words). Healthcare synthesis
+  p95 dropped 10.97s → 2.44s (answer still a valid ranked differential).
+
+### Verified baseline (2026-07-15, RTX 3060 12GB; `skip_cache=true`, n=20/domain)
+- Retrieval (`synthesize=false`): healthcare p95 241ms, enterprise 74ms,
+  legal 74ms, fraud 62ms; all-domain TOTAL p95 **89ms** (target <400ms). 0 errors.
+- Synthesis (`synthesize=true`): healthcare p95 2.44s, enterprise 1.93s,
+  legal 1.47s, fraud 1.01s — all under the 3s target. 0 errors.
+- Cross-domain (`domain=all`, n=20): p50 298ms, p95 301ms (target <400ms). 0 errors.
+- Cache hit (variant-scoped): ~68ms end-to-end (query embed runs before the
+  cache lookup; the cache saves retrieval+rerank+synthesis, not the embed).
+
 ## [0.1.0] — 2026-07-14 (baseline)
 
 Initial public *experimental* baseline after resetting all prior `v1.x`/`v3.x`
