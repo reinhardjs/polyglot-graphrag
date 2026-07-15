@@ -10,6 +10,16 @@ Usage:
     python scripts/release-gate.py --verbose   # show per-check details
     python scripts/release-gate.py --all-domains  # run full 20x benches
     python scripts/release-gate.py --load        # 24-parallel concurrency hammer
+
+RAGAS limitation (check #12):
+    The answer-quality check enforces faithfulness >= 0.85 against the
+    golden set. By default it uses a local lexical proxy (no deps, no API
+    keys, works offline). RAGAS semantic faithfulness requires an external
+    LLM judge (typically GPT-4 via OpenAI) — directly violating the project's
+    "100% local, no API keys" principle — plus heavy deps (ragas + datasets
+    + langchain-openai) that a fresh clone won't have. RAGAS therefore is
+    NOT the default hard gate. To opt in, set EVAL_USE_RAGAS=1 (the gate
+    auto-selects ragas when both the env var and the library are present).
 """
 
 import json, os, subprocess, sys, time, threading, urllib.request, urllib.error

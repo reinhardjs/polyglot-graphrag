@@ -101,19 +101,27 @@ golden set:
 
 ```bash
 bash run.sh doctor && bash run.sh serve
-./venv/bin/python scripts/release-gate.py        # 12/12 ALL SYSTEMS GO
+./venv/bin/python scripts/release-gate.py        # 14/14 ALL SYSTEMS GO
 ```
 
-By default it scores with a fast **local lexical proxy**. For stricter
-*semantic* faithfulness (real ragas), install the optional deps and opt in:
+By default answer quality scores with a fast **local lexical proxy** (no
+dependencies, no API keys, works offline). For stricter *semantic*
+faithfulness, install the optional deps and opt into ragas:
 
 ```bash
 ./venv/bin/pip install ragas datasets langchain-openai
 EVAL_USE_RAGAS=1 ./venv/bin/python scripts/release-gate.py
 ```
 
-The gate auto-selects ragas when present + `EVAL_USE_RAGAS=1`, else the local
-proxy — so a fresh clone stays green without those heavy extras.
+**Why ragas is NOT the default hard gate.** RAGAS semantic faithfulness
+requires calling an external LLM (typically GPT-4 via an OpenAI API key).
+That directly violates the project's intended "100% local, no API keys"
+principle, so it cannot be the mandatory gate. It also needs heavy deps
+(`ragas` + `datasets` + `langchain-openai`) that a fresh clone won't have,
+and its per-run latency (~3-5 min with real ragas) is prohibitive for
+quick iteration. The gate therefore auto-selects ragas only when both
+`EVAL_USE_RAGAS=1` AND ragas is installed; otherwise it uses the local
+lexical proxy — so a fresh clone stays green without those extras.
 
 ---
 
