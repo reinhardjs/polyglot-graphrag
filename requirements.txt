@@ -48,3 +48,14 @@ watchdog==6.0.0
 
 # ── Test-only (optional: `pip install -r requirements.txt` includes them) ─
 pytest==9.1.1
+
+# ── Optional: RAGAS semantic faithfulness (deep/CI eval only) ───────────
+# Not part of the default `pip install -r requirements.txt`. Install to run
+# the release gate on TRUE semantic faithfulness instead of the lexical proxy:
+#     pip install ragas datasets langchain-openai
+#     EVAL_USE_RAGAS=1 ./venv/bin/python scripts/release-gate.py
+# The gate auto-selects ragas when present + EVAL_USE_RAGAS=1, else the local
+# proxy (so a fresh clone stays green without these heavy deps).
+# ragas==0.2.14
+# datasets==3.6.0
+# langchain-openai==0.3.4

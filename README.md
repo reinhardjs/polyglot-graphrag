@@ -93,6 +93,31 @@ confirmed by more than one — see [docs/domains/README.md](docs/domains/README.
 
 ---
 
+## Quality gate (before you ship)
+
+`scripts/release-gate.py` runs 12 checks (health, retrieval-latency p95 < 400ms,
+synthesis non-empty, answer quality, concurrency). The answer-quality check
+enforces **faithfulness ≥ 0.85** AND **context_precision ≥ 0.50** against the
+golden set:
+
+```bash
+bash run.sh doctor && bash run.sh serve
+./venv/bin/python scripts/release-gate.py        # 12/12 ALL SYSTEMS GO
+```
+
+By default it scores with a fast **local lexical proxy**. For stricter
+*semantic* faithfulness (real ragas), install the optional deps and opt in:
+
+```bash
+./venv/bin/pip install ragas datasets langchain-openai
+EVAL_USE_RAGAS=1 ./venv/bin/python scripts/release-gate.py
+```
+
+The gate auto-selects ragas when present + `EVAL_USE_RAGAS=1`, else the local
+proxy — so a fresh clone stays green without those heavy extras.
+
+---
+
 ## Explore (next steps, in order)
 
 1. **Ask with the SNOMED clinical graph** — `domain:"snomed"` (or omit `domain`

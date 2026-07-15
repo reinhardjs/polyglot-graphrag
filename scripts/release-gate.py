@@ -234,13 +234,20 @@ def run():
             f"golden set missing: {golden}\n"
             f"  → drop your confidential set at golden/{gfile} "
             f"(git-ignored) or set GOLDEN_DIR/GOLDEN_FILE.")
+        # --backend auto: uses real ragas (semantic faithfulness) when
+        # EVAL_USE_RAGAS=1 and ragas is installed, else the local lexical
+        # proxy. A fresh clone has no ragas, so it stays green on the proxy;
+        # a CI/deep run sets EVAL_USE_RAGAS=1 for stricter semantic grounding.
+        backend_flag = ["--backend", "auto"]
         cmd = [os.path.join(BASE, "venv", "bin", "python"),
-                "evaluate_pipeline.py", golden, "--live", "--domain", "enterprise"]
+               "evaluate_pipeline.py", golden, "--live", "--domain", "enterprise",
+               *backend_flag]
         # Live E2B synthesis is slightly non-deterministic, so a single eval
-        # run can wobble around the bar. Take the BEST of up to 3 runs: a
-        # working pipeline always produces at least one strong run, while a
-        # genuinely broken one (no retrieval) scores ~0 on every run and still
-        # fails. This removes flake without masking real regressions.
+        # run can wobble around the bar. Take the BEST of up to 3 runs (by
+        # faithfulness): a working pipeline always produces at least one
+        # strong run, while a genuinely broken one (no retrieval) scores ~0
+        # on every run and still fails. This removes flake without masking
+        # real regressions.
         best = None
         for attempt in range(3):
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -257,12 +264,19 @@ def run():
         ff = best.get("faithfulness", 0.0)
         cp = best.get("context_precision", 0.0)
         cr = best.get("context_recall", 0.0)
-        # Faithfulness floor (local lexical proxy; EVAL_USE_RAGAS=1 for true
-        # faithfulness). A working pipeline clears this on its best run.
+        backend = best.get("backend", "local")
+        # Faithfulness floor (semantic when EVAL_USE_RAGAS=1, else local
+        # lexical proxy). A working pipeline clears this on its best run.
         assert ff >= 0.85, (
             f"faithfulness {ff:.2f} < 0.85 (n={best.get('n_samples')})")
+        # Retrieval-tightness floor: at least half of the retrieved context
+        # must be relevant to the question. Low precision = noisy rerank/top-k
+        # passing distractor chunks (and risks distractor-induced abstention).
+        assert cp >= 0.50, (
+            f"context_precision {cp:.2f} < 0.50 — retrieval too noisy "
+            f"(n={best.get('n_samples')})")
         return (f"faith={ff:.2f} prec={cp:.2f} recall={cr:.2f} "
-                f"(n={m.get('n_samples')})")
+                f"backend={backend} (n={m.get('n_samples')})")
     results.append(check("Answer quality (golden set, E2B synth)", c_quality))
 
     # ── Print results ───────────────────────────────────────────────
