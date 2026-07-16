@@ -243,12 +243,27 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
         else:
             rows = []
         if not rows:
-            # No token overlap — broad fallback (rare; e.g. pure-NL queries).
-            rows = s.run(
-                f"MATCH (n:Entity{label_clause}) "
-                f"RETURN n.id AS id, n.name AS name, n.profile AS prof, "
-                f"n.source_doc AS source_doc LIMIT 500"
-            ).data()
+            # No token overlap. Instead of scanning ALL ~500 entities and
+            # embedding each in Python (the old fallback — ~3-4s for an
+            # out-of-graph query), do a SERVER-SIDE vector lookup against the
+            # entity_vector_idx (top-5 nearest entities in ~10ms). This gives
+            # real cosine similarity without the embed storm.
+            try:
+                q_vec = embed_query(query)
+                res = s.run(
+                    "CALL db.index.vector.queryNodes($idx, 5, $qvec) "
+                    "YIELD node, score "
+                    "RETURN node.id AS id, node.name AS name, "
+                    "node.profile AS prof, score AS sim",
+                    idx=C.ENTITY_VECTOR_INDEX, qvec=q_vec,
+                ).data()
+                rows = [
+                    {"id": r["id"], "name": r.get("name"),
+                     "prof": r.get("prof"), "sim": r.get("sim", 0.0)}
+                    for r in res if r.get("id")
+                ]
+            except Exception:
+                rows = []
 
     def _keyword_scored():
         scored = []
@@ -264,6 +279,13 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
         return scored
 
     def _vector_scored():
+        # Prefer a precomputed similarity (e.g. from the server-side vector
+        # index lookup in the `sim` field) instead of re-embedding every row.
+        if rows and rows[0].get("sim") is not None:
+            return sorted(
+                ((r["sim"], r) for r in rows if r.get("id")),
+                key=lambda x: -x[0],
+            )[:5]
         q_vec = embed_query(query)
         import numpy as np
         q_np = np.array(q_vec) / (np.linalg.norm(q_vec) + 1e-8)
@@ -301,16 +323,46 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
             # No keyword overlap — auto-fall back to vector so NL queries still work.
             scored = _vector_scored()
 
+    # ── Similarity gate (v2.6.x): skip the expensive k-hop traversal when the
+    # best entry node is a poor match for the query. This turns ~3.7s wasted
+    # graph traversals for out-of-graph queries into a fast skip (the pipeline
+    # degrades gracefully to Qdrant vector retrieval only).
+    #
+    # Acceptance rule for traversing:
+    #   • keyword overlap >= 2 tokens  → strong lexical match, always traverse; OR
+    #   • best entry cosine similarity >= GRAPH_ENTRY_MIN_SIM → relevant.
+    # Otherwise (loose/irrelevant match) the graph context contributes nothing,
+    # so we return [] and let Qdrant carry the answer.
+    if not scored:
+        return []
+    # scored[0][0] is an integer token-overlap for keyword, or a cosine float
+    # for vector/hybrid entries.
+    best = scored[0]
+    best_score = best[0]
+    is_lexical = isinstance(best_score, int)
+    if is_lexical and best_score >= 2:
+        pass  # strong lexical match — traverse
+    elif (not is_lexical) and best_score >= C.GRAPH_ENTRY_MIN_SIM:
+        pass  # semantically relevant — traverse
+    else:
+        return []
+
     out = []
     if scored:
         entry = scored[0][1]["id"]
         with driver.session() as s:
             # Fetch neighbourhood nodes AND the relationships among them so we
             # can rank by structural centrality (Phase 2 pruning).
+            # NOTE: a 2-hop expansion from a high-degree "hub" entity can return
+            # thousands of nodes and take ~3.7s. Bound the result set with
+            # LIMIT so latency stays predictable; Phase-2 pruning refines the
+            # top-N afterwards. Applies to both the node fetch and the edge
+            # expansion below.
+            _LIMIT = getattr(C, "GRAPH_TRAVERSAL_LIMIT", 200)
             rec = s.run(
                 "MATCH (n:Entity {id:$e})-[*1..%d]-(m:Entity) "
                 "RETURN DISTINCT m.id AS id, m.profile AS prof, "
-                "m.source_doc AS source_doc" % hops,
+                "m.source_doc AS source_doc LIMIT %d" % (hops, _LIMIT),
                 e=entry,
             ).data()
             edge_rows = s.run(
@@ -319,7 +371,7 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
                 "WITH ms + entry AS ns "
                 "UNWIND ns AS a UNWIND ns AS b "
                 "MATCH (a)-[r]-(b) WHERE a.id < b.id "
-                "RETURN DISTINCT a.id AS src, b.id AS dst" % hops,
+                "RETURN DISTINCT a.id AS src, b.id AS dst LIMIT %d" % (hops, _LIMIT),
                 e=entry,
             ).data()
         edges = [(r["src"], r["dst"]) for r in edge_rows

@@ -272,8 +272,18 @@ VECTOR_DIM = 1024          # jina-embeddings-v3 output dim
 RERANK_TOP_K = 5           # keep top-5 contexts after rerank
 QDRANT_SEARCH_TOP_K = 10   # vector candidates from Qdrant
 GRAPH_HOPS = 2             # k-hop subgraph from Neo4j
+GRAPH_TRAVERSAL_LIMIT = 200 # cap nodes/edges returned by the k-hop expansion
+                             # (a hub entity's 2-hop neighbourhood can be huge
+                             # and take ~3.7s; LIMIT bounds latency)
 GRAPH_PRUNE_TOP_N = 10     # Phase 2: cap subgraph to Top-N nodes (context window guard)
 GRAPH_PRUNE_STRATEGY = "degree"  # "degree" | "pagerank" | "none" — neighbor ranking
+# Similarity floor for the graph entry node. When the best keyword-overlap /
+# vector-similarity match is below this, the query has no real entity in the
+# graph, so the expensive k-hop traversal is skipped (degrades to vector-only).
+# Without this gate, unrelated queries ("cassandra repair" in an ops corpus)
+# still pick a low-similarity entry and run a ~3.7s variable-length path query
+# for context that contributes nothing. 0.0 disables the gate (old behaviour).
+GRAPH_ENTRY_MIN_SIM = float(os.environ.get("GRAPH_ENTRY_MIN_SIM", "0.30"))
 
 # ── CRAG (Phase 3): Corrective RAG & adaptive routing ────────────────────────
 CRAG_USE_LLM_ROUTER = False  # True → confirm route + rewrite with E4B (slower, smarter)
