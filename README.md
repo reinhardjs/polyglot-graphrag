@@ -76,6 +76,9 @@ If you got an answer, you're done — the system works. Now explore.
 ---
 config:
   layout: dagre
+  theme: base
+  themeVariables:
+    background: '#ffffff'
 ---
 flowchart LR
  subgraph INGEST["INGEST PIPELINE"]
@@ -122,8 +125,8 @@ flowchart LR
      F:::query
      S:::query
      A:::query
-    classDef ingest fill:#eef2ff,stroke:#818cf8
-    classDef query fill:#f0fdfa,stroke:#2dd4bf
+    classDef ingest fill:#e0e7ff,stroke:#6366f1,color:#1e1b4b
+    classDef query fill:#ccfbf1,stroke:#14b8a6,color:#022c22
 ```
 
 Two stores, searched together:
