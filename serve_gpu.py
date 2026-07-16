@@ -202,8 +202,7 @@ def _load_gliner():
             _gliner = _gliner.to(DEVICE).half()
         _gliner.predict_entities("warm", ["Microservice", "Database"])
         print(
-            f"[{LOG_PREFIX}] GLiNER resident. "
-            f"Allocated: {allocated}",
+            f"[{LOG_PREFIX}] GLiNER resident on {DEVICE}.",
             flush=True,
         )
     return _gliner
