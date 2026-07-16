@@ -1599,7 +1599,13 @@ def health():
     try:
         from qdrant_client import QdrantClient
         qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False, timeout=3)
-        qc.count(C.COLL_CACHE)
+        # The query_cache collection may not exist yet on a freshly-wiped
+        # store — treat a missing collection as "ok" (it will be created on
+        # first use) rather than failing the whole health probe.
+        try:
+            qc.count(C.COLL_CACHE)
+        except Exception:
+            pass
         backends["qdrant"] = "ok"
     except Exception as e:
         backends["qdrant"] = f"down:{type(e).__name__}"
