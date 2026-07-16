@@ -271,9 +271,11 @@ LLM_MAX_TOKENS_OUT = 1024
 VECTOR_DIM = 1024          # jina-embeddings-v3 output dim
 RERANK_TOP_K = 5           # keep top-5 contexts after rerank
 QDRANT_SEARCH_TOP_K = 10   # vector candidates from Qdrant
-GRAPH_HOPS = 3             # k-hop subgraph from Neo4j (3 lets any chain endpoint
-                            # reach a 3-relationship A->B->C->D path; bounded by
-                            # GRAPH_TRAVERSAL_LIMIT so latency stays controlled)
+GRAPH_HOPS = 2             # k-hop subgraph from Neo4j. The full A->B->C->D chain
+                            # (bob OWNS BUG-204 CAUSED_BY CPU DEPENDS_ON GPU) is
+                            # reachable in 2 hops from the MIDDLE node BUG-204
+                            # (bob@1, GPU@2). Latency-safe; GRAPH_TRAVERSAL_LIMIT
+                            # bounds a hub entity's neighbourhood.
 GRAPH_TRAVERSAL_LIMIT = 200 # cap nodes/edges returned by the k-hop expansion
 GRAPH_PRUNE_TOP_N = 10     # Phase 2: cap subgraph to Top-N nodes (context window guard)
 GRAPH_PRUNE_STRATEGY = "degree"  # "degree" | "pagerank" | "none" — neighbor ranking
@@ -291,9 +293,6 @@ GRAPH_ENTRY_MIN_SIM = float(os.environ.get("GRAPH_ENTRY_MIN_SIM", "0.30"))
 # them surfaces the chain for graph questions and is a no-op when no graph
 # edges are present (normal RAG queries unchanged).
 GRAPH_EDGE_BOOST = float(os.environ.get("GRAPH_EDGE_BOOST", "1.0"))
-# Max graph-edge-statement contexts appended (additive) to the synthesis set so
-# the multi-hop chain always reaches the LLM without starving prose context.
-GRAPH_EDGES_IN_SYNTH = int(os.environ.get("GRAPH_EDGES_IN_SYNTH", "12"))
 
 # ── CRAG (Phase 3): Corrective RAG & adaptive routing ────────────────────────
 CRAG_USE_LLM_ROUTER = False  # True → confirm route + rewrite with E4B (slower, smarter)
