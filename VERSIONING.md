@@ -45,6 +45,17 @@ were frozen and documented as stable. Subsequent work uses `1.0.x` (PATCH) or
    ```
 5. Never force-push tags. If a tag is wrong, cut a new PATCH and note the
    correction in `CHANGELOG.md`.
+6. **Never re-point `v1.0.0`.** `v1.0.0` is the frozen, contract-locked stable
+   baseline. Do NOT run `git tag -f v1.0.0`, do NOT `git push --force` the tag,
+   and do NOT delete-and-recreate its GitHub release to absorb new work. Any
+   change after 1.0.0 — even a one-line fix or a doc update — ships as a NEW
+   incremental version (`v1.0.1`, `v1.1.0`, …) per the table above. Treat
+   `v1.0.0` as immutable history.
+
+> **Why this is hard:** re-pointing `v1.0.0` silently rewrites what
+> downstream users pinned to `v1.0.0` resolve to, breaks reproducibility, and
+> defeats the contract-lock. The cost of a new PATCH tag is one extra git tag;
+> the cost of re-pointing is loss of a stable reference. Always cut forward.
 
 ## What is frozen at 1.0
 

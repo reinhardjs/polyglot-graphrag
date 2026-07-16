@@ -1,4 +1,36 @@
-> **Current release: `v1.0.0`** (git tag `v1.0.0`).
+> **Current release: `v1.0.1`** (git tag `v1.0.1`).
+
+## [1.0.1] — 2026-07-16 (PATCH)
+
+### Changed
+- **Versioning rule hardened** (`VERSIONING.md`): `v1.0.0` is now explicitly
+  frozen — never re-point (`git tag -f`), never force-push, never
+  delete-and-recreate its release. All post-1.0.0 work ships as a NEW
+  incremental version (`v1.0.1`, `v1.1.0`, …). This PATCH itself establishes
+  that rule going forward.
+- **`run.sh` offline-safe + CUDA-pinned** (carried into this PATCH): auto-enables
+  `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1` when HuggingFace is unreachable so
+  the daemon starts from cache instead of hanging ~4 min; `detect_llama_bin`
+  prefers the CUDA llama.cpp build and will NOT fall back to the Vulkan binary.
+- **Recursive latency-doc audit** (carried into this PATCH): all current-state
+  docs now state the calibrated SLOs (synthesis p95 **2.3s / <3s**, retrieval
+  **~530ms**). Bench scripts assert `TARGET_SYNTH_P95_MS=3000`. Historical
+  records retain the <4s interim decision as accurate history with forward
+  pointers.
+
+### Docs
+- `README.md`, `CHANGELOG.md`, `docs/release-gate-gpu-load.md`,
+  `goal_100pct_functional.md`, both v1.0 roadmap planning docs, and the
+  `v1.0-release-readiness` benchmark doc corrected to <3s.
+- `docs/latency-calibration.md` (6-lever tuning playbook) and
+  `docs/SESSION-2026-07-16-latency.md` (session + verification) added.
+
+> **Note:** the offline-safe `run.sh` and doc-audit changes were originally
+> folded into `v1.0.0` via a re-point. Per the new rule they belong to a
+> forward PATCH, so they are recorded here under `v1.0.1` and `v1.0.0` is left
+> immutable.
+
+---
 
 ## [1.0.0] — 2026-07-16 (consolidated)
 
