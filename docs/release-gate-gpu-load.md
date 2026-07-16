@@ -37,41 +37,55 @@ Thu Jul 16 13:58:13 2026
 
 ### VRAM breakdown by process
 
-| Process                              | VRAM   | Role                                     |
-|--------------------------------------|--------|------------------------------------------|
-| `rag-system/venv/bin/python` (PID 212954) | 4558 MiB | **This project's daemon** — Jina embed + E2B GGUF (synthesis) + BGE reranker, all on GPU |
-| `llama-server` (PID 212891)         | 2340 MiB | **External LM Studio server** — NOT part of this project; co-resident on the same GPU |
-| `gnome-shell` / `Xorg`              | 139 MiB | Desktop display (unavoidable)            |
+| Process                              | VRAM   | Role                                                                  |
+|--------------------------------------|--------|-----------------------------------------------------------------------|
+| `rag-system/venv/bin/python` (PID 212954) | 4558 MiB | **This project's daemon** — Jina embed + BGE reranker on GPU (the E2B GGUF synthesis runs in the separate process below) |
+| `llama-server` (PID 212891)         | 2340 MiB | **This project's E2B synthesis backend** — LM Studio is just the runtime hosting `/mnt/data-970-plus/rag-system/models/gemma-4-E2B-it-QAT-Q4_0.gguf` on `:8082`. NOT a foreign model. |
+| `gnome-shell` / `Xorg`              | 139 MiB | Desktop display (unavoidable)                                         |
 
 ## Why this matters for the latency SLOs
 
 The synthesis benchmark (`Bench 5x all-domains`, `_SYNTH_THRESHOLD_S`) runs the
-E2B GGUF at full tilt. During the gate the card was at **95% utilization** and
-the project daemon **shared the GPU with an external LM Studio `llama-server`
-(2340 MiB)** that was not part of the test.
+E2B GGUF at full tilt. During the gate the card was at **95% utilization**. The
+GPU hosts **this project's own** models together:
 
-That co-tenancy is additional contention beyond the documented Jina-embed + E2B
-sharing. It is the practical reason the 10x-burst synthesis p95 lands in the
-6.4–7.1s range (occasional ~8s outliers) rather than the ~3.5s a sporadic
-single call achieves. The recalibrated thresholds in `scripts/release-gate.py`
-(CPU/GPU):
+- the **Jina embedder** + **BGE reranker** inside the daemon process, and
+- the **E2B synthesis GGUF** in the LM-Studio-launched `llama-server` process.
+
+LM Studio is merely the *runtime* for our E2B endpoint — it is **not** a foreign
+or competing workload. The contention is **intra-project**: E2B generation
+competes with the daemon's own Jina embed calls on the shared 12 GB card. That
+is the practical reason the 10x-burst synthesis p95 lands in the 6.4–7.1s range
+(occasional ~8s outliers) rather than the ~3.5s a sporadic single call achieves.
+The recalibrated thresholds in `scripts/release-gate.py` (CPU/GPU):
 
 - Retrieval p95: **1100ms** (GPU)
 - Synthesis p95: **8.5s** (GPU) — covers the burst envelope + co-tenancy margin
 
-### Reproducibility note
+### Reproducibility note — IMPORTANT (corrected)
 
-For a *clean* gate run with minimal GPU contention, free the card first:
+The `llama-server` (PID 212891) shown above was launched by **LM Studio**, but
+it is serving **this project's own E2B GGUF**:
 
-```bash
-# stop this project's daemon
-pkill -f "rag-system/venv/bin/python serve_gpu.py"   # or kill by explicit PID
-# stop the co-resident LM Studio server if present
-pkill -f "llama-server"
-# confirm zero compute apps
-nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader
+```
+/home/reinhard/.lmstudio/extensions/backends/.../llama-server \
+  --model /mnt/data-970-plus/rag-system/models/gemma-4-E2B-it-QAT-Q4_0.gguf \
+  --host 127.0.0.1 --port 8082
 ```
 
-Re-running the gate on a card with only the project daemon loaded (no external
-llama-server) will typically show a lower synthesis p95. The SLOs above remain
-valid headroom for the contested (default desktop) state.
+That is the exact model file and `:8082` port the daemon uses for synthesis
+(`SYNTHESIS_LLM_BASE_URL`). So LM Studio was merely the *runtime* that hosts our
+E2B synthesis endpoint — it is **not** a foreign/competing workload. The 2340 MiB
+it consumes is our synthesis model itself.
+
+The genuine GPU contention during the burst is therefore **intra-project**: the
+daemon (`serve_gpu.py`, 4558 MiB) holds the **Jina embedder + BGE reranker** on
+the GPU, while the **E2B synthesis GGUF** lives in the separate `llama-server`
+process — all three (embed + rerank + synthesis) sharing the one 12 GB card.
+The 95% utilization is E2B generation competing with the daemon's own Jina
+embed calls. This is exactly the topology the recalibrated SLOs account for.
+
+Do NOT kill the `llama-server` before a gate run — that *is* the synthesis
+backend; without it `/health` reports `synthesis: down` and the gate fails. The
+card simply must host embed + rerank + synthesis together; the SLOs above are
+calibrated for that reality.
