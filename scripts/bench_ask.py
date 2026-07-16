@@ -9,9 +9,9 @@ Usage:
 Reports p50/p95/p99 latency, error count, and (for --all-domains) per-domain
 context coverage. Exits non-zero if any request errors or p95 exceeds target.
 
-Targets (from v1.0 roadmap):
+Targets (calibrated for RTX 3060 12GB, v1.0.0):
   single-domain, no synthesis: p95 < 250ms (cold) / < 400ms (multi-domain)
-  with synthesis:             p95 < 4s
+  with synthesis:             p95 < 3.0s
 """
 from __future__ import annotations
 

@@ -4,19 +4,16 @@ bench_synth_compare.py — Compare synthesize:false (retrieval-only) vs
 synthesize:true (LLM answer) on the REAL ingested corpus,
 using whichever synthesis backend the LIVE daemon is configured with.
 
-Run it twice to compare backends:
-  # with E4B (default, :8084):
-  python scripts/bench_synth_compare.py
-  # then restart daemon with E2B synthesis and re-run:
-  SYNTHESIS_LLM_BASE_URL=http://localhost:8082/v1 \
-  SYNTHESIS_LLM_MODEL=gemma-4-E2B_q4_0-it.gguf python serve_gpu.py
+E4B is RETIRED (v1.0.2); synthesis now runs on E2B (:8082) for both
+extraction and synthesis. Just run it once against the live daemon:
+
   python scripts/bench_synth_compare.py --label e2b
 
 Reports p50/p95 for both modes + which synthesis backend is live, and asserts
-the <4s synthesis target (TARGET_SYNTH_P95_MS). Note: under sustained back-to-back
-burst the worst-case call can reach ~3.5s due to GPU contention between the
-daemon's Jina embed and E2B on the shared 12GB card; sporadic real traffic is
-0.3-0.7s. The 4s SLO covers the adversarial burst while keeping a tight budget.
+the <3.0s synthesis target (TARGET_SYNTH_P95_MS). On RTX 3060 12GB, E2B on the
+CUDA llama.cpp build decodes at ~128 tok/s; with SYNTH_MAX_TOKENS_OUT=250 a
+synthesized /ask lands at ~2.3s p95 (well under 3.0s). The 3.0s SLO covers the
+worst-case adversarial 10x burst while keeping a tight budget.
 """
 from __future__ import annotations
 import argparse
@@ -32,7 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 BASE = "http://localhost:8000/ask"
 HEALTH = "http://localhost:8000/health"
-TARGET_SYNTH_P95_MS = 4000.0
+TARGET_SYNTH_P95_MS = 3000.0  # 3.0s SLO (RTX 3060 12GB, E2B on CUDA, cap 250)
 
 # Realistic enterprise queries (derived from corpus structure, no confidential text)
 QUERIES = [

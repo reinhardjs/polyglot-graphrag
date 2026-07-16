@@ -22,6 +22,20 @@ export HF_HOME="${HF_HOME:-$ROOT/.cache/hf}"
 PY="$ENV/bin/python"
 mkdir -p "$ROOT/.run" "$ROOT/logs" "$ROOT/.cache"
 
+# ── Offline-safe fallback for the Jina embedder ──────────────────────────────
+# The daemon loads the Jina embedding model from the local HF cache. If
+# HuggingFace is unreachable, `sentence_transformers` still probes HF HEAD
+# endpoints and retries for ~4 minutes before failing to start. Auto-enable
+# offline mode when HF is not reachable so the daemon starts from cache
+# immediately. Override with HF_HUB_OFFLINE / TRANSFORMERS_OFFLINE if needed.
+if [ -z "${HF_HUB_OFFLINE:-}" ] && [ -z "${TRANSFORMERS_OFFLINE:-}" ]; then
+  if ! timeout 5 curl -sI https://huggingface.co >/dev/null 2>&1; then
+    echo "  [warn] HuggingFace unreachable — enabling offline mode (using cached models)"
+    export HF_HUB_OFFLINE=1
+    export TRANSFORMERS_OFFLINE=1
+  fi
+fi
+
 MODELS_DIR="${MODELS_DIR:-$ROOT/models}"
 E2B_MODEL="${E2B_MODEL:-$MODELS_DIR/gemma-4-E2B-it-QAT-Q4_0.gguf}"
 E2B_CTX="${E2B_CTX:-32768}"
@@ -34,10 +48,15 @@ MODEL_HINT="  Download:  huggingface-cli download lmstudio-community/gemma-4-E2B
   (override with E2B_MODEL=/path/to.gguf or MODELS_DIR=/path)"
 
 # ── llama.cpp server binary: auto-detect if not provided ──────────────────────
+# IMPORTANT: prefer the CUDA build. The Vulkan llama.cpp build is ~3× slower
+# (~45 tok/s vs ~128 tok/s on RTX 3060) and silently breaks the synthesis SLO.
+# Candidates are ordered CUDA-first; the bare `find` last-resort is avoided
+# because it can return the Vulkan binary first. Set LLAMA_BIN explicitly to
+# override.
 detect_llama_bin() {
   # 1) explicit env
   [ -n "${LLAMA_BIN:-}" ] && [ -x "${LLAMA_BIN:-}" ] && { echo "$LLAMA_BIN"; return; }
-  # 2) common lmstudio / manual install locations
+  # 2) CUDA llama.cpp builds (preferred), then generic, then PATH
   local cands=(
     "$HOME/.lmstudio/extensions/backends/llama.cpp-linux-x86_64-nvidia-cuda-avx2-2.23.1/llama-server"
     "$HOME/.lmstudio/extensions/backends/llama.cpp-linux-x86_64-nvidia-cuda-cb/llama-server"
@@ -48,9 +67,9 @@ detect_llama_bin() {
   for c in "${cands[@]}"; do
     [ -n "$c" ] && [ -x "$c" ] && { echo "$c"; return; }
   done
-  # 3) last resort: search the lmstudio dirs
+  # 3) CUDA-only search (do NOT fall back to a Vulkan binary)
   local found
-  found=$(find "$HOME/.lmstudio" -name llama-server -type f 2>/dev/null | head -1)
+  found=$(find "$HOME/.lmstudio" -path '*nvidia-cuda*' -name llama-server -type f 2>/dev/null | head -1)
   [ -n "$found" ] && { echo "$found"; return; }
   echo ""
 }

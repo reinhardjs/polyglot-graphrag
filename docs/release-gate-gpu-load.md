@@ -58,13 +58,24 @@ GPU hosts **this project's own** models together:
 
 LM Studio is merely the *runtime* for our E2B endpoint — it is **not** a foreign
 or competing workload. The contention is **intra-project**: E2B generation
-competes with the daemon's own Jina embed calls on the shared 12 GB card. That
-is the practical reason the 10x-burst synthesis p95 lands in the 6.4–7.1s range
-(occasional ~8s outliers) rather than the ~3.5s a sporadic single call achieves.
-The recalibrated thresholds in `scripts/release-gate.py` (CPU/GPU):
+competes with the daemon's own Jina embed calls on the shared 12 GB card.
 
-- Retrieval p95: **1100ms** (GPU)
-- Synthesis p95: **8.5s** (GPU) — covers the burst envelope + co-tenancy margin
+**Calibrated state (post-fix, RTX 3060 12GB):** synthesis latency was driven
+under 3s. The fixes that got there: E2B on the **CUDA** llama.cpp build
+(~128 tok/s, not the ~45 tok/s Vulkan build), `SYNTH_MAX_TOKENS_OUT=250` (was
+400, which forced ~3.9s of padded boilerplate), and the retrieval fixes that
+removed a ~4s hub-node graph traversal (server-side `entity_vector_idx` lookup
++ `GRAPH_TRAVERSAL_LIMIT`). Measured on the release gate:
+
+- Retrieval p95: **~530ms** (GPU)
+- Synthesis p95: **~2.3s** (GPU) — under the 3.0s SLO
+- All 10 benchmark queries retrieve in 360–567ms; 60/60 `/ask` calls < 3s
+
+The current thresholds in `scripts/release-gate.py` (CPU/GPU):
+
+- Retrieval p95: **1100ms** (GPU) — measured p95 + headroom
+- Synthesis p95: **3.0s** (GPU) — achievable with the CUDA build + cap 250
+  (8.5s was a temporary calibration during investigation; no longer used)
 
 ### Reproducibility note — IMPORTANT (corrected)
 

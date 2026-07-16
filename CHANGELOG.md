@@ -4,7 +4,8 @@
 
 ### Changed
 - **Unified daemon** (`serve_gpu.py`): auto-detects CUDA vs CPU, guards `.half()` calls on CPU, device-aware log prefix (`gpu-daemon` / `rag-daemon`). `serve_cpu.py` is now a thin wrapper — zero future divergence.
-- **Release gate** (`scripts/release-gate.py`): device-aware thresholds — bench <2000ms on CPU (vs 400ms GPU), synth <5.0s on CPU (vs 4.0s GPU), auto-detected from `/health`.
+- **Release gate** (`scripts/release-gate.py`): device-aware thresholds — bench <2000ms on CPU (vs 1100ms GPU), synth <5.0s on CPU (vs **3.0s GPU**), auto-detected from `/health`.
+- **Synthesis calibrated <3s** (RTX 3060 12GB): E2B on the CUDA llama.cpp build (~128 tok/s, not Vulkan ~45 tok/s) + `SYNTH_MAX_TOKENS_OUT` 400→250. Retrieval fixes (server-side `entity_vector_idx` lookup + `GRAPH_TRAVERSAL_LIMIT`) removed a ~4s hub-node graph traversal. Measured: synthesis p95 **2.3s**, retrieval p95 **~530ms**, 60/60 `/ask` calls <3s.
 - **serve_cpu.py parity**: added `/v1/embeddings`, `/admin/reload`, `/metrics`, full health endpoint, unknown-domain guard, cross-domain fan-out, Prometheus counters, and fixed stale `_resolve_collections` / `process_query` bug.
 - **Doc audit**: fixed stale E4B/E2B, engineering/enterprise naming, and badge version across ARCHITECTURE.md, MIGRATION.md, ask-pipeline.md, benchmarks, and Python docstrings.
 - **Sample answers doc**: `docs/sample-answers.md` — 7 verified Q&A pairs with copy-paste curl commands.
@@ -93,6 +94,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com).
   breach was GPU contention between the daemon's Jina embed and E2B on the
   shared 12 GB card under sustained burst (isolated /ask ≈0.27s; direct E2B
   burst p95 0.37s; daemon burst p95 3–4s, max 3.49s). Real traffic is 0.3–0.7s.
+  *Subsequently met at **< 3.0s** (measured 2.3s) after the E2B CUDA build +
+  `SYNTH_MAX_TOKENS_OUT=250` + hub-node graph-traversal retrieval fix — see the
+  [1.0.0] header above and `docs/latency-calibration.md`.*
 
 ### Removed
 - `external/ora-et-labora/` — a separate, unrelated project (git-ignored)

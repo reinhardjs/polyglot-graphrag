@@ -11,7 +11,7 @@ a Neo4j knowledge graph + a Qdrant vector store, then answers questions by
 fusing both.
 
 > **Status: STABLE (`1.0.0`).** Enterprise MVP. 4-domain federated retrieval,
-> verified baseline (retrieval p95=89ms, synthesis <4s). Backwards-compatible
+> verified baseline (retrieval p95≈530ms, synthesis <3s on RTX 3060 12GB). Backwards-compatible
 > API. See [VERSIONING.md](VERSIONING.md), [CHANGELOG.md](CHANGELOG.md), and
 > [the roadmap](plans/v1.0-enterprise-mvp-roadmap.md).
 
@@ -143,8 +143,8 @@ confirmed by more than one — see [docs/domains/README.md](docs/domains/README.
 
 ## Quality gate (before you ship)
 
-`scripts/release-gate.py` runs 14 checks (health, retrieval-latency p95 < 400ms,
-synthesis non-empty, synthesis-latency p95 < 4s, answer quality, concurrency,
+`scripts/release-gate.py` runs 14 checks (health, retrieval-latency p95 < 1100ms,
+synthesis non-empty, synthesis-latency p95 < 3.0s, answer quality, concurrency,
 doc/code consistency). The answer-quality check
 enforces **faithfulness ≥ 0.85** AND **context_precision ≥ 0.50** against the
 golden set:
