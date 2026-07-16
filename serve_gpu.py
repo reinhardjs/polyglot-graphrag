@@ -823,6 +823,20 @@ def ask(req: AskReq):
         (not _force_differential) and len(pool) <= 10
     )
 
+    # Guarantee graph-edge-statement contexts reach synthesis. These are the
+    # explicit A->B->C->D relationship evidence; without this they can be
+    # sliced off by top_k (pool is Qdrant-first) and the LLM never sees
+    # the chain. Appended additively (capped) so prose context is NOT
+    # starved — the edges supplement, not replace, the answer source.
+    def _ensure_graph_edges(ranked):
+        if not ranked:
+            return ranked
+        have = set(i for i, _ in ranked)
+        ge = [i for i, r in enumerate(pool)
+              if r.get("doc_type") == "graph_edge" and i not in have]
+        cap = int(C.GRAPH_EDGES_IN_SYNTH)
+        return ranked + [(i, 1e9) for i in ge[:cap]]
+
     if _skip_rerank:
         # Raw-score ordering: graph hits carry IDF score (already summed in
         # _build_context? no — re-derive from context text). Simpler: sort by
@@ -833,9 +847,11 @@ def ask(req: AskReq):
             sc = 0.0
             if r.get("_dual_signal"):
                 sc += DUAL_BOOST
+            if r.get("doc_type") == "graph_edge":
+                sc += C.GRAPH_EDGE_BOOST
             ranked.append((i, sc))
         ranked.sort(key=lambda x: x[1], reverse=True)
-        ranked = ranked[:req.top_k]
+        ranked = _ensure_graph_edges(ranked[:req.top_k])
         rerank_scores = [float(pool[i].get("_dual_signal", False)) for i, _ in ranked]
     else:
         scores = _reranker.predict([(req.query, r["text"]) for r in pool])
@@ -844,9 +860,11 @@ def ask(req: AskReq):
             sc = float(s)
             if pool[i].get("_dual_signal"):
                 sc += DUAL_BOOST
+            if pool[i].get("doc_type") == "graph_edge":
+                sc += C.GRAPH_EDGE_BOOST
             ranked.append((i, sc))
         ranked.sort(key=lambda x: x[1], reverse=True)
-        ranked = ranked[:req.top_k]
+        ranked = _ensure_graph_edges(ranked[:req.top_k])
         rerank_scores = [s for _, s in ranked]
 
     # Confidence label per ranked differential. Computed on the DE-BOOSTED

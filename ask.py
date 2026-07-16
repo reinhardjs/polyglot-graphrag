@@ -319,8 +319,13 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
             scored = kw
     else:  # keyword (default)
         scored = _keyword_scored()
-        if not scored:
-            # No keyword overlap — auto-fall back to vector so NL queries still work.
+        # Fall back to vector when keyword has no confident lexical match
+        # (overlap < 2). A weak 1-token overlap must NOT suppress the
+        # vector entry — otherwise indirect NL queries ("how is bob connected
+        # to the GPU through his bug") get a poor keyword entry and the gate
+        # wrongly skips a traversable graph.
+        if not scored or (scored and isinstance(scored[0][0], int)
+                         and scored[0][0] < 2):
             scored = _vector_scored()
 
     # ── Similarity gate (v2.6.x): skip the expensive k-hop traversal when the
@@ -361,7 +366,7 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
             _LIMIT = getattr(C, "GRAPH_TRAVERSAL_LIMIT", 200)
             rec = s.run(
                 "MATCH (n:Entity {id:$e})-[*1..%d]-(m:Entity) "
-                "RETURN DISTINCT m.id AS id, m.profile AS prof, "
+                "RETURN DISTINCT m.id AS id, m.name AS name, m.profile AS prof, "
                 "m.source_doc AS source_doc LIMIT %d" % (hops, _LIMIT),
                 e=entry,
             ).data()
@@ -371,10 +376,10 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
                 "WITH ms + entry AS ns "
                 "UNWIND ns AS a UNWIND ns AS b "
                 "MATCH (a)-[r]-(b) WHERE a.id < b.id "
-                "RETURN DISTINCT a.id AS src, b.id AS dst LIMIT %d" % (hops, _LIMIT),
+                "RETURN DISTINCT a.id AS src, b.id AS dst, type(r) AS rel LIMIT %d" % (hops, _LIMIT),
                 e=entry,
             ).data()
-        edges = [(r["src"], r["dst"]) for r in edge_rows
+        edges = [(r["src"], r["dst"], r.get("rel")) for r in edge_rows
                  if r.get("src") and r.get("dst")]
 
         # Phase 2: prune the neighbourhood to the Top-N most central nodes.
@@ -387,6 +392,35 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
                                        strategy=strategy, top_n=top_n)
             except Exception:
                 pass  # never let pruning break retrieval
+
+        # Build an id->name map so we can emit human-readable edge
+        # statements even when entity `prof`/`source_doc` are empty.
+        _id2name = {r["id"]: (r.get("name") or r["id"]) for r in rec if r.get("id")}
+        if scored:
+            _e0 = scored[0][1]
+            if _e0.get("id"):
+                _id2name.setdefault(_e0["id"], _e0.get("name") or _e0["id"])
+
+        # Emit traversed relationship edges as explicit statements (A -[rel]-> B).
+        # This is what makes an indirect A->D chain answerable: the LLM sees
+        # "bob OWNS BUG-204; BUG-204 CAUSED_BY CPU; CPU DEPENDS_ON GPU"
+        # rather than disconnected (often empty) node profiles.
+        _seen_edges = set()
+        for _src, _dst, _rel in edges:
+            if not _rel:
+                continue
+            _key = (_src, _dst, _rel)
+            if _key in _seen_edges:
+                continue
+            _seen_edges.add(_key)
+            _a = _id2name.get(_src, _src)
+            _b = _id2name.get(_dst, _dst)
+            out.append({
+                "text": f"GRAPH EDGE: {_a} -[{_rel}]-> {_b}",
+                "doc_id": "graph://enterprise",
+                "doc_type": "graph_edge",
+                "chunk_idx": -1,
+            })
 
         # Include the entry node's own profile first (with its source_doc)
         e0 = scored[0][1]

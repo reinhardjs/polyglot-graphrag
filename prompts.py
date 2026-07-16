@@ -70,8 +70,23 @@ def build_synthesis_prompt(query: str, contexts: list,
 
     # 3. Generic fallback (no profile / no kind / missing template).
     role = syn.get("role", "knowledge assistant")
-    return (
+    base = (
         f"You are a {role}. Answer using ONLY the context. "
         f"Cite source numbers. If missing, say so.\n\n"
         f"CONTEXT:\n{ctx}\n\nQUESTION: {query}"
-    )[: C.MAX_TOKENS_CONTEXT * 4]
+    )
+    # Graph-aware framing: when the context carries relationship edges
+    # ("GRAPH EDGE: A -[REL]-> B"), tell the model these are
+    # transitive facts — A->B and B->C implies A relates to C. Without
+    # this the LLM sees disconnected edge lines and cannot answer an
+    # indirect A->D question even though the full chain is present.
+    if any("GRAPH EDGE:" in str(c) for c in contexts):
+        base = (
+            "The context may include relationship edges written as "
+            "\"GRAPH EDGE: A -[RELATIONSHIP]-> B\". Treat each as a fact that "
+            "A relates to B via RELATIONSHIP. Chain them transitively: if "
+            "A->B and B->C, then A relates to C (through B). Use these to "
+            "answer indirect (\"how is A connected to C\") questions.\n\n"
+            + base
+        )
+    return base[: C.MAX_TOKENS_CONTEXT * 4]

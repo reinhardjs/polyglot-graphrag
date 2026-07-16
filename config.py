@@ -271,10 +271,10 @@ LLM_MAX_TOKENS_OUT = 1024
 VECTOR_DIM = 1024          # jina-embeddings-v3 output dim
 RERANK_TOP_K = 5           # keep top-5 contexts after rerank
 QDRANT_SEARCH_TOP_K = 10   # vector candidates from Qdrant
-GRAPH_HOPS = 2             # k-hop subgraph from Neo4j
+GRAPH_HOPS = 3             # k-hop subgraph from Neo4j (3 lets any chain endpoint
+                            # reach a 3-relationship A->B->C->D path; bounded by
+                            # GRAPH_TRAVERSAL_LIMIT so latency stays controlled)
 GRAPH_TRAVERSAL_LIMIT = 200 # cap nodes/edges returned by the k-hop expansion
-                             # (a hub entity's 2-hop neighbourhood can be huge
-                             # and take ~3.7s; LIMIT bounds latency)
 GRAPH_PRUNE_TOP_N = 10     # Phase 2: cap subgraph to Top-N nodes (context window guard)
 GRAPH_PRUNE_STRATEGY = "degree"  # "degree" | "pagerank" | "none" — neighbor ranking
 # Similarity floor for the graph entry node. When the best keyword-overlap /
@@ -284,6 +284,16 @@ GRAPH_PRUNE_STRATEGY = "degree"  # "degree" | "pagerank" | "none" — neighbor r
 # still pick a low-similarity entry and run a ~3.7s variable-length path query
 # for context that contributes nothing. 0.0 disables the gate (old behaviour).
 GRAPH_ENTRY_MIN_SIM = float(os.environ.get("GRAPH_ENTRY_MIN_SIM", "0.30"))
+# Additive rerank/order boost for explicit graph-edge-statement contexts
+# (doc_type="graph_edge"). These are the direct A->B->C->D relationship
+# evidence for multi-hop questions; without a boost they get sliced off by
+# top_k (pool is Qdrant-first) and the LLM never sees the chain. Boosting
+# them surfaces the chain for graph questions and is a no-op when no graph
+# edges are present (normal RAG queries unchanged).
+GRAPH_EDGE_BOOST = float(os.environ.get("GRAPH_EDGE_BOOST", "1.0"))
+# Max graph-edge-statement contexts appended (additive) to the synthesis set so
+# the multi-hop chain always reaches the LLM without starving prose context.
+GRAPH_EDGES_IN_SYNTH = int(os.environ.get("GRAPH_EDGES_IN_SYNTH", "12"))
 
 # ── CRAG (Phase 3): Corrective RAG & adaptive routing ────────────────────────
 CRAG_USE_LLM_ROUTER = False  # True → confirm route + rewrite with E4B (slower, smarter)

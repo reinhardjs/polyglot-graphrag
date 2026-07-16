@@ -38,7 +38,7 @@ def _degree_scores(node_ids: List[str],
     """Degree centrality: count incident edges per node within the subgraph."""
     deg: Dict[str, int] = defaultdict(int)
     node_set = set(node_ids)
-    for a, b in edges:
+    for a, b, *_ in edges:
         if a in node_set:
             deg[a] += 1
         if b in node_set:
@@ -59,7 +59,7 @@ def _pagerank_scores(node_ids: List[str],
         return {k: float(v) for k, v in deg.items()}
     g = nx.Graph()
     g.add_nodes_from(node_ids)
-    for a, b in edges:
+    for a, b, *_ in edges:
         if a in node_ids and b in node_ids:
             g.add_edge(a, b)
     if g.number_of_nodes() == 0:
