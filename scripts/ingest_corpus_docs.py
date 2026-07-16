@@ -29,7 +29,7 @@ API = "http://localhost:8000/ingest"
 STATUS_API = "http://localhost:8000/ingest/status"
 
 
-def build_payload(path, docs_root, domain, source):
+def build_payload(path, docs_root, domain, source, extract_graph=True, force=False):
     rel = os.path.relpath(path, docs_root)
     doc_id = f"{source}::" + rel.replace(os.sep, "::")
     text = open(path, encoding="utf-8", errors="replace").read()
@@ -39,8 +39,10 @@ def build_payload(path, docs_root, domain, source):
         "doc_id": doc_id,
         "doc_type": "eng",
         "domain": domain,
-        "extract_graph": True,
-        "if_checksum": checksum,
+        "extract_graph": extract_graph,
+        # --force: omit if_checksum so the daemon skips its 304 short-circuit
+        # and runs full ingest (re-embed + graph extraction) for every doc.
+        "if_checksum": None if force else checksum,
         "metadata": {"source_repo": source, "rel_path": rel},
     }, doc_id
 
@@ -104,6 +106,17 @@ def main():
                     help="seconds to sleep between submits (let GPU settle)")
     ap.add_argument("--limit", type=int, default=0, help="0 = all")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--extract-graph", dest="extract_graph", action="store_true",
+                    default=True,
+                    help="run GLiNER graph extraction and write entities/edges to "
+                         "Neo4j during ingest (default: on)")
+    ap.add_argument("--no-extract-graph", dest="extract_graph", action="store_false",
+                    help="skip graph extraction (Qdrant only) — much faster; use to "
+                         "bulk-load, then run graph extraction separately")
+    ap.add_argument("--force", action="store_true",
+                    help="ignore the daemon's checksum 304 short-circuit and re-ingest "
+                         "every doc (re-embed + graph extraction). Use to backfill graph "
+                         "edges for a corpus already embedded in Qdrant.")
     args = ap.parse_args()
 
     if not os.path.isdir(args.docs):
@@ -137,7 +150,8 @@ def main():
     submitted, unchanged, failed = [], [], []
 
     def worker(path):
-        payload, doc_id = build_payload(path, args.docs, args.domain, args.source)
+        payload, doc_id = build_payload(path, args.docs, args.domain,
+                                        args.source, args.extract_graph, args.force)
         status, task_id = post_ingest(payload)
         return doc_id, status, task_id
 

@@ -303,6 +303,11 @@ GLINER_LABELS = [
     "Developer", "Framework", "Component", "Bug", "PR", "ADR",
 ]
 GLINER_THRESHOLD = 0.4
+# Max words sent to GLiNER in a single call. GLiNER cost grows superlinearly with
+# input length and can hang (effectively never return) on large docs. Chunking the
+# text to <= this many words keeps each call fast and bounded. ingest.write_graph
+# uses the same 512-word window for profile context.
+GLINER_CHUNK_WORDS = 512
 
 # ── Entity Resolution (vector-driven, language-agnostic) ─────────────────────
 # Replaces the hardcoded CANON_MAP. Entities extracted in their native language

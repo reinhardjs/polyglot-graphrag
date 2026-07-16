@@ -258,7 +258,45 @@ Return compact JSON:
 # ---------------------------------------------------------------------------
 
 def _call_gliner(text: str, entity_types: list, daemon_url: str = None) -> list:
-    """Call GLiNER /extract_entities endpoint."""
+    """Call GLiNER /extract_entities endpoint.
+
+    Splits `text` into word-windows of C.GLINER_CHUNK_WORDS and calls the
+    endpoint per chunk, then merges entities (deduped by name+type). GLiNER
+    cost grows superlinearly with input length and can hang on large docs, so
+    bounding each call to a small window keeps extraction fast and prevents the
+    daemon's _gliner_lock from being wedged by one huge document.
+    """
+    import config as C
+    words = text.split()
+    size = getattr(C, "GLINER_CHUNK_WORDS", 512)
+    if len(words) <= size:
+        chunks = [text]
+    else:
+        chunks = [" ".join(words[i:i + size]) for i in range(0, len(words), size)]
+    merged = []
+    seen = set()
+    for ch in chunks:
+        if not ch.strip():
+            continue
+        try:
+            ents = _call_gliner_one(ch, entity_types, daemon_url)
+        except Exception as e:
+            # One chunk failing must not lose the others.
+            print(f"[hybrid] GLiNER chunk failed: {e}", flush=True)
+            continue
+        for e in ents:
+            name = (e.get("name") or "").strip()
+            if not name:
+                continue
+            key = (name.lower(), e.get("type"))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(e)
+    return merged
+
+
+def _call_gliner_one(text: str, entity_types: list, daemon_url: str = None) -> list:
     url = (daemon_url or GLINER_DAEMON_URL or "http://localhost:8000")
     resp = requests.post(
         f"{url}/extract_entities",

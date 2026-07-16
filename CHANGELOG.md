@@ -1,4 +1,43 @@
-> **Current release: `v1.0.2`** (git tag `v1.0.2`).
+> **Current release: `v1.0.3`** (git tag `v1.0.3`).
+
+## [1.0.3] — 2026-07-16 (PATCH)
+
+### Fixed
+- **GLiNER graph-extraction hang.** `hybrid_extraction._call_gliner` sent the
+  *entire document* to GLiNER in one call; on large docs `predict_entities`
+  cost grew superlinearly and never returned, collapsing ingest throughput and
+  wedging the daemon. Now the text is split into 512-word windows
+  (`config.GLINER_CHUNK_WORDS`) and GLiNER is called per chunk, with entities
+  merged (deduped by name+type). A real 41,609-word doc now ingests with
+  `extract_graph=True` in ~80s (previously it hung forever).
+- **Server-side GLiNER timeout guard.** `serve_gpu._gliner_predict` runs
+  `predict_entities` in a worker thread with a 45s join timeout, returning `[]`
+  on expiry, so one slow call can never wedge the `_gliner_lock`.
+- **Daemon event-loop deadlock under concurrent ingest.** `/ingest` ran
+  blocking extraction (which self-calls the daemon's `/extract_entities`) as a
+  FastAPI `BackgroundTask` **on the event loop**. Under concurrent ingests that
+  saturated the loop → the self-calls timed out → wedge → the daemon appeared
+  dead ("ready at 8s, then DOWN"). Extraction now runs in a **daemon thread**,
+  keeping the event loop free. This — not a memory leak — was the real cause of
+  "the daemon dies under sustained ingest".
+
+### Added
+- **Ingest CLI flags** (`scripts/ingest_corpus_docs.py`):
+  - `--extract-graph` (default ON) — populating **both Qdrant and Neo4j in one
+    pass**.
+  - `--no-extract-graph` — Qdrant-only fast bulk load.
+  - `--force` — bypass the daemon's checksum 304 short-circuit to re-ingest +
+    graph-extract a corpus already embedded in Qdrant (graph-edge backfill).
+
+### Calibrated
+- Combined ingest (workers=3, graph ON): ~52 Neo4j nodes/min + ~54 edges/min
+  while Qdrant re-embeds in parallel; stable (no wedge). Both stores populate
+  simultaneously. `ora-et-labora` foreign corpus: 3024 Qdrant chunks + 928
+  Neo4j nodes / 1178 edges; multi-hop traversal (A→B→C→D) verified.
+
+### In scope / not changed
+- `v1.0.0` remains frozen. This is an incremental PATCH. No API contract
+  changes; the `/ingest` payload `extract_graph` field is unchanged.
 
 ## [1.0.2] — 2026-07-16 (PATCH)
 

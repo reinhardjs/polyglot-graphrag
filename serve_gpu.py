@@ -208,6 +208,41 @@ def _load_gliner():
     return _gliner
 
 
+def _gliner_predict(text: str, labels: list, threshold: float) -> list:
+    """Run GLiNER predict_entities with a hard wall-clock timeout.
+
+    GLiNER is NOT thread-safe (guarded by _gliner_lock at the call sites) and
+    its cost grows superlinearly with input length — on a large/awkward input
+    it can hang indefinitely. To stop one pathological call from wedging the
+    lock (and every later extraction), we run predict_entities in a worker
+    thread and join with a timeout. On expiry we return [] (graceful degrade)
+    and the stale thread is left to finish on its own (it cannot touch shared
+    state beyond the already-released lock).
+    """
+    import threading
+    GLINER_TIMEOUT = 45.0  # seconds per predict_entities call
+    gliner = _gliner
+    box = {}
+
+    def _run():
+        try:
+            box["preds"] = gliner.predict_entities(text, labels, threshold=threshold)
+        except Exception as e:
+            box["err"] = e
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(GLINER_TIMEOUT)
+    if t.is_alive():
+        print(f"[{LOG_PREFIX}] GLiNER predict timed out ({GLINER_TIMEOUT}s) — "
+              f"degrading (0 entities)", flush=True)
+        return []
+    if "err" in box:
+        print(f"[{LOG_PREFIX}] GLiNER predict failed: {box['err']}", flush=True)
+        return []
+    return box.get("preds", [])
+
+
 # ── Request schemas ──────────────────────────────────────────────────────────
 class EmbedQueryReq(BaseModel):
     text: str
@@ -345,8 +380,7 @@ def extract_graph(req: ExtractReq):
     labels = req.labels or C.GLINER_LABELS
     with _gliner_lock:
         try:
-            preds = gliner.predict_entities(req.text, labels,
-                                            threshold=C.GLINER_THRESHOLD)
+            preds = _gliner_predict(req.text, labels, C.GLINER_THRESHOLD)
         except Exception as e:
             # GLiNER can raise KeyError on certain spans (id_to_class_i bug).
             # Degrade gracefully — return no entities rather than 500 so the
@@ -391,8 +425,7 @@ def extract_entities(req: ExtractReq):
     labels = req.labels or C.GLINER_LABELS
     with _gliner_lock:
         try:
-            preds = gliner.predict_entities(req.text, labels,
-                                            threshold=C.GLINER_THRESHOLD)
+            preds = _gliner_predict(req.text, labels, C.GLINER_THRESHOLD)
         except Exception as e:
             # GLiNER can raise KeyError on certain spans (id_to_class_i bug).
             # Degrade gracefully — return no entities rather than 500 so the
@@ -1173,7 +1206,16 @@ def ingest(req: IngestReq, background_tasks: BackgroundTasks, response: Response
                     _ingest_tasks[task_id]["status"] = "error"
                     _ingest_tasks[task_id]["error"] = str(e)
 
-    background_tasks.add_task(_run)
+    # Run the (blocking) extraction in a daemon thread, NOT a FastAPI
+    # BackgroundTask. BackgroundTasks execute on the event loop; ingest_text()
+    # does synchronous HTTP self-calls (hybrid_extraction -> /extract_entities
+    # on THIS daemon, plus E2B on :8082). Under concurrent ingests those
+    # blocking calls saturate the event loop, the self-calls can't be served,
+    # they time out at 60s, and the daemon wedges ("ready then DOWN").
+    # Offloading to a thread keeps the event loop free to serve the GLiNER
+    # self-calls, so concurrent graph-ingest stays stable.
+    _t = threading.Thread(target=_run, daemon=True)
+    _t.start()
     response.status_code = 202
     return {"task_id": task_id, "status": "accepted", "doc_id": req.doc_id}
 
