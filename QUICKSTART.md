@@ -10,8 +10,9 @@ four example domains — **`snomed`** (clinical terminology graph), **`enterpris
 Download ONE GGUF into `<project-root>/models/` (it's NOT in the repo):
 - `gemma-4-E2B-it-QAT-Q4_0.gguf` ← extraction + answer writing (HuggingFace `lmstudio-community/gemma-4-E2B-it-QAT-GGUF`)
 
-> Only E2B is needed — it serves BOTH entity/edge extraction AND answer
-> synthesis. The larger E4B (:8084) is retired (gave ~22s answers for no
+> Only E2B is needed — it serves BOTH entity/edge extraction (classifies
+> relations; GLiNER detects entities) AND answer synthesis.
+> The larger E4B (:8084) is retired (gave ~22s answers for no
 > quality gain on the 12 GB card; E2B is ~2.2s p95).
 
 Everything else (Neo4j, Qdrant, Jina embed, BGE rerank, llama.cpp server) is

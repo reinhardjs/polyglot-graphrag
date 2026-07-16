@@ -73,28 +73,57 @@ If you got an answer, you're done — the system works. Now explore.
 ## What just happened (30-second mental model)
 
 ```mermaid
-graph TB
-  subgraph INGEST[INGEST]
-    D[Your Docs] --> C[Chunker]
-    C --> E[Jina Embeddings]
-    C --> X[Gemma E2B Extraction]
-    E --> Q[(Qdrant Vectors)]
-    X --> N[(Neo4j Graph)]
+---
+config:
+  layout: dagre
+---
+flowchart LR
+ subgraph INGEST["INGEST PIPELINE"]
+    direction TB
+        DOC["Your Documents"]
+        CHUNK["Chunker"]
+        EMBED["Jina Embeddings"]
+        EXTRACT["GLiNER + Gemma E2B Extraction"]
+        QD[("Qdrant Vector DB")]
+        N4J[("Neo4j Knowledge Graph")]
   end
-  subgraph ASK[ASK]
-    QU[Query] --> QE[Embed]
-    QU --> NG[Graph Traversal]
-    QE --> VS[Vector Search]
-    VS --> F[BGE Reranker]
-    NG --> F
-    F --> S[Gemma E2B Synthesis]
-    S --> A[Grounded Answer]
+ subgraph QUERY["QUERY / ASK"]
+    direction TB
+        QU["User Question"]
+        QE["Embed query"]
+        VS["Vector Search"]
+        KG["Graph traversal"]
+        F["Fuse and Rerank BGE"]
+        S["Gemma E2B Synthesis"]
+        A["Grounded Answer with citations"]
   end
-  Q --> VS
-  N --> NG
-  style Q fill:#e8f4f8,stroke:#4a90d9
-  style N fill:#fce4ec,stroke:#e74c3c
-  style A fill:#d1ecf1,stroke:#17a2b8,stroke-width:3px
+    DOC --> CHUNK
+    CHUNK --> EMBED & EXTRACT
+    EMBED --> QD
+    EXTRACT --> N4J
+    QU --> QE & KG
+    QE --> VS
+    VS --> F
+    F --> S
+    S --> A
+    KG --> F
+    INGEST -- Data Ready --> QUERY
+
+     DOC:::ingest
+     CHUNK:::ingest
+     EMBED:::ingest
+     EXTRACT:::ingest
+     QD:::ingest
+     N4J:::ingest
+     QU:::query
+     QE:::query
+     VS:::query
+     KG:::query
+     F:::query
+     S:::query
+     A:::query
+    classDef ingest fill:#eef2ff,stroke:#818cf8
+    classDef query fill:#f0fdfa,stroke:#2dd4bf
 ```
 
 Two stores, searched together:

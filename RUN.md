@@ -24,7 +24,7 @@ and (optionally) asks a language model to write a natural-language answer.
         ┌─────────────── INGEST ───────────────┐
  text ──► chunk ──► embed (Jina) ──► Qdrant      │
         │                  │                     │
-        │            extract graph (Gemma E2B) ──┤──► Neo4j
+        │            extract (GLiNER entities + E2B relations) ──┤──► Neo4j
         └───────────────────────────────────────┘
 
         ┌─────────────── ASK ───────────────────┐

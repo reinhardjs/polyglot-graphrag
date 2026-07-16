@@ -10,7 +10,7 @@
 ```
                 ┌─────────────────────────── INGEST ───────────────────────────┐
  doc(.md/.pdf) ─┤ chunk ─► embed (Jina v3, :8000) ─► Qdrant (vectors)            │
-                │        └► extract entities/relations (Gemma E2B, :8082) ─► Neo4j│
+│        └► extract (GLiNER entities + E2B relations, :8082) ─► Neo4j│
                 └───────────────────────────────────────────────────────────────┘
 
                 ┌─────────────────────────── ASK ──────────────────────────────┐
@@ -44,7 +44,8 @@ model as extraction — no separate synthesis LLM needed. Everything runs
 locally; nothing leaves the machine.
 
 > **E2B serves synthesis (no separate model required).** `POST /ask` with
-> `synthesize:true` uses E2B (`:8082`), which also performs extraction. Use
+> `synthesize:true` uses E2B (`:8082`), which also performs extraction
+> (GLiNER detects entities, E2B classifies relations). Use
 > `synthesize:false` for retrieval-only if you want the fastest path.
 
 ---
@@ -143,7 +144,7 @@ can see which domain/companion each context came from.
 
 ## 7. Known gaps (experimental)
 
-- `synthesize:true` works whenever E2B (:8082) is up (it serves both extraction and synthesis); else use `synthesize:false`.
+- `synthesize:true` works whenever E2B (:8082) is up (it serves both extraction — GLiNER entities + E2B relations — and synthesis); else use `synthesize:false`.
 - VRAM is tight on 12 GB — avoid concurrent heavy ingest + many parallel queries.
 - Non-`snomed` domains are untested stubs unless you add and seed them.
 - `/ask` is stateless (no multi-turn memory).
