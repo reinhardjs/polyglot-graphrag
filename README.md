@@ -72,13 +72,29 @@ If you got an answer, you're done — the system works. Now explore.
 
 ## What just happened (30-second mental model)
 
-```
-INGEST:  doc.md ──► chunk ──► embed (Jina) ──► Qdrant (vectors)
-                      │
-                      └──► extract entities/relations (Gemma E2B) ──► Neo4j (graph)
-
-ASK:     query ─► embed ─► Qdrant (similar text) + Neo4j (related entities)
-                     ─► rerank (BGE) ─► (E2B) writes the answer
+```mermaid
+graph TB
+  subgraph INGEST[INGEST]
+    D[Your Docs] --> C[Chunker]
+    C --> E[Jina Embeddings]
+    C --> X[Gemma E2B Extraction]
+    E --> Q[(Qdrant Vectors)]
+    X --> N[(Neo4j Graph)]
+  end
+  subgraph ASK[ASK]
+    QU[Query] --> QE[Embed]
+    QU --> NG[Graph Traversal]
+    QE --> VS[Vector Search]
+    VS --> F[BGE Reranker]
+    NG --> F
+    F --> S[Gemma E2B Synthesis]
+    S --> A[Grounded Answer]
+  end
+  Q --> VS
+  N --> NG
+  style Q fill:#e8f4f8,stroke:#4a90d9
+  style N fill:#fce4ec,stroke:#e74c3c
+  style A fill:#d1ecf1,stroke:#17a2b8,stroke-width:3px
 ```
 
 Two stores, searched together:
@@ -149,6 +165,7 @@ lexical proxy — so a fresh clone stays green without those extras.
 | The 5-min ingest→ask path | [QUICKSTART.md](QUICKSTART.md) |
 | Understand the design | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | **All API endpoints (request/response + curl)** | [docs/API.md](docs/API.md) |
+| Sample queries with verified answers | [docs/sample-answers.md](docs/sample-answers.md) |
 | Add a domain / companion | [docs/domains/README.md](docs/domains/README.md) |
 | How versioning works | [VERSIONING.md](VERSIONING.md) |
 | What changed / release notes | [CHANGELOG.md](CHANGELOG.md) |
@@ -171,7 +188,7 @@ lexical proxy — so a fresh clone stays green without those extras.
 ## Requirements
 
 - **NVIDIA GPU** (~8–12 GB VRAM; RTX 3060 12 GB tested). CPU fallback exists
-  (`serve_cpu.py`) but is slow.
+  (same unified daemon auto-detects device — `DEVICE=cpu` mode) but is slower.
 - **Docker + docker compose** (Neo4j + Qdrant).
 - **Python 3.11** venv.
 - **One GGUF model file** — `gemma-4-E2B-it-QAT-Q4_0.gguf` (extraction + synthesis). Optional: add more domains' models as needed.
