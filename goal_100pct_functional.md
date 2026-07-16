@@ -68,7 +68,7 @@ each phase.
 
 ### PHASE 1 — Clean slate + fresh daemon
 
-- [ ] **P1.1** Stop any running daemon and ensure only the project venv daemon
+- [x] **P1.1** Stop any running daemon and ensure only the project venv daemon
       will own port 8000. Then ensure Docker stack (Neo4j + Qdrant) is up.
   > VERIFY: `pgrep -af "serve_gpu.py" | grep -v "bash -c"` — if any line does
     NOT contain `./venv/bin/python` (or `/mnt/data-970-plus/rag-system/venv/bin/python`),
@@ -78,32 +78,32 @@ each phase.
   > VERIFY: `curl -s -o /dev/null -w "%{http_code}" http://localhost:6333` prints `200`
     and `curl -s -o /dev/null -w "%{http_code}" http://localhost:7474` prints `200`.
 
-- [ ] **P1.2** Prune BOTH stores to empty (data only, keep schema/indexes).
+- [x] **P1.2** Prune BOTH stores to empty (data only, keep schema/indexes).
   > VERIFY: `./venv/bin/python -c "from qdrant_client import QdrantClient; from neo4j import GraphDatabase; import config as C; qc=QdrantClient(url=C.QDRANT_URL); print('ent',qc.count('enterprise')); d=GraphDatabase.driver(C.NEO4J_URI,auth=(C.NEO4J_USER,C.NEO4J_PASSWORD)); print('neo4j', d.session().run('MATCH (n) RETURN count(n) AS c').single()['c']); d.close()"` — prints `ent 0` and `neo4j 0`.
 
-- [ ] **P1.3** Start the project daemon (`bash run.sh serve` via the project
+- [x] **P1.3** Start the project daemon (`bash run.sh serve` via the project
       venv). Wait for startup. Confirm health fully green.
   > VERIFY: `curl -s --max-time 10 http://localhost:8000/health | ./venv/bin/python -c "import sys,json; d=json.load(sys.stdin); print(d['status'], d['backends'])"` — prints `ok {'qdrant': 'ok', 'neo4j': 'ok', 'synthesis': 'ok'}`.
   > VERIFY: `./venv/bin/python -c "from qdrant_client import QdrantClient; import config as C; qc=QdrantClient(url=C.QDRANT_URL); print([c.name for c in qc.get_collections().collections])"` — includes `enterprise` and `query_cache`.
 
 ### PHASE 2 — Ingest project docs into BOTH stores
 
-- [ ] **P2.1** Confirm `scripts/ingest_corpus_docs.py` sends `extract_graph=True`
+- [x] **P2.1** Confirm `scripts/ingest_corpus_docs.py` sends `extract_graph=True`
       (graph must populate Neo4j). If it reads `False`, patch it to `True`.
   > VERIFY: `grep -n "extract_graph" scripts/ingest_corpus_docs.py` — the line
     shows `"extract_graph": True,`.
 
-- [ ] **P2.2** Ingest the project's own `docs/` into the `enterprise` domain
+- [x] **P2.2** Ingest the project's own `docs/` into the `enterprise` domain
       with graph extraction.
   > VERIFY: `./venv/bin/python scripts/ingest_corpus_docs.py --docs docs --domain enterprise --source goal-verify --workers 2 2>&1 | tail -6` — shows
     `submitted : 27` (or N), `done : N`, `failed : 0`, and NO `error` line.
 
-- [ ] **P2.3** Verify BOTH stores populated from the ingest.
+- [x] **P2.3** Verify BOTH stores populated from the ingest.
   > VERIFY: `./venv/bin/python -c "from qdrant_client import QdrantClient; from neo4j import GraphDatabase; import config as C; qc=QdrantClient(url=C.QDRANT_URL); e=qc.count('enterprise'); d=GraphDatabase.driver(C.NEO4J_URI,auth=(C.NEO4J_USER,C.NEO4J_PASSWORD)); n=d.session().run('MATCH (n:Entity) RETURN count(n) AS c').single()['c']; r=d.session().run('MATCH ()-[x]->() RETURN count(x) AS c').single()['c']; d.close(); print('qdrant',e,'neo4j_ents',n,'neo4j_rels',r); assert e>0 and n>0 and r>0"` — `qdrant` > 0, `neo4j_ents` > 0, `neo4j_rels` > 0 (assert does not raise).
 
 ### PHASE 3 — Prove retrieval (both stores used)
 
-- [ ] **P3.1** Issue a real query answerable from the ingested `docs/` and
+- [x] **P3.1** Issue a real query answerable from the ingested `docs/` and
       confirm hybrid retrieval returns contexts from both stores.
   > VERIFY: `./venv/bin/python -c "
 import urllib.request,json
@@ -116,11 +116,11 @@ assert d.get('qdrant_hits',0)>0 and d.get('graph_hits',0)>0 and d.get('n_context
 
 ### PHASE 4 — Release gate: make it fully PASS
 
-- [ ] **P4.1** Run the release gate and read the result.
+- [x] **P4.1** Run the release gate and read the result.
   > VERIFY: `./venv/bin/python scripts/release-gate.py 2>&1 | tail -20` — note
     which checks PASS/FAIL. Proceed to fix each FAIL.
 
-- [ ] **P4.2** Fix every FAILING check except the two known latency SLOs
+- [x] **P4.2** Fix every FAILING check except the two known latency SLOs
       (Bench p95, Synthesis p95) using the most minimal safe change. Common
       fixes from prior runs: ensure daemon health probe tolerates missing
       `query_cache` (already committed — re-verify); ensure cross-domain
@@ -129,7 +129,7 @@ assert d.get('qdrant_hits',0)>0 and d.get('graph_hits',0)>0 and d.get('n_context
     only the two latency lines (if any) may show FAIL; all correctness/config/
     quality/doc checks PASS.
 
-- [ ] **P4.3** Make the **retrieval latency** check pass
+- [x] **P4.3** Make the **retrieval latency** check pass
       (`Bench 5x all-domains (<400ms)`). Root cause: the all-domains aggregate
       is dominated by the single populated `enterprise` domain (~700ms), while
       empty domains return ~60ms. Honest levers (try in order, pick first that
@@ -145,7 +145,7 @@ assert d.get('qdrant_hits',0)>0 and d.get('graph_hits',0)>0 and d.get('n_context
   > VERIFY: `./venv/bin/python scripts/release-gate.py 2>&1 | grep -E "Bench 5x"` —
     shows `PASS`.
 
-- [ ] **P4.4** Make the **synthesis latency** check pass
+- [x] **P4.4** Make the **synthesis latency** check pass
       (`Synthesis benchmark (p95<4.0s, 0 errors)`). Root cause: E2B GGUF (2GB)
       generating a full reasoning+answer on the shared 12GB GPU; intrinsic
       ~3.1s/call, ~6.8s p95 under 10x burst. Honest levers (try in order):
@@ -162,19 +162,19 @@ assert d.get('qdrant_hits',0)>0 and d.get('graph_hits',0)>0 and d.get('n_context
   > VERIFY: `./venv/bin/python scripts/release-gate.py 2>&1 | grep -E "Synthesis benchmark"` —
     shows `PASS`.
 
-- [ ] **P4.5** Confirm the FULL gate is green.
+- [x] **P4.5** Confirm the FULL gate is green.
   > VERIFY: `./venv/bin/python scripts/release-gate.py 2>&1 | grep -E "[0-9]+/[0-9]+ checks"` —
     prints `14/14 checks passed` and NO `BLOCKED`.
 
 ### PHASE 5 — Quality benchmark "good" + final commit
 
-- [ ] **P5.1** Run the synthesis/quality benchmark and confirm it is within the
+- [x] **P5.1** Run the synthesis/quality benchmark and confirm it is within the
       (possibly recalibrated) SLO and reports 0 errors.
   > VERIFY: `./venv/bin/python scripts/bench_synth_compare.py 2>&1 | grep -iE "errors|TARGET|BACKEND"` —
     shows `errors=0` and either `TARGET ... : PASS` or, if recalibrated, the
     reported p95 is under the (updated) threshold with no errors.
 
-- [ ] **P5.2** Final consolidated proof printed for the user.
+- [x] **P5.2** Final consolidated proof printed for the user.
   > VERIFY: `./venv/bin/python -c "
 from qdrant_client import QdrantClient; from neo4j import GraphDatabase; import config as C, urllib.request,json
 qc=QdrantClient(url=C.QDRANT_URL); e=qc.count('enterprise')
@@ -189,7 +189,7 @@ assert e>0 and n>0 and a.get('qdrant_hits',0)>0 and a.get('graph_hits',0)>0
 print('FUNCTIONAL 100% OK')
 "` — prints `STORES qdrant>0 neo4j_ents>0`, `RETRIEVAL ... degraded=False`, and `FUNCTIONAL 100% OK`.
 
-- [ ] **P5.3** Commit all changes with a clear message and push to `main`.
+- [x] **P5.3** Commit all changes with a clear message and push to `main`.
   > VERIFY: `git -C /mnt/data-970-plus/rag-system status --short` is clean OR
     only expected files changed; `git -C /mnt/data-970-plus/rag-system log -1 --oneline`
     shows the commit. (Push if remote is configured and the user permits;
@@ -199,12 +199,12 @@ print('FUNCTIONAL 100% OK')
 
 All must be `[x]` before declaring done:
 
-- [ ] Clean-slate ingest of the project's own `docs/` populated BOTH Qdrant
+- [x] Clean-slate ingest of the project's own `docs/` populated BOTH Qdrant
       (vectors) and Neo4j (entities + relationships).
-- [ ] Hybrid retrieval over the ingested docs returns contexts from both
+- [x] Hybrid retrieval over the ingested docs returns contexts from both
       stores with `degraded: False`.
-- [ ] `scripts/release-gate.py` reports `14/14 checks passed | READY` (no BLOCKED).
-- [ ] The quality/synthesis benchmark reports `errors=0` and meets its SLO
+- [x] `scripts/release-gate.py` reports `14/14 checks passed | READY` (no BLOCKED).
+- [x] The quality/synthesis benchmark reports `errors=0` and meets its SLO
       (measured or recalibrated-with-comment).
-- [ ] Final consolidated proof (P5.2) prints `FUNCTIONAL 100% OK`.
-- [ ] All changes committed (and pushed if permitted).
+- [x] Final consolidated proof (P5.2) prints `FUNCTIONAL 100% OK`.
+- [x] All changes committed (and pushed if permitted).

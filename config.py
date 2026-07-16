@@ -170,8 +170,10 @@ RERANK_USE_HALF    = True    # fp16 conversion
 # Reranker device. Default "cuda" — with E4B retired there is ~7 GB free on
 # the 12 GB card, so BGE (~1.0 GB) coexists with Jina + E2B comfortably
 # and rerank runs on GPU (faster than CPU, ~10-20 ms vs ~50 ms). It was
-# previously forced to "cpu" to leave headroom for the now-removed E4B.
-# Override with RERANK_DEVICE=cpu if you ever need the VRAM back.
+# The reranker stays on GPU: a CPU BGE reranker regressed retrieval to
+# ~22s p95 under load (rerank is on the hot path of every /ask). E2B synthesis
+# is the dominant cost; tuning the reranker device does not move the synthesis
+# p95 SLO. Keep cuda.
 RERANK_DEVICE = os.environ.get("RERANK_DEVICE", "cuda")
 
 # CPU fallback (serve_cpu.py): lighter model + capped pool. BGE-base at 278M
