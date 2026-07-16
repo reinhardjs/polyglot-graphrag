@@ -24,7 +24,8 @@ Endpoints:
     POST /rerank           multilingual cross-encoder rerank
     POST /extract_graph    GLiNER zero-shot NER + co-occurrence edges
     POST /ask              ONE-CALL full RAG: embed → Qdrant||Neo4j → rerank → synth
-    POST /ingest           single-doc ingest (BackgroundTasks, non-blocking)
+    POST /ingest           single-doc ingest (extraction runs in a daemon
+                          thread, non-blocking to /ask)
     GET  /ingest/status/{task_id}  poll ingest completion
     DELETE /ingest/{doc_id}        remove a document (Qdrant + Neo4j)
     GET  /ingest                    list ingested documents (per collection)

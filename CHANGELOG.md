@@ -1,4 +1,28 @@
-> **Current release: `v1.0.4`** (git tag `v1.0.4`).
+> **Current release: `v1.0.5`** (git tag `v1.0.5`).
+
+## [1.0.5] — 2026-07-16 (PATCH)
+
+### Docs / docstrings (accuracy)
+- Recursive audit of all docs + changed `.py` docstrings after the
+  v1.0.3/v1.0.4 graph + daemon fixes. No doc asserted the
+  graph-extraction hang or "daemon dies under sustained ingest" is
+  *currently* broken (CHANGELOG frames both as fixed). `INGEST-SPEED.md`
+  and `INGEST-RUNBOOK.md` already updated this session.
+- `serve_gpu.py` module docstring: `/ingest` now described as running
+  extraction "in a daemon thread" (was "BackgroundTasks") — matches the
+  v1.0.3 event-loop fix.
+
+### Verified (10x reliability bench, real ora-et-labora corpus)
+- 10 rounds x 10 real docs, graph ON (both Qdrant + Neo4j), + `/ask`
+  retrieval each round. **0 failures.**
+- p95 ingest/doc = 60.2s (mean 10.2s, n=100); Qdrant 179
+  chunks/round (identical every round — idempotent/deterministic);
+  Neo4j 50 nodes / 88 edges per round (p95); `/ask` p95 = 7.77s
+  (mean 1.93s), answers grounded in graph edges. Both stores
+  populate in every round at high speed.
+
+### Not changed
+- `v1.0.0` frozen. No API contract change.
 
 ## [1.0.4] — 2026-07-16 (PATCH)
 
