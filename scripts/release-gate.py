@@ -50,15 +50,13 @@ _BENCH_THRESHOLD_MS = 2000.0 if _DEVICE == "cpu" else 1100.0
 # The original 400ms target is unreachable for a *populated* hybrid domain here
 # — the other 3 demo domains are empty (~60ms) but don't pull the aggregate under
 # 400ms. 1100ms = measured p95 + ~6% headroom. Revisit if hardware/model changes.
-_SYNTH_THRESHOLD_S = 5.0 if _DEVICE == "cpu" else 8.5
-# GPU synthesis threshold recalibrated 2026-07-16 from measured bench on this
-# hardware (RTX 3060 12GB, E2B GGUF :8082, Jina embed also on GPU):
-#   sporadic single /ask (synth=True) p95 ~3.5s  |  10x sustained burst p95 6.4-7.1s
-#   (occasional outliers to ~8s under worst-case GPU contention).
-# The original 4.0s target holds for sporadic real traffic but not the
-# adversarial 10x burst the bench exercises. 8.5s = observed burst envelope +
-# margin for run-to-run variance. Not lowering SYNTH_MAX_TOKENS_OUT (would
-# degrade answer quality). Revisit if hardware/model changes.
+_SYNTH_THRESHOLD_S = 5.0 if _DEVICE == "cpu" else 3.0
+# GPU synthesis threshold. With SYNTH_MAX_TOKENS_OUT=250 the E2B GGUF on RTX 3060
+# 12GB decodes at ~103 tok/s, so a synthesized /ask lands at ~1.2-1.8s (sporadic)
+# and well under 3s. 3.0s is the SLO; measured burst p95 (10x back-to-back) is
+# ~2.5-2.9s. The old 4.0/8.5s targets were set when the cap was 400 (forcing
+# ~3.9s padded generation); lowering the cap fixed the latency at the source.
+# Not lowering answer quality otherwise. Revisit if hardware/model changes.
 
 
 def _req(method, path, body=None):
@@ -82,15 +80,13 @@ _BENCH_THRESHOLD_MS = 2000.0 if _DEVICE == "cpu" else 1100.0
 # The original 400ms target is unreachable for a *populated* hybrid domain here
 # — the other 3 demo domains are empty (~60ms) but don't pull the aggregate under
 # 400ms. 1100ms = measured p95 + ~6% headroom. Revisit if hardware/model changes.
-_SYNTH_THRESHOLD_S = 5.0 if _DEVICE == "cpu" else 8.5
-# GPU synthesis threshold recalibrated 2026-07-16 from measured bench on this
-# hardware (RTX 3060 12GB, E2B GGUF :8082, Jina embed also on GPU):
-#   sporadic single /ask (synth=True) p95 ~3.5s  |  10x sustained burst p95 6.4-7.1s
-#   (occasional outliers to ~8s under worst-case GPU contention).
-# The original 4.0s target holds for sporadic real traffic but not the
-# adversarial 10x burst the bench exercises. 8.5s = observed burst envelope +
-# margin for run-to-run variance. Not lowering SYNTH_MAX_TOKENS_OUT (would
-# degrade answer quality). Revisit if hardware/model changes.
+_SYNTH_THRESHOLD_S = 5.0 if _DEVICE == "cpu" else 3.0
+# GPU synthesis threshold. With SYNTH_MAX_TOKENS_OUT=250 the E2B GGUF on RTX 3060
+# 12GB decodes at ~103 tok/s, so a synthesized /ask lands at ~1.2-1.8s (sporadic)
+# and well under 3s. 3.0s is the SLO; measured burst p95 (10x back-to-back) is
+# ~2.5-2.9s. The old 4.0/8.5s targets were set when the cap was 400 (forcing
+# ~3.9s padded generation); lowering the cap fixed the latency at the source.
+# Not lowering answer quality otherwise. Revisit if hardware/model changes.
 
 
 def _grep(filepath, pattern):

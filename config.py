@@ -247,9 +247,14 @@ MAX_SYNTH_CONTEXT_CHARS = int(os.environ.get("MAX_SYNTH_CONTEXT_CHARS", "1800"))
 # most-relevant chunks; sending all reranked candidates just inflates prefill.
 MAX_SYNTH_CONTEXTS = int(os.environ.get("MAX_SYNTH_CONTEXTS", "4"))
 # Max tokens the synthesis LLM may generate. Lower = faster answers (caps
-# generation time, the dominant cost for small models like E2B). 512 is plenty
-# for a cited summary of 3 short context excerpts.
-SYNTH_MAX_TOKENS_OUT = int(os.environ.get("SYNTH_MAX_TOKENS_OUT", "400"))
+# generation time, the dominant cost for small models like E2B). On RTX 3060
+# 12GB the E2B GGUF decodes at ~103 tok/s, so wall ≈ tokens/103 + ~0.5s
+# (retrieval+rerank). 250 tokens -> ~1.2-1.8s daemon /ask, comfortably under
+# the 3s synthesis SLO, while still allowing a grounded cited answer (the model
+# stops at EOS well before the cap for most queries). 400 was too high: it forced
+# the model to pad to the cap (~3.9s wall) with boilerplate. 250 is the sweet
+# spot. Override via SYNTH_MAX_TOKENS_OUT if you need longer answers.
+SYNTH_MAX_TOKENS_OUT = int(os.environ.get("SYNTH_MAX_TOKENS_OUT", "250"))
 
 # Synthesis sampling temperature. RAG synthesis is a faithful-extraction task,
 # not creative writing: a non-zero temperature makes the small E2B model
