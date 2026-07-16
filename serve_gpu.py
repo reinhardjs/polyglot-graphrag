@@ -208,39 +208,39 @@ def _load_gliner():
     return _gliner
 
 
+# Single dedicated thread for ALL GLiNER predict_entities calls. GLiNER is
+# thread-unsafe across DIFFERENT threads (CUDA/torch thread-local state) — a
+# fresh thread per call raises KeyError (id_to_class_i) on real input. Running
+# every call on ONE persistent thread gives it thread-affinity and avoids that.
+# _gliner_lock still serializes concurrent calls; the executor guarantees they
+# all land on the same thread.
+import concurrent.futures
+_gliner_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="gliner")
+
+
 def _gliner_predict(text: str, labels: list, threshold: float) -> list:
     """Run GLiNER predict_entities with a hard wall-clock timeout.
 
-    GLiNER is NOT thread-safe (guarded by _gliner_lock at the call sites) and
-    its cost grows superlinearly with input length — on a large/awkward input
-    it can hang indefinitely. To stop one pathological call from wedging the
-    lock (and every later extraction), we run predict_entities in a worker
-    thread and join with a timeout. On expiry we return [] (graceful degrade)
-    and the stale thread is left to finish on its own (it cannot touch shared
-    state beyond the already-released lock).
+    GLiNER is NOT thread-safe across different threads (CUDA/torch thread-local
+    state) and its cost grows superlinearly with input length. We submit the
+    call to a SINGLE dedicated thread (_gliner_executor) — guaranteeing thread
+    affinity so it never hits the KeyError(5) seen when spawning a fresh thread
+    per call — and wait up to 45s. On expiry/error we return [] (graceful
+    degrade) so one bad doc can never wedge extraction.
     """
-    import threading
     GLINER_TIMEOUT = 45.0  # seconds per predict_entities call
     gliner = _gliner
-    box = {}
-
-    def _run():
-        try:
-            box["preds"] = gliner.predict_entities(text, labels, threshold=threshold)
-        except Exception as e:
-            box["err"] = e
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    t.join(GLINER_TIMEOUT)
-    if t.is_alive():
+    try:
+        fut = _gliner_executor.submit(gliner.predict_entities, text, labels,
+                                      threshold=threshold)
+        return fut.result(timeout=GLINER_TIMEOUT)
+    except concurrent.futures.TimeoutError:
         print(f"[{LOG_PREFIX}] GLiNER predict timed out ({GLINER_TIMEOUT}s) — "
               f"degrading (0 entities)", flush=True)
         return []
-    if "err" in box:
-        print(f"[{LOG_PREFIX}] GLiNER predict failed: {box['err']}", flush=True)
+    except Exception as e:
+        print(f"[{LOG_PREFIX}] GLiNER predict failed: {e}", flush=True)
         return []
-    return box.get("preds", [])
 
 
 # ── Request schemas ──────────────────────────────────────────────────────────

@@ -1,4 +1,21 @@
-> **Current release: `v1.0.3`** (git tag `v1.0.3`).
+> **Current release: `v1.0.4`** (git tag `v1.0.4`).
+
+## [1.0.4] — 2026-07-16 (PATCH)
+
+### Changed (hardening)
+- **GLiNER call affinity.** `serve_gpu._gliner_predict` now submits every
+  `predict_entities` call to a **single dedicated thread**
+  (`concurrent.futures.ThreadPoolExecutor(max_workers=1)`), replacing the
+  per-call fresh-thread it used since v1.0.3. GLiNER is thread-unsafe
+  across *different* threads (CUDA/torch thread-local state) — running all
+  calls on one persistent thread guarantees thread affinity. The 45s timeout
+  guard and the `_gliner_lock` serialization are retained. This is belt-and-
+  suspenders on top of the v1.0.3 event-loop deadlock fix; verified that a
+  fresh `/ingest` with `extract_graph=True` populates **both Qdrant and
+  Neo4j in one call** (5 nodes / 7 edges on a 4s single-doc ingest).
+
+### Not changed
+- `v1.0.0` frozen. No API contract change.
 
 ## [1.0.3] — 2026-07-16 (PATCH)
 
