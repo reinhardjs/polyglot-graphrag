@@ -111,21 +111,34 @@ is logged for debugging, content is parsed as JSON.
 > it via env (note the ~22s latency tradeoff):
 > `SYNTHESIS_LLM_BASE_URL=http://127.0.0.1:8084/v1 SYNTHESIS_LLM_MODEL=gemma-4-E4B-it-QAT-Q4_0.gguf`
 
-### Synthesis tuning (v1.0 — how E2B synthesis stays <4s)
+### Synthesis tuning (v1.0 — how E2B synthesis stays < 3s)
 
-The daemon keeps E2B synthesis under 4s on the RTX 3060 12 GB card via levers
-in `config.py` (all env-overridable):
+> **Authoritative, up-to-date guide:** [docs/latency-calibration.md](../../latency-calibration.md).
+> The summary below is kept in sync but the calibration doc is the source of
+> truth for "how to go even lower."
 
-- `MAX_SYNTH_CONTEXT_CHARS` (default 350) — truncate each retrieved chunk sent
+The daemon keeps E2B synthesis **under 3s** on the RTX 3060 12 GB card via
+levers in `config.py` (all env-overridable):
+
+- **CUDA E2B backend** — `LLAMA_BIN` must point at the *nvidia-cuda* llama.cpp
+  build (~128 tok/s). The *vulkan* build is ~3× slower (~45 tok/s) and silently
+  breaks the SLO. `run.sh` auto-detects and may pick the wrong one — pin it.
+- `SYNTH_MAX_TOKENS_OUT` (default **250**, was 400) — 250 tokens decode in
+  ~2s at 128 tok/s; 400 forced ~3.9s of padded boilerplate. The model stops at
+  EOS well before the cap for most grounded queries.
+- `MAX_SYNTH_CONTEXT_CHARS` (default 1800) — truncate each retrieved chunk sent
   to the generator, slashing prompt prefill.
-- `MAX_SYNTH_CONTEXTS` (default 3) — send only the top-3 chunks, not all
-  reranked candidates.
-- `SYNTH_MAX_TOKENS_OUT` (default 400) — cap generated length.
-- The CPU BGE reranker is **skipped when synthesizing** (it added ~9.6s on CPU
-  for no benefit — the LLM reads all contexts and synthesizes them itself).
+- `MAX_SYNTH_CONTEXTS` (default 4) — send only the top chunks, not all reranked
+  candidates.
+- `E2B_CTX` (default 32768; 8192 recommended) — smaller KV cache reduces decode
+  overhead / VRAM when the card is tight.
 - Synthesis backends are reached via `127.0.0.1` (not `localhost`) — `localhost`
   resolves to IPv6 `::1` first while the llama-servers bind IPv4, causing a
   multi-second connection retry per call.
+
+**Retrieval must also be fast** or the full `/ask` still misses 3s. The old
+~4s hub-node graph traversal is fixed by `GRAPH_TRAVERSAL_LIMIT` + a
+server-side `entity_vector_idx` lookup (see the calibration doc, §2.2).
 
 ### Server command (reference — E4B, not started by default)
 

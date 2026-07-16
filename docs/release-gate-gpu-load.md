@@ -1,8 +1,12 @@
 # GPU Load Evidence — Release Gate Run (2026-07-16)
 
 Captured with `nvidia-smi` (sampled every 0.5s) during the `scripts/release-gate.py`
-execution on **2026-07-16 13:58:13**. This records the actual GPU pressure the
-synthesis/retrieval benchmarks ran under, and explains the latency envelope the
+execution on **2026-07-16 13:58:13**. This records the actual GPU contention
+during the run that motivated the latency work.
+
+> **See also:** [docs/latency-calibration.md](./latency-calibration.md) — the
+> authoritative guide to how synthesis/retrieval latency was calibrated under
+> 3s, and how to tune it further.
 gate's SLOs were calibrated against.
 
 ## Snapshot
