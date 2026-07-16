@@ -79,6 +79,8 @@ config:
   theme: base
   themeVariables:
     background: '#ffffff'
+    lineColor: '#475569'
+    textColor: '#1e293b'
 ---
 flowchart LR
  subgraph INGEST["INGEST PIPELINE"]
@@ -110,7 +112,7 @@ flowchart LR
     F --> S
     S --> A
     KG --> F
-    INGEST -- Data Ready --> QUERY
+    INGEST == Data Ready ==> QUERY
 
      DOC:::ingest
      CHUNK:::ingest
