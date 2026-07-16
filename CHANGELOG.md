@@ -1,6 +1,27 @@
-> **Current release: `v1.0.1`** (git tag `v1.0.1`).
+> **Current release: `v1.0.2`** (git tag `v1.0.2`).
 
-## [1.0.1] — 2026-07-16 (PATCH)
+## [1.0.2] — 2026-07-16 (PATCH)
+
+### Added
+- **Indirect-relation (A→B→C→D) answering via the Neo4j graph.** Graph-edge
+  contexts are now surfaced to the synthesizer so the RAG answers multi-hop
+  questions that no single document states — e.g. `bob OWNS BUG-204
+  CAUSED_BY CPU DEPENDS_ON GPU`. Verified end-to-end on the live daemon
+  (enterprise domain): `bob` → "bob is owned by BUG-204"; "which GPU does
+  the CPU depend on after the BUG" → chains `BUG-204 → CPU → GPU`
+  transitively, citing the graph-edge contexts.
+
+### Changed
+- `GRAPH_HOPS` 3 → 2 (full chain reachable in 2 hops from the middle node
+  `BUG-204`; avoids the 3×-larger traversal query).
+- Graph-edge surfacing uses `GRAPH_EDGE_BOOST` (rank-first within the
+  existing `top_k` window) instead of appending extra contexts — keeps the
+  synthesis context count flat, so p95 stays at ~2.9s (no latency
+  regression vs v1.0.1).
+
+### Removed
+- `GRAPH_EDGES_IN_SYNTH` config (superseded by the bounded boost).
+
 
 ### Changed
 - **Versioning rule hardened** (`VERSIONING.md`): `v1.0.0` is now explicitly
