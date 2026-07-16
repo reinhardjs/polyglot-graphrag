@@ -39,7 +39,7 @@ def build_payload(path, docs_root, domain, source):
         "doc_id": doc_id,
         "doc_type": "eng",
         "domain": domain,
-        "extract_graph": False,
+        "extract_graph": True,
         "if_checksum": checksum,
         "metadata": {"source_repo": source, "rel_path": rel},
     }, doc_id

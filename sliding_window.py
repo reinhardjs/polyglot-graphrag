@@ -33,14 +33,17 @@ _nlp = None
 def _get_nlp():
     global _nlp
     if _nlp is None:
+        import spacy
         try:
-            import spacy
             _nlp = spacy.load("en_core_web_sm")
         except OSError:
-            import subprocess
-            subprocess.run(["python", "-m", "spacy", "download",
+            # Model missing — try to fetch it with the SAME interpreter that is
+            # running this code (never bare `python`, which may resolve to a
+            # different env without the model). If it still fails, raise a clear
+            # error so ingestion does not silently produce an empty graph.
+            import subprocess, sys
+            subprocess.run([sys.executable, "-m", "spacy", "download",
                            "en_core_web_sm"], check=True)
-            import spacy
             _nlp = spacy.load("en_core_web_sm")
     return _nlp
 
