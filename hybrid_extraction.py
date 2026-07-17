@@ -225,7 +225,7 @@ def _run_extraction(text: str, domain: dict, entities: list,
 GLINER_DAEMON_URL = "http://localhost:8000"
 
 # ---------------------------------------------------------------------------
-# Prompts (Gemma-4-E2B Relation Extraction Engine design)
+# Prompts (our Relation Extraction Engine design; runs on the E2B backend)
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """You are a precise Relation Extraction engine for a GraphRAG \

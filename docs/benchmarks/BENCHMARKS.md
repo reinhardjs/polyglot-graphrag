@@ -164,7 +164,7 @@ systematically confuses source/target and invents pairs.
 
 ---
 
-## 1.1 WS3 — Sliding Window with Coreference (Gemma-4-E2B Design)
+## 1.1 WS3 — Sliding Window with Coreference (our design; E2B backend)
 
 **Problem solved:** naive `text[pos:end]` character slicing split entity
 names in half → GLiNER missed them, and coreference ("It depends on...")
