@@ -1,4 +1,4 @@
-"""Sliding-window extraction for LONG documents (Gemini 3 Pro design).
+"""Sliding-window extraction for LONG documents (Gemma-4-E2B design).
 
 Problem with naive character slicing:
   - Splits words/entity names in half → GLiNER misses them
@@ -49,7 +49,7 @@ def _get_nlp():
 
 
 # ---------------------------------------------------------------------------
-# Step 1: Sentence-boundary chunker (Gemini design)
+# Step 1: Sentence-boundary chunker (Gemma-4-E2B sliding-window design)
 # ---------------------------------------------------------------------------
 
 def sentence_chunk(text: str, max_words: int = 3000,
@@ -95,7 +95,7 @@ def sentence_chunk(text: str, max_words: int = 3000,
     return chunks
 
 # ---------------------------------------------------------------------------
-# Step 2: E2B sliding-window prompt (Gemini design)
+# Step 2: E2B sliding-window prompt (Gemma-4-E2B design)
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT_SLIDING = """You are a precise Relation Extraction engine for a GraphRAG system. Your task is to analyze a chunk of text (the "Current Window") and extract relationships between predefined entities.
@@ -140,7 +140,7 @@ def build_sliding_prompt(chunk_text: str, entities: list,
 
 
 # ---------------------------------------------------------------------------
-# Step 3: Summary generation (Gemini coreference mechanism)
+# Step 3: Summary generation (Gemma-4-E2B coreference mechanism)
 # ---------------------------------------------------------------------------
 
 SUMMARY_PROMPT = """Summarize the following text block focusing on the main subjects, actors, and their ongoing actions. This summary will be used to resolve pronouns in the next iteration. Keep it under 3 sentences.

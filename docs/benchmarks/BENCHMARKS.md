@@ -117,7 +117,7 @@ if last_tag != -1:
 | `index_routing` (Qwen) | 9 (GLiNER) | ~5 | ~20% | 1.2s | Too inaccurate |
 | `llm` (E2B full-doc) | E2B decides | 9 | 89% | 11.8s | 1 fallback |
 | **`hybrid` (GLiNER+E2B)** | 13 (GLiNER) | **5** | **100%** | 10.7–15.2s | **BEST precision** |
-| **`sliding_window` (Gemini design)** | 13 (GLiNER) | **5 (short) / 15 (36K)** | **100% (short)** | 21s (short) / 63s (36K) | **Long-doc capable** |
+| **`sliding_window` (Gemma-4-E2B design)** | 13 (GLiNER) | **5 (short) / 15 (36K)** | **100% (short)** | 21s (short) / 63s (36K) | **Long-doc capable** |
 
 **Verdict:** `hybrid` is the production recommendation for docs ≤4K tokens.
 `sliding_window` extends coverage to **any document length** (sentence-boundary
@@ -164,7 +164,7 @@ systematically confuses source/target and invents pairs.
 
 ---
 
-## 1.1 WS3 — Sliding Window with Coreference (Gemini Design)
+## 1.1 WS3 — Sliding Window with Coreference (Gemma-4-E2B Design)
 
 **Problem solved:** naive `text[pos:end]` character slicing split entity
 names in half → GLiNER missed them, and coreference ("It depends on...")

@@ -1,6 +1,35 @@
-> **Current release: `v1.0.4`** (git tag `v1.0.4`).
+> **Current release: `v1.0.5`** (git tag `v1.0.5`).
 
-## [1.0.4] — 2026-07-16 (PATCH)
+## [1.0.5] — 2026-07-17 (PATCH)
+
+Single PATCH: recursive doc/docstring scrub + re-verify. No functional
+change — the system shipped at v1.0.4 (15/15 ALL SYSTEMS GO); this
+release only cleans stale model references from docs/docstrings and
+re-confirms the gate is green.
+
+### Docs / Docstrings
+- Scrubbed all stale "Gemini 3 Pro" / "Gemini design" / "Gemini
+  recommendation" references from active code and docs:
+  - `hybrid_extraction.py` (4): module + section docstrings and 2 in-code
+    comments → "Gemma-4-E2B".
+  - `sliding_window.py` (4): module docstring + 3 step comments →
+    "Gemma-4-E2B design".
+  - `docs/benchmarks/BENCHMARKS.md` (2): table label + WS3 section
+    heading → "Gemma-4-E2B Design".
+- Verified the rest of the tree is clean: zero remaining "Gemini" anywhere
+  in active `.py`/`.md`; no GPT-5 / Claude-4 / Mistral-Large / Llama-3
+  stale refs. The only remaining GPT-4 mentions are accurate context
+  (ragas' own design assumption in `release-gate.py`; an example label in
+  `label_provider.py`), not our stack.
+
+### Verified (no code change)
+- `scripts/audit_docs.py --daemon-url`: **PASS** (0 failures) — no doc
+  drift vs the live daemon.
+- `scripts/release-gate.py`: **15/15 ALL SYSTEMS GO** — enterprise
+  self-docs + the ora-et-labora foreign confidential corpus both pass
+  (faithfulness ≥0.85, precision ≥0.25, E2B ctx-size 32768).
+
+
 
 Single consolidated PATCH covering one session: isolation of a foreign
 confidential corpus (ora-et-labora) into its own domain, a release-gate
