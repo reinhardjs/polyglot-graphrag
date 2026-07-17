@@ -147,7 +147,7 @@ cmd_doctor() {
 
 # ── model / daemon starters ───────────────────────────────────────────────────
 start_llm() {
-  local port="$1" model="$2" log="$3" ctx="${4:-8192}"
+  local port="$1" model="$2" log="$3" ctx="${4:-32768}"
   if curl -s --max-time 2 "http://localhost:$port/v1/models" >/dev/null 2>&1; then
     echo "  :$port already up"; return 0; fi
   if [ -z "$LLAMA_BIN" ]; then

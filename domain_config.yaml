@@ -151,6 +151,27 @@ domains:
     description: >-
       Clinical diagnosis via SNOMED CT terminology graph + clinical_prose
       companion. Identical strategy to snomed; exposed as a clear public name.
+  oraetlabora:
+    # FOREIGN, CONFIDENTIAL corpus (kept in external/, git-ignored). Seeded
+    # from a private engineering repo the user owns. Kept in its OWN domain so
+    # it never pollutes the `enterprise` self-docs collection or the default
+    # release-gate golden set. Source dir is external/ (git-ignored — never
+    # committed). Do NOT add any document-specific names or content here.
+    collection: oraetlabora
+    neo4j_label: OraEtLabora
+    retrieval: dense_prose
+    entity_types: [Product, Service, Component, Module, API, ADR, Bug, Guideline, Team, Document, Config]
+    relation_types: [DOCUMENTS, OWNS, DEPENDS_ON, CAUSED_BY, REFERENCES, IMPLEMENTS, DESCRIBES, CONFIGURES]
+    pair_strategy: all_pairs
+    min_confidence: 0.0
+    chunking:
+      strategy: fixed
+      chunk_size: 512
+      overlap: 64
+    metadata_schema:
+      fields:
+      - title
+      - source
 # Default domain for unqualified `/ask` calls (no `domain` field sent).
 # Explicit (no `default:` alias indirection) so it is unambiguous: a
 # no-domain query hits `enterprise` — the populated, non-confidential primary
