@@ -56,7 +56,8 @@ docs/
 - [Sample Queries & Answers](sample-answers.md) — verified Q&A pairs + copy-paste curl commands
 
 ### Guides
-- [Development](guides/development.md) — prerequisites, environment, common workflows
+- [Getting Started](guides/getting-started.md) — **start here**: fresh clone → venv → Docker → ingest → query (synthesis ON/OFF) → your confidential corpus → quality benchmark
+- [Development](guides/development.md) — prerequisites, environment, workflows, smoke tests, benchmark, Hermes integration
 
 ### Domain Profiles
 - [Domain Profiles](domains/README.md) — TOML schema, available domains, how to add one
