@@ -1,5 +1,9 @@
 # QUICKSTART — ask in 5 minutes
 
+> **Audience:** You want the absolute shortest path to a working query. No explanations.
+> - For concepts + your corpus + benchmark → [Getting Started](docs/guides/getting-started.md)
+> - For every knob, systemd, limitations → [RUN.md](RUN.md)
+
 This is the shortest path from zero to a working query. The system ships with
 four example domains — **`snomed`** (clinical terminology graph), **`enterprise`**
 (auto-seeded with this project's own docs on first boot), **`legal`**, and

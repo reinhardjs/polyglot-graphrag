@@ -1,5 +1,9 @@
 # RUN.md — Run GraphRAG (all-in-one, from zero)
 
+> **Audience:** You're running this in prod / need every knob, systemd units, limitations, sync workflow.
+> - For absolute minimum (10 lines) → [QUICKSTART.md](QUICKSTART.md)
+> - For guided tutorial (concepts + your corpus + benchmark) → [Getting Started](docs/guides/getting-started.md)
+
 This guide assumes **you have never heard of Gemma, llama.cpp, or E2B** and just
 want to get the whole system running. It explains every moving part in plain
 terms, what you need, and the limits you must know before it will work.

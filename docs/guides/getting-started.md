@@ -1,5 +1,9 @@
 # New User Walkthrough — polyglot-graphrag v1.0.4
 
+> **Audience:** You want the guided tutorial — concepts explained, your confidential corpus in `external/`, quality benchmark run.
+> - For 5-minute copy-paste → [QUICKSTART.md](../QUICKSTART.md)
+> - For every knob, systemd, limitations → [RUN.md](../RUN.md)
+
 **One linear path from "fresh clone" to a working GraphRAG query with synthesis, then to your own confidential corpus, then to the quality benchmark.**
 
 > **Prerequisites**: Linux (Ubuntu 22.04+ tested), Python 3.11, NVIDIA GPU with 12 GB VRAM (RTX 3060 used here), Docker + docker compose v2, ~25 GB free disk.
