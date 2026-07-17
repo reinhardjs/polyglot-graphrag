@@ -1,11 +1,11 @@
-"""GLiNER entity detection + Gemma-4-E2B relation classification.
+"""GLiNER entity detection + E2B relation classification.
 
 Single-pass hybrid extraction: GLiNER detects entities (character spans +
 types), E2B classifies relationships between them. Unlike index_routing,
 this does NOT use batch pairs — E2B gets the full document context with
 pre-detected entities as a hint (where it excels).
 
-Designed per the local Gemma-4-E2B sliding-window architecture: strict entity
+Our extraction design (runs on the E2B backend): strict entity
 verification, compact JSON-only output, no prose/explanation leakage.
 """
 
@@ -331,7 +331,7 @@ def _call_e2b(system_prompt: str, user_prompt: str, timeout: int = 120) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Parsing + strict entity validation (Gemma-4-E2B recommendation)
+# Parsing + strict entity validation (our extraction design)
 # ---------------------------------------------------------------------------
 
 def _parse_and_validate(content: str, entities: list, valid_types: list,
@@ -433,7 +433,7 @@ def _parse_and_validate(content: str, entities: list, valid_types: list,
         src = rel.get("source") or rel.get("source_name")
         tgt = rel.get("target") or rel.get("target_name")
         rtype = rel.get("type") or rel.get("relation_type")
-        # Entity verification (Gemma-4-E2B recommendation) — normalize first
+        # Entity verification (our extraction design) — normalize first
         src_n = _norm(src)
         tgt_n = _norm(tgt)
         src_real = valid_norm.get(src_n)

@@ -3,8 +3,7 @@
 Zero-shot NER via GLiNER + co-occurrence heuristic edges
 (ASSOCIATED_WITH between entities sharing a sentence). This is the
 stable, E2B-free extraction path used when EXTRACT_WITHOUT_E2B=1
-(e.g. bulk-loading large corpora where the Gemma-4-E2B extraction
-LLM is unavailable or unstable on the host GPU).
+(e.g. bulk-loading large corpora where the extraction LLM is unavailable or unstable on the host GPU).
 
 Extracted from serve_gpu.py's /extract_graph endpoint so both the
 HTTP endpoint and ingest_text() can share it.
