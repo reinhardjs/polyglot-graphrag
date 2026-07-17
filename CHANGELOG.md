@@ -1,35 +1,4 @@
-> **Current release: `v1.0.5`** (git tag `v1.0.5`).
-
-## [1.0.5] — 2026-07-17 (PATCH)
-
-Single PATCH: recursive doc/docstring scrub + re-verify. No functional
-change — the system shipped at v1.0.4 (15/15 ALL SYSTEMS GO); this
-release only cleans stale model references from docs/docstrings and
-re-confirms the gate is green.
-
-### Docs / Docstrings
-- Scrubbed all stale "Gemini 3 Pro" / "Gemini design" / "Gemini
-  recommendation" references from active code and docs:
-  - `hybrid_extraction.py` (4): module + section docstrings and 2 in-code
-    comments → "Gemma-4-E2B".
-  - `sliding_window.py` (4): module docstring + 3 step comments →
-    "Gemma-4-E2B design".
-  - `docs/benchmarks/BENCHMARKS.md` (2): table label + WS3 section
-    heading → "Gemma-4-E2B Design".
-- Verified the rest of the tree is clean: zero remaining "Gemini" anywhere
-  in active `.py`/`.md`; no GPT-5 / Claude-4 / Mistral-Large / Llama-3
-  stale refs. The only remaining GPT-4 mentions are accurate context
-  (ragas' own design assumption in `release-gate.py`; an example label in
-  `label_provider.py`), not our stack.
-
-### Verified (no code change)
-- `scripts/audit_docs.py --daemon-url`: **PASS** (0 failures) — no doc
-  drift vs the live daemon.
-- `scripts/release-gate.py`: **15/15 ALL SYSTEMS GO** — enterprise
-  self-docs + the ora-et-labora foreign confidential corpus both pass
-  (faithfulness ≥0.85, precision ≥0.25, E2B ctx-size 32768).
-
-
+> **Current release: `v1.0.4`** (git tag `v1.0.4`).
 
 Single consolidated PATCH covering one session: isolation of a foreign
 confidential corpus (ora-et-labora) into its own domain, a release-gate
@@ -82,17 +51,29 @@ per session; v1.0.1/v1.0.2 remain prior real releases, untouched.)
   (~16-20 Neo4j nodes/min with graph ON, single-thread GLiNER — the v1.0.4
   single-thread stability fix serializes graph extraction; documented as a
   deliberate reliability-over-peak-throughput tradeoff, with the
-  `--no-extract-graph` fast path noted). The earlier ~52 nodes/min figure was
-  pre-stability-hardening and is no longer accurate.
-
+  |  `--no-extract-graph` fast path noted). The earlier ~52 nodes/min figure was
+  |  pre-stability-hardening and is no longer accurate.
+  |- **Recursive doc/docstring scrub (no version bump — doc-only).** All stale
+  |  "Gemini 3 Pro" / "Gemini design" / "Gemini recommendation"
+  |  references in active code + docs were scrubbed → "Gemma-4-E2B"
+  |  (`hybrid_extraction.py` ×4, `sliding_window.py` ×4,
+  |  `docs/benchmarks/BENCHMARKS.md` ×2). Verified zero "Gemini"
+  |  remaining anywhere in active `.py`/`.md`, and no GPT-5 / Claude-4 /
+  |  Mistral-Large / Llama-3 stale refs. The only remaining GPT-4 mentions
+  |  are accurate context (ragas' own design assumption in `release-gate.py`;
+  |  an example entity label in `label_provider.py`), not our stack.
+  |- **Verified (no code change):** `scripts/audit_docs.py --daemon-url`
+  |  PASS (0 failures) — no doc drift vs the live daemon;
+  |  `scripts/release-gate.py` **15/15 ALL SYSTEMS GO** (enterprise
+  |  self-docs + ora-et-labora foreign corpus; E2B ctx-size 32768).
+  |
 
 
 Single consolidated PATCH covering one session of related graph-ingestion +
 daemon-stability fixes, the recursive doc/docstring audit, and the 10x
-reliability verification. (Earlier per-change tags v1.0.3/v1.0.4/v1.0.5 were
-churn and have been deleted — this release supersedes them; see VERSIONING.md
-"Consolidation rule". v1.0.1 and v1.0.2 are prior real releases and remain
-untouched; this is the next free version after them.)
+reliability verification. (During the v1.0.0 stabilization, earlier
+per-change dev tags were churn and deleted; the settled real lineage is
+v1.0.1 → v1.0.2 → v1.0.3 → v1.0.4.)
 
 ### Fixed
 - **GLiNER graph-extraction hang.** `hybrid_extraction._call_gliner` sent the
