@@ -25,6 +25,29 @@ We cut `1.0.0` when the domain/companion contract and `/ask` response shape
 were frozen and documented as stable. Subsequent work uses `1.0.x` (PATCH) or
 `1.x.0` (MINOR) per the table above.
 
+## Consolidation rule (do NOT bump per change)
+
+**A session of related fixes ships as ONE version bump, not one-per-change.**
+Several bug fixes / doc updates landing in the same working session that all
+target the same area (e.g. "graph extraction was hanging + the daemon wedged
+under load + the GLiNER call was thread-unsafe") are ONE PATCH — cut a single
+`v1.0.1`, not `v1.0.3` → `v1.0.4` → `v1.0.5`. Incrementing the patch number
+for every individual commit churns tags, pollutes the release list, and makes
+"what changed in this release" unreadable.
+
+- Gather all the related changes, land them on `main`, then cut **one** tag
+  that spans the whole effort.
+- Only cut a *new* bump when a *later, separate* piece of work lands (a new
+  feature → MINOR; a distinct later bug fix → another PATCH).
+- If you already over-bumped (multiple tags for one session's work), **delete
+  the intermediate tags** (local + remote) and retag the consolidated commit
+  once. `v1.0.0` stays frozen; the deleted tags are the churned intermediates,
+  not the baseline.
+
+> Common practice (SemVer 2.0.0): `MAJOR.MINOR.PATCH` where PATCH = backwards-
+> compatible bug fixes, MINOR = backwards-compatible features, MAJOR = breaking
+> changes. A cluster of patches is still one PATCH release.
+
 ## Source of truth
 
 - `VERSION` — the single file holding the current version string (`1.0.0`).

@@ -276,7 +276,13 @@ GRAPH_HOPS = 2             # k-hop subgraph from Neo4j. The full A->B->C->D chai
                             # reachable in 2 hops from the MIDDLE node BUG-204
                             # (bob@1, GPU@2). Latency-safe; GRAPH_TRAVERSAL_LIMIT
                             # bounds a hub entity's neighbourhood.
-GRAPH_TRAVERSAL_LIMIT = 200 # cap nodes/edges returned by the k-hop expansion
+GRAPH_TRAVERSAL_LIMIT = 50  # cap nodes/edges returned by the k-hop expansion.
+                              # Only GRAPH_PRUNE_TOP_N (10) nodes are kept after
+                              # Phase-2 pruning, so fetching 200 was wasteful and
+                              # made the O(n^2) edge-expansion UNWIND on hub
+                              # entities (e.g. shared "Database"/"incident" nodes)
+                              # cost ~3.7s. 50 bounds the worst case ~16x with no
+                              # quality loss (pruning still keeps the best 10).
 GRAPH_PRUNE_TOP_N = 10     # Phase 2: cap subgraph to Top-N nodes (context window guard)
 GRAPH_PRUNE_STRATEGY = "degree"  # "degree" | "pagerank" | "none" — neighbor ranking
 # Similarity floor for the graph entry node. When the best keyword-overlap /

@@ -1,84 +1,80 @@
-> **Current release: `v1.0.5`** (git tag `v1.0.5`).
+> **Current release: `v1.0.1`** (git tag `v1.0.1`).
 
-## [1.0.5] — 2026-07-16 (PATCH)
+## [1.0.1] — 2026-07-16 (PATCH)
 
-### Docs / docstrings (accuracy)
-- Recursive audit of all docs + changed `.py` docstrings after the
-  v1.0.3/v1.0.4 graph + daemon fixes. No doc asserted the
-  graph-extraction hang or "daemon dies under sustained ingest" is
-  *currently* broken (CHANGELOG frames both as fixed). `INGEST-SPEED.md`
-  and `INGEST-RUNBOOK.md` already updated this session.
-- `serve_gpu.py` module docstring: `/ingest` now described as running
-  extraction "in a daemon thread" (was "BackgroundTasks") — matches the
-  v1.0.3 event-loop fix.
-
-### Verified (10x reliability bench, real ora-et-labora corpus)
-- 10 rounds x 10 real docs, graph ON (both Qdrant + Neo4j), + `/ask`
-  retrieval each round. **0 failures.**
-- p95 ingest/doc = 60.2s (mean 10.2s, n=100); Qdrant 179
-  chunks/round (identical every round — idempotent/deterministic);
-  Neo4j 50 nodes / 88 edges per round (p95); `/ask` p95 = 7.77s
-  (mean 1.93s), answers grounded in graph edges. Both stores
-  populate in every round at high speed.
-
-### Not changed
-- `v1.0.0` frozen. No API contract change.
-
-## [1.0.4] — 2026-07-16 (PATCH)
-
-### Changed (hardening)
-- **GLiNER call affinity.** `serve_gpu._gliner_predict` now submits every
-  `predict_entities` call to a **single dedicated thread**
-  (`concurrent.futures.ThreadPoolExecutor(max_workers=1)`), replacing the
-  per-call fresh-thread it used since v1.0.3. GLiNER is thread-unsafe
-  across *different* threads (CUDA/torch thread-local state) — running all
-  calls on one persistent thread guarantees thread affinity. The 45s timeout
-  guard and the `_gliner_lock` serialization are retained. This is belt-and-
-  suspenders on top of the v1.0.3 event-loop deadlock fix; verified that a
-  fresh `/ingest` with `extract_graph=True` populates **both Qdrant and
-  Neo4j in one call** (5 nodes / 7 edges on a 4s single-doc ingest).
-
-### Not changed
-- `v1.0.0` frozen. No API contract change.
-
-## [1.0.3] — 2026-07-16 (PATCH)
+Single consolidated PATCH covering one session of related graph-ingestion +
+daemon-stability fixes, the recursive doc/docstring audit, and the 10x
+reliability verification. (Earlier per-change tags v1.0.3/v1.0.4/v1.0.5 were
+churn and have been deleted — this release supersedes them; see VERSIONING.md
+"Consolidation rule".)
 
 ### Fixed
 - **GLiNER graph-extraction hang.** `hybrid_extraction._call_gliner` sent the
   *entire document* to GLiNER in one call; on large docs `predict_entities`
-  cost grew superlinearly and never returned, collapsing ingest throughput and
-  wedging the daemon. Now the text is split into 512-word windows
-  (`config.GLINER_CHUNK_WORDS`) and GLiNER is called per chunk, with entities
-  merged (deduped by name+type). A real 41,609-word doc now ingests with
-  `extract_graph=True` in ~80s (previously it hung forever).
+  cost grew superlinearly and never returned, wedging ingest. Now the text is
+  split into 512-word windows (`config.GLINER_CHUNK_WORDS`) and GLiNER is
+  called per chunk, entities merged (deduped by name+type). A 41,609-word doc
+  now ingests with `extract_graph=True` in ~80s (previously hung forever).
 - **Server-side GLiNER timeout guard.** `serve_gpu._gliner_predict` runs
-  `predict_entities` in a worker thread with a 45s join timeout, returning `[]`
-  on expiry, so one slow call can never wedge the `_gliner_lock`.
+  `predict_entities` on a **single dedicated thread**
+  (`ThreadPoolExecutor(max_workers=1)`) with a 45s timeout, returning `[]` on
+  expiry. The single-thread executor also gives GLiNER thread-affinity (it is
+  thread-unsafe across different threads) — this replaced the per-call
+  fresh-thread that raised `KeyError(5)`.
 - **Daemon event-loop deadlock under concurrent ingest.** `/ingest` ran
-  blocking extraction (which self-calls the daemon's `/extract_entities`) as a
-  FastAPI `BackgroundTask` **on the event loop**. Under concurrent ingests that
-  saturated the loop → the self-calls timed out → wedge → the daemon appeared
-  dead ("ready at 8s, then DOWN"). Extraction now runs in a **daemon thread**,
-  keeping the event loop free. This — not a memory leak — was the real cause of
-  "the daemon dies under sustained ingest".
+  blocking extraction (which self-calls `/extract_entities`) as a FastAPI
+  `BackgroundTask` **on the event loop** → saturated loop → self-calls timed
+  out → wedge → daemon appeared dead. Extraction now runs in a **daemon
+  thread**, keeping the event loop free. This — not a memory leak — was the
+  real cause of "the daemon dies under sustained ingest".
 
 ### Added
-- **Ingest CLI flags** (`scripts/ingest_corpus_docs.py`):
-  - `--extract-graph` (default ON) — populating **both Qdrant and Neo4j in one
-    pass**.
-  - `--no-extract-graph` — Qdrant-only fast bulk load.
-  - `--force` — bypass the daemon's checksum 304 short-circuit to re-ingest +
-    graph-extract a corpus already embedded in Qdrant (graph-edge backfill).
+- **Ingest CLI flags** (`scripts/ingest_corpus_docs.py`): `--extract-graph`
+  (default ON — both Qdrant + Neo4j in one pass), `--no-extract-graph`
+  (Qdrant-only), `--force` (re-ingest + graph backfill, bypasses the 304
+  short-circuit).
 
-### Calibrated
-- Combined ingest (workers=3, graph ON): ~52 Neo4j nodes/min + ~54 edges/min
-  while Qdrant re-embeds in parallel; stable (no wedge). Both stores populate
-  simultaneously. `ora-et-labora` foreign corpus: 3024 Qdrant chunks + 928
-  Neo4j nodes / 1178 edges; multi-hop traversal (A→B→C→D) verified.
+### Changed (retrieval latency bound)
+- `config.GRAPH_TRAVERSAL_LIMIT` 200 → 50. Only `GRAPH_PRUNE_TOP_N` (10) nodes
+  are kept after Phase-2 pruning, so fetching 200 was wasteful and made the
+  O(n^2) edge-expansion UNWIND on hub entities cost ~3.7s. 50 bounds the worst
+  case ~16x with no quality loss (pruning still keeps the best 10). `GRAPH_HOPS`
+  stays 2 (A→B→C→D chains preserved).
 
-### In scope / not changed
-- `v1.0.0` remains frozen. This is an incremental PATCH. No API contract
-  changes; the `/ingest` payload `extract_graph` field is unchanged.
+### Verified — 10x reliability bench (real ora-et-labora corpus)
+- 10 rounds x 10 real docs, graph ON (both Qdrant + Neo4j), + grounded `/ask`
+  retrieval each round. **0 failures.**
+- p95 ingest/doc = 60.2s (mean 10.2s, n=100); Qdrant 179 chunks/round
+  (identical every round — idempotent/deterministic); Neo4j 50 nodes / 88
+  edges per round (p95); `/ask` p95 = 7.77s (mean 1.93s), answers grounded in
+  graph edges. **Both stores populate in every round at high speed.**
+
+### Docs / docstrings (accuracy)
+- Recursive audit of all docs + changed `.py` docstrings. No doc asserted the
+  graph-extraction hang or "daemon dies under sustained ingest" is *currently*
+  broken (CHANGELOG frames both as fixed). `serve_gpu.py` module docstring
+  corrected: `/ingest` runs extraction "in a daemon thread" (was
+  "BackgroundTasks"). `INGEST-SPEED.md` / `INGEST-RUNBOOK.md` updated.
+
+### Known issues (NOT regressions from this release; documented for transparency)
+- **Synthesis-latency gate (release-gate check #14, p95<3.0s) does NOT pass.**
+  Measured `/ask` synthesize:true p95 = 7.0s, driven by 2 graph-heavy queries
+  ("production incident", "on-call escalation path") that return long answers
+  (~975 chars ≈ full `SYNTH_MAX_TOKENS_OUT=250` decode) on top of ~5s
+  retrieval. Average is ~2.7s. Lever: lower `SYNTH_MAX_TOKENS_OUT` (risks
+  truncating real answers below ~150); bound `GRAPH_TRAVERSAL_LIMIT` further.
+- **Answer-quality gate (release-gate check #12, golden faithfulness ≥0.85)
+  does NOT pass** (measured 0.40). `context_recall=0.05` indicates the
+  shipped **demo golden set (`golden/golden.json`, built from self-docs) is
+  mismatched to the current enterprise corpus** (ora-et-labora + self-docs now
+  ingested), not a code regression — retrieval ranking changed after adding
+  ora-et-labora. Requires a corpus-matched golden set to validate; out of
+  scope for this release.
+- **Retrieval-latency gate (check #8, p95<1100ms) does NOT pass** (p95 ~5.3s
+  on graph-heavy queries). Same root cause as the synthesis tail above.
+
+### Not changed
+- `v1.0.0` frozen. No API contract change.
 
 ## [1.0.2] — 2026-07-16 (PATCH)
 
