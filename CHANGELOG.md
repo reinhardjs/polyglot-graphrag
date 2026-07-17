@@ -1,12 +1,13 @@
-> **Current release: `v1.0.1`** (git tag `v1.0.1`).
+> **Current release: `v1.0.3`** (git tag `v1.0.3`).
 
-## [1.0.1] — 2026-07-16 (PATCH)
+## [1.0.3] — 2026-07-16 (PATCH)
 
 Single consolidated PATCH covering one session of related graph-ingestion +
 daemon-stability fixes, the recursive doc/docstring audit, and the 10x
 reliability verification. (Earlier per-change tags v1.0.3/v1.0.4/v1.0.5 were
 churn and have been deleted — this release supersedes them; see VERSIONING.md
-"Consolidation rule".)
+"Consolidation rule". v1.0.1 and v1.0.2 are prior real releases and remain
+untouched; this is the next free version after them.)
 
 ### Fixed
 - **GLiNER graph-extraction hang.** `hybrid_extraction._call_gliner` sent the
