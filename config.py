@@ -94,18 +94,18 @@ EXTRACTION_LLM_MODEL    = "gemma-4-E2B_q4_0-it.gguf"
 #   "llm"           — full-doc single-pass extraction with E2B (89% precision)
 #   "index_routing" — Hybrid GLiNER (entities) → Qwen (relation classification, 20% precision)
 #   "hybrid"        — GLiNER (entities) → E2B (relation class, 100% precision) [RECOMMENDED]
-#   "sliding_window" — sentence-boundary chunked extraction with coref
-#   Extraction mode (how relations are classified between GLiNER entities):
-#     - "sliding_window" — chunk long docs, extract per window (default, best recall)
-#     - "hybrid"         — GLiNER entities → E2B relationship classification
-#     - "llm"            — single-pass E2B extraction (fast on huge corpora)
-#   (The old "index_routing" mode — GLiNER → Qwen relation classification at
-#   20% precision — was deprecated and removed.)
-# Override at runtime: EXTRACTION_MODE=sliding_window (richer extraction for
-# long docs) | hybrid | llm (single-pass).
-# Default is "sliding_window" — richest extraction (per-window LLM + GLiNER,
-# parallelized). For speed on huge corpora, set EXTRACTION_MODE=llm.
-EXTRACTION_MODE = os.environ.get("EXTRACTION_MODE", "llm")
+# V3.0 extraction mode:
+#   - "sliding_window"  — sentence-boundary chunks, GLiNER + E2B per window,
+#                        coref via summary chain (best for long docs)
+#   - "hybrid"         — GLiNER entities → E2B relationship classification
+#   - "llm"            — single-pass E2B extraction (fast on huge corpora)
+# (The old "index_routing" mode — GLiNER → Qwen relation classification at
+#  20% precision — was deprecated and removed.)
+# Override at runtime: EXTRACTION_MODE=sliding_window (long docs >4K tokens)
+# | hybrid (recommended, ≤4K tokens, 100% precision) | llm (speed fallback, 89%).
+# Default is "hybrid" — GLiNER entities + E2B relations, 100% precision,
+# comparable latency to llm (10.7–15.2s vs 11.8s). Benchmarks: BENCHMARKS.md §1.1.
+EXTRACTION_MODE = os.environ.get("EXTRACTION_MODE", "hybrid")
 
 # Parallel sliding-window extraction: number of windows processed concurrently.
 # Each window does GLiNER + E2B calls; E2B shares ONE KV cache across parallel
