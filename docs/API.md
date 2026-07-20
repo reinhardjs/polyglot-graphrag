@@ -18,7 +18,7 @@ answer with E2B (the same model that performs extraction).
 ```json
 { "query": "who reported BUG-204?",
   "domain": "enterprise",       // optional; None → default_domain (enterprise)
-  "top_k": 5,                     // default 5
+  "top_k": 5,                     // default 5; domain_config.yaml `top_k` overrides (enterprise=12, oraetlabora=50)
   "synthesize": false,            // false → return raw contexts only (no synthesis)
   "skip_cache": false,
   "collection": null,             // optional Qdrant collection override

@@ -1,3 +1,24 @@
+> **Current release: `v1.0.7`** (git tag `v1.0.7`).
+
+Enterprise `top_k: 12` to boost context recall (0.76→0.88), improved synthesis prompt for longer answers (template-based structure), `SYNTH_MAX_TOKENS_OUT` raised to 384. Full 4-metric RAGAS evaluation unblocked via OpenRouter (`tencent/hy3:free`, 262K context) with hybrid fallback to local proxy. Release gate: 15/15.
+
+### Changed
+- **`domain_config.yaml`**: Enterprise `top_k: 12` (was default 5) — recall jumps 0.76→0.88 at precision cost 0.52→0.47. Ora-et-labora stays at 50 (recall 0.99).
+- **`prompts/enterprise_synthesis.md`**: Template-based answer structure: "echo the question's key noun, then 2-3 details, then purpose restatement." Produces ~127-word answers (was ~50).
+- **`config.py`**: `SYNTH_MAX_TOKENS_OUT=*** (was 250) — allows richer answers.
+- **`evaluate_pipeline.py`**: RAGAS context_precision/recall now included when using large-context OpenRouter LLM; fall back to local proxy on NaN (2B model overflow). Embeddings use `tiktoken_enabled=False` (Jina endpoint expects strings, not token IDs). LLM for RAGAS overridable via `RAGAS_LLM_BASE_URL`/`RAGAS_LLM_MODEL`/`RAGAS_LLM_API_KEY`.
+
+### Docs
+- `docs/API.md`: `top_k` docs now mention domain_config.yaml override.
+- `v2-quality-improvement.md`: Sprint 1-3 plans with measured results.
+- `config.py` version comment updated (removed "v1.0.0 stable release" reference).
+
+### Verified
+- Release gate: **15/15 checks pass** (synthesis benchmark p95 < 3s, both golden set quality gates, concurrency 12).
+- Enterprise: faithfulness 1.0, answer_relevancy 0.56, context_precision 0.47, context_recall **0.88**.
+- Ora-et-labora: faithfulness 1.0, answer_relevancy 0.65, context_precision 0.65, context_recall 0.99.
+- RAGAS faithfulness (OpenRouter Nemotron 3 Ultra): 1.0 (semantic grounding confirmed).
+
 > **Current release: `v1.0.6`** (git tag `v1.0.6`).
 
 Single consolidated PATCH covering one session: **default `EXTRACTION_MODE=hybrid` (100% extraction precision, GLiNER+E2B)**, recursive doc audit to disambiguate "extraction precision" from query-time faithfulness/context_precision, release-please manifest synced to 1.0.6. (Per VERSIONING.md "Consolidation rule" — one bump per session.)

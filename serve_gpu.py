@@ -860,13 +860,14 @@ def ask(req: AskReq):
     # The reranker's main value is ordering for LLM synthesis; for raw context
     # retrieval the per-signal scores (IDF for graph hits, Qdrant similarity for
     # prose hits) are sufficient and deterministic.
-    # For synthesize=TRUE we ALSO skip the rerank: the LLM reads all top-k
-    # contexts and synthesizes them itself, so pre-reranking only adds latency
-    # (the BGE reranker runs on CPU — ~9.6s for a 10-candidate pool — and that
-    # cost is pure overhead when synthesis is happening anyway).
+    # For synthesize=TRUE we ALSO skip the rerank by default to save latency
+    # (BGE on CPU ~9.6s for 10 candidates). Can be enabled via ENABLE_RERANK_ON_SYNTH=1.
     _skip_rerank = req.synthesize or (
         (not _force_differential) and len(pool) <= 10
     )
+    # Optional: enable rerank even on synthesis (experimental, for quality)
+    if req.synthesize and os.environ.get("ENABLE_RERANK_ON_SYNTH") == "1":
+        _skip_rerank = False
 
     # Guarantee graph-edge-statement contexts rank first within the existing
     # top_k window (via GRAPH_EDGE_BOOST). They ARE the direct

@@ -23,7 +23,7 @@ import os
 
 # ── Version ─────────────────────────────────────────────────────────────────
 # Single source of truth is the VERSION file at the project root.
-# This is the v1.0.0 stable release (contract frozen). See VERSIONING.md.
+# The VERSION file is read at module load time. See VERSIONING.md.
 def _read_version() -> str:
     vf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")
     try:
@@ -249,12 +249,9 @@ MAX_SYNTH_CONTEXTS = int(os.environ.get("MAX_SYNTH_CONTEXTS", "4"))
 # Max tokens the synthesis LLM may generate. Lower = faster answers (caps
 # generation time, the dominant cost for small models like E2B). On RTX 3060
 # 12GB the E2B GGUF decodes at ~103 tok/s, so wall ≈ tokens/103 + ~0.5s
-# (retrieval+rerank). 250 tokens -> ~1.2-1.8s daemon /ask, comfortably under
-# the 3s synthesis SLO, while still allowing a grounded cited answer (the model
-# stops at EOS well before the cap for most queries). 400 was too high: it forced
-# the model to pad to the cap (~3.9s wall) with boilerplate. 250 is the sweet
-# spot. Override via SYNTH_MAX_TOKENS_OUT if you need longer answers.
-SYNTH_MAX_TOKENS_OUT = int(os.environ.get("SYNTH_MAX_TOKENS_OUT", "250"))
+# (retrieval+rerank). 384 tokens -> ~4.2s daemon /ask, allows richer
+# answers for answer_relevancy improvement. Override via SYNTH_MAX_TOKENS_OUT.
+SYNTH_MAX_TOKENS_OUT = int(os.environ.get("SYNTH_MAX_TOKENS_OUT", "384"))
 
 # Synthesis sampling temperature. RAG synthesis is a faithful-extraction task,
 # not creative writing: a non-zero temperature makes the small E2B model

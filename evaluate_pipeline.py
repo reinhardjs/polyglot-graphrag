@@ -210,16 +210,24 @@ def evaluate_ragas(rows: List[Dict]) -> Dict:
     # Explicit timeout + retries: the local 2B E2B can be slow under load and
     # ragas' default request timeout is short, which caused sporadic
     # TimeoutError -> 0.0/NaN scores. 300s timeout, 2 retries absorbs that.
-    llm = ChatOpenAI(model=C.SYNTHESIS_LLM_MODEL,
-                     base_url=C.SYNTHESIS_LLM_BASE_URL,
-                     api_key=_key, temperature=0.0,
+    # Use OpenRouter free model for ragas LLM (larger context window)
+    import os
+    ragas_llm_base = os.environ.get("RAGAS_LLM_BASE_URL", C.SYNTHESIS_LLM_BASE_URL)
+    ragas_llm_model = os.environ.get("RAGAS_LLM_MODEL", C.SYNTHESIS_LLM_MODEL)
+    ragas_llm_key = os.environ.get("RAGAS_LLM_API_KEY", _key)
+    llm = ChatOpenAI(model=ragas_llm_model,
+                     base_url=ragas_llm_base,
+                     api_key=ragas_llm_key, temperature=0.0,
                      timeout=300, max_retries=2)
     # ragas context_precision/recall need an embeddings model. Use the
     # daemon's OpenAI-compatible /v1/embeddings (Jina), NOT the E2B
     # llama-server (which has no embeddings endpoint without --embeddings).
+    # IMPORTANT: tiktoken_enabled=False because our local endpoint doesn't
+    # use tiktoken; it expects raw strings, not token IDs.
     embeddings = OpenAIEmbeddings(model=C.EMBED_MODEL_NAME,
                                   base_url=f"{C.DAEMON_URL}/v1",
-                                  api_key=_key, timeout=120, max_retries=2)
+                                  api_key=_key, timeout=120, max_retries=2,
+                                  tiktoken_enabled=False)
     # Raise ragas' own per-call timeout so a slow local LLM doesn't abort a
     # faithfulness/context job mid-run.
     try:
@@ -235,7 +243,7 @@ def evaluate_ragas(rows: List[Dict]) -> Dict:
     eval_kwargs = dict(
         dataset=ds,
         metrics=[faithfulness, answer_relevancy,
-                 context_precision, context_recall],
+                 context_precision, context_recall],  # All 4 metrics; context only works with large-context models (OpenRouter)
         llm=llm,
         embeddings=embeddings,
     )
@@ -260,17 +268,16 @@ def evaluate_ragas(rows: List[Dict]) -> Dict:
         scores = dict(result)
     out = {k: round(float(v), 4) for k, v in scores.items() if v == v}  # drop NaN
     # ── Hybrid merge ────────────────────────────────────────────────────────
-    # ragas' faithfulness is a true SEMANTIC grounding check — that's the metric
-    # worth the heavy deps. But ragas' context_precision/context_recall require
-    # the LLM to emit strict structured classifications, which a tiny 2B model
-    # (E2B) frequently fails to produce (None/parse errors -> 0.0/NaN). So we
-    # keep those two retrieval-tightness metrics from the reliable LOCAL proxy
-    # and override ragas' (often broken) values with them.
+    # ragas context_precision/recall often fail on 2B models (context overflow
+    # → NaN). When they come back valid (OpenRouter large-context model), use
+    # ragas values. When NaN, fall back to local proxy.
     local = evaluate_local(rows)
-    out["context_precision"] = local["context_precision"]
-    out["context_recall"] = local["context_recall"]
+    if "context_precision" not in out:
+        out["context_precision"] = local["context_precision"]
+    if "context_recall" not in out:
+        out["context_recall"] = local["context_recall"]
     # If ragas faithfulness came back NaN/unusable, fall back to local proxy.
-    if "faithfulness" not in out or out.get("faithfulness") != out.get("faithfulness"):
+    if "faithfulness" not in out:
         out["faithfulness"] = local["faithfulness"]
     out["n_samples"] = len(rows)
     out["backend"] = "ragas"

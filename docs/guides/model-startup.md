@@ -37,7 +37,9 @@ quantization is much lower than post-training quantization of the same bitwidth.
 
 ---
 
-## Gemma 4 E2B (Extraction LLM) — :8082
+## Gemma 4 E2B (Extraction + Synthesis LLM) — :8082
+
+**E2B = Edge 2-Billion effective parameters** — the "Edge" variant of Gemma 4, optimized for on-device inference (phones, laptops, IoT). Used here for BOTH graph extraction (entities + relations from documents) AND answer synthesis (writing grounded answers from retrieved contexts). The larger E4B (~27B-class) was retired in v1.0.2 — it gave ~22s p95 synthesis for no quality gain on the 12 GB card; E2B is ~2.2s p95.
 
 ### Server command
 
