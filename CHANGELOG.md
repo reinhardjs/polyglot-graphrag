@@ -35,7 +35,7 @@ per session.)
 - **`run.sh` CPU flags**: `--cpu` (auto: local E2B if GGUF, else OpenRouter),
   `--cpu --no-llm` (force remote synthesis), default `serve` = GPU.
 
-- **`EXTRACTION_MODE` default: `hybrid`** (was `sliding_window` → `llm` → `hybrid`) — GLiNER entities + E2B relations, **100% precision**, comparable latency to `llm` (10.7–15.2s vs 11.8s). See `docs/benchmarks/BENCHMARKS.md §1.1`.
+- **`EXTRACTION_MODE` default: `hybrid`** (was `sliding_window` → `llm` → `hybrid`) — GLiNER entities + E2B relations, **100% extraction precision**, comparable latency to `llm` (10.7–15.2s vs 11.8s). See `docs/benchmarks/BENCHMARKS.md §1.1`. **Note:** This is ingestion-time extraction precision (correctness of extracted entities/relations from source documents), not query-time answer faithfulness.
 
 ### Docs
 - `QUICKSTART.md`: Explicit CPU paths (Option 1: local E2B on CPU; Option 2:

@@ -112,20 +112,24 @@ if last_tag != -1:
 
 ### Comparison: all 3 extraction modes
 
-| Mode | Entities | Edges | Precision | Latency | Notes |
-|------|----------|-------|-----------|----------|-------|
-| `index_routing` (Qwen) | 9 (GLiNER) | ~5 | ~20% | 1.2s | Too inaccurate |
-| `llm` (E2B full-doc) | E2B decides | 9 | 89% | 11.8s | 1 fallback |
-| **`hybrid` (GLiNER+E2B)** | 13 (GLiNER) | **5** | **100%** | 10.7–15.2s | **BEST precision** |
+| Mode | Entities | Edges | **Extraction Precision** | Latency | Notes |
+|------|----------|-------|--------------------------|----------|-------|
+| `index_routing` (Qwen) | 9 (GLiNER) | ~5 | **~20%** | 1.2s | Too inaccurate |
+| `llm` (E2B full-doc) | E2B decides | 9 | **89%** | 11.8s | 1 fallback edge |
+| **`hybrid` (GLiNER+E2B)** | 13 (GLiNER) | **5** | **100%** | 10.7–15.2s | **Best extraction precision** |
 | **`sliding_window` (our design; E2B backend)** | 13 (GLiNER) | **5 (short) / 15 (36K)** | **100% (short)** | 21s (short) / 63s (36K) | **Long-doc capable** |
 
-**Verdict:** `hybrid` is the production recommendation for docs ≤4K tokens.
-`sliding_window` extends coverage to **any document length** (sentence-boundary
-chunking + coreference summaries) with the same 100% short-doc precision.
-`llm` is the fallback; `index_routing` (Qwen) is deprecated (20%).
+**Note:** "Extraction Precision" = correctness of entities+relations extracted **during ingestion** from a single test document. This is NOT the same as query-time retrieval/answer metrics (faithfulness, context_precision, context_recall) measured by the release gate.
+
+**Verdict:** `hybrid` is the production recommendation for docs ≤4K tokens. `sliding_window` extends coverage to **any document length** (sentence-boundary chunking + coreference summaries) with the same 100% short-doc extraction precision. `llm` is the fallback; `index_routing` (Qwen) is deprecated (20%).
 
 | **VRAM** | **5.4 GB** | 5.8 GB | close |
-**Ruling:** **`hybrid` mode is the production default** (100% precision, GLiNER+E2B, ≤4K tokens). `sliding_window` handles long docs (>4K). `llm` is the speed fallback (89% precision). `index_routing` (Qwen) is deprecated (20% precision). The 10× latency cost is acceptable — extraction runs once per document at ingest time, not at query time.
+**Ruling:** **`hybrid` mode is the production default** (100% **extraction precision**, GLiNER+E2B, ≤4K tokens). `sliding_window` handles long docs (>4K). `llm` is the speed fallback (89% extraction precision). `index_routing` (Qwen) is deprecated (20% extraction precision). The 10× latency cost is acceptable — extraction runs once per document at ingest time, not at query time.
+
+**Terminology clarification:**
+- **Extraction precision** = correctness of entities+relations extracted **during ingestion** from source documents (measured on a single test doc in BENCHMARKS.md §1.1)
+- **Query-time metrics** (measured by release gate): faithfulness (answer grounded in contexts), context_precision (retrieved chunks relevant to ground_truth), context_recall (ground_truth terms covered by contexts)
+- These are **different metrics** — do not conflate them
 
 ### E2B llm Mode — Gold-Standard Match
 ```
