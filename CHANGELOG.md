@@ -1,3 +1,57 @@
+> **Current release: `v1.0.5`** (git tag `v1.0.5`).
+
+Single consolidated PATCH covering one session: `oraetlabora` faithfulness fix
+(0.73 → 1.0), cross-domain crash fix, and full CPU-only support with multiple
+synthesis backends. (Per VERSIONING.md "Consolidation rule" — one bump
+per session.)
+
+### Fixed
+- **`oraetlabora` faithfulness regression (0.73 → 1.0).** The 3,024-point
+  corpus used default `top_k=5`, causing generic queries to match many similar
+  docs before the target. Fixes: `oraetlabora` domain gets `top_k: 50` in
+  `domain_config.yaml`; `GRAPH_EDGE_BOOST` reduced `1.0 → 0.001` so vector
+  similarity dominates; `domains/_default.py` and `federated.py` now respect
+  domain-configured `top_k`; graph edge results capped at 5 (not `top_k`).
+
+- **Cross-domain (`domain=all`) crash: `KeyError: 'text'`.** Graph retrievers
+  from empty domains returned records without `text` field. Fixed in
+  `federated.py`: all records now guaranteed to have `text` (empty string
+  fallback). `serve_gpu.py` also hardened: `_as_record()` and rerank scoring
+  use `.get("text", "")`.
+
+- **CPU retrieval now respects domain `top_k` and uses effective_top_k for
+  cross-domain fan-out and rerank pool.**
+
+### Added
+- **Full CPU-only support** (`run.sh serve --cpu`):
+  - Daemon auto-detects CPU mode via `torch.cuda.is_available()` (no code change)
+  - Embedding (Jina v3) + Reranker (BGE) run locally on CPU (fp32)
+  - Synthesis: two backends — **local E2B on CPU** (`gpu_layers=0`, if GGUF
+    present) or **remote/OpenRouter** (set `SYNTHESIS_LLM_BASE_URL` + `--no-llm`)
+  - Release gate device-aware thresholds: 2000ms bench / 5.0s synth on CPU
+  - Performance: CPU retrieval ~23× slower (3.8s vs 0.16s p95), full pipeline
+    ~12% slower because synthesis dominates
+
+- **`run.sh` CPU flags**: `--cpu` (auto: local E2B if GGUF, else OpenRouter),
+  `--cpu --no-llm` (force remote synthesis), default `serve` = GPU.
+
+- **`EXTRACTION_MODE` default: `llm`** (was `sliding_window`) — faster, simpler
+  single-pass extraction.
+
+### Docs
+- `QUICKSTART.md`: Explicit CPU paths (Option 1: local E2B on CPU; Option 2:
+  remote synthesis via OpenRouter).
+- `docs/guides/getting-started.md`: Full CPU section with performance notes.
+- `run.sh` usage updated with `--cpu` / `--cpu --no-llm` flags.
+
+### Verified
+- Release gate: **15/15 checks pass** (enterprise + oraetlabora quality; CPU
+  device-aware thresholds; cross-domain functional; concurrency 12 parallel;
+  doc/code audit PASS).
+- Faithfulness: `enterprise` 1.0, `oraetlabora` 1.0 (both ≥ 0.85 threshold).
+- Cross-domain `domain=all`: 200 OK, 100+ contexts from all 7 domains.
+- `bash run.sh serve --cpu --no-llm` starts and serves on CPU-only machine.
+
 > **Current release: `v1.0.4`** (git tag `v1.0.4`).
 
 Single consolidated PATCH covering one session: isolation of a foreign

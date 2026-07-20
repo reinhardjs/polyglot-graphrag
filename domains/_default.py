@@ -41,11 +41,16 @@ def default_retrieve(name: str, query: str, top_k: int = 5,
     ``vec`` is the precomputed query embedding (from /ask). If provided, it is
     reused; otherwise the query is embedded here. Reusing avoids a second embed
     on the primary path (companions still self-embed, as before).
+
+    The effective top_k is taken from the domain profile (default 5 if not
+    configured). Callers can override by passing top_k explicitly.
     """
     profile = get_domain(name)
     collection = profile.get("collection")
     neo4j_label = profile.get("neo4j_label")
     entry_strategy = profile.get("entry_strategy", "keyword")
+    # Use domain-configured top_k unless caller explicitly overrides
+    domain_top_k = profile.get("top_k", top_k)
 
     import ask as rag
     from ask import resolve_collections, embed_query
@@ -55,13 +60,17 @@ def default_retrieve(name: str, query: str, top_k: int = 5,
     out = []
     if collection:
         collections = resolve_collections(collection)
-        for r in rag.qdrant_search_multi(vec, query, collections):
+        for r in rag.qdrant_search_multi(vec, query, collections, top_k=domain_top_k):
             rec = _as_record(r)
             rec["_sig"] = name
             out.append(rec)
     if neo4j_label:
-        for r in rag.neo4j_subgraph(
-                query, label=neo4j_label, entry_strategy=entry_strategy):
+        graph_results = rag.neo4j_subgraph(
+                query, label=neo4j_label, entry_strategy=entry_strategy)
+        # Limit graph results to a small fixed number (5) to avoid
+        # overwhelming Qdrant results for dense_prose domains. Graph edges
+        # are supplementary evidence, not the primary retrieval signal.
+        for r in graph_results[:5]:
             rec = _as_record(r)
             rec["_sig"] = name + ":graph"
             out.append(rec)

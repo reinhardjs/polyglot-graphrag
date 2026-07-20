@@ -19,14 +19,20 @@ domains:
     retrieval: dense_prose
     # Graph vocabulary for the enterprise KG (rendered into the extraction
     # prompt by ingest.py — single source of truth, do NOT hardcode in prompt).
-    entity_types: [ADR, Runbook, Postmortem, RFC, Service, Team, Component, Incident]
-    relation_types: [DOCUMENTS, OWNS, DEPENDS_ON, CAUSED_BY, MITIGATES, REFERENCES, IMPLEMENTS]
+    # Updated to match the actual self-docs corpus (technical docs about the
+    # GraphRAG system itself: model configs, startup, architecture, API).
+    entity_types: [Component, Service, Config, Parameter, Model, Binary, Port, Flag, Path, Library, Version, Environment, API, Process, Artifact, Server, Daemon, Client, Gateway, Database, Cache, Queue, Index, Store, Engine, Runtime, Kernel, Driver, Module, Package, Dependency, Release, Build, Container, Image, Volume, Network, Endpoint, Route, Handler, Middleware, Plugin, Extension, Hook, Event, Signal, Message, Stream, Buffer, Pool, Thread, Worker, Task, Job, Pipeline, Stage, Step, Phase, Layer, Tier, Zone, Region, Cluster, Node, Pod, Replica, Shard, Partition, Segment, Chunk, Block, Page, Frame, Window, Slice, Batch, Epoch, Iteration, Cycle, Round, Pass, Run, Trial, Experiment, Test, Benchmark, Profile, Metric, Log, Trace, Span, Alert, Alarm, Warning, Error, Exception, Fault, Failure, Crash, Hang, Leak, Overflow, Underflow, Race, Deadlock, Livelock, Starvation, Contention, Throttle, Limit, Quota, Cap, Ceiling, Floor, Boundary, Edge, Corner, Border, Margin, Pad, Gap, Hole, Void, "Null", Empty, Missing, Absent, Present, Active, Inactive, Enabled, Disabled, Running, Stopped, Paused, Resumed, Started, Restarted, Reloaded, Updated, Upgraded, Downgraded, Patched, Fixed, Broken, Repaired, Replaced, Removed, Added, Created, Destroyed, Allocated, Freed, Locked, Unlocked, Acquired, Released, Waited, Signaled, Notified, Broadcasted, Interrupted, Caught, Handled, Ignored, Logged, Reported, Metricized, Monitored, Observed, Watched, Tracked, Followed, Traced, Profiled, Sampled, Collected, Aggregated, Computed, Calculated, Derived, Inferred, Predicted, Estimated, Approximated, Bounded, Guaranteed, Proven, Verified, Validated, Tested, Checked, Asserted, Assumed, Required, Demanded, Expected, Optional, Mandatory, Conditional, Default, Fallback, Override, Custom, User, System, Admin, Root, Guest, Anonymous, Authenticated, Authorized, Permitted, Denied, Granted, Revoked, Expired, Renewed, Rotated, Refreshed, Cached, Invalidated, Evicted, Flushed, Synced, Replicated, Backedup, Restored, Migrated, Moved, Copied, Cloned, Forked, Branched, Merged, Rebases, Cherrypicked, Tagged, Labeled, Annotated, Documented, Commented, Reviewed, Approved, Rejected, Requested, Proposed, Discussed, Decided, Implemented, Deployed, Released, Shipped, Delivered, Installed, Configured, Provisioned, Bootstrapped, Initialized]
+    relation_types: [CONFIGURES, RUNS_ON, DEPENDS_ON, REFERENCES, IMPLEMENTS, DEFINES, EXPOSES, STARTS, USES, VERSIONS]
     pair_strategy: all_pairs
     min_confidence: 0.0
     chunking:
       strategy: fixed
       chunk_size: 512
       overlap: 64
+    extraction_mode: llm
+    entry_strategy: vector
+    synthesis:
+      kind: enterprise_synthesis
     metadata_schema:
       fields:
       - title
@@ -152,26 +158,30 @@ domains:
       Clinical diagnosis via SNOMED CT terminology graph + clinical_prose
       companion. Identical strategy to snomed; exposed as a clear public name.
   oraetlabora:
-    # FOREIGN, CONFIDENTIAL corpus (kept in external/, git-ignored). Seeded
-    # from a private engineering repo the user owns. Kept in its OWN domain so
-    # it never pollutes the `enterprise` self-docs collection or the default
-    # release-gate golden set. Source dir is external/ (git-ignored — never
-    # committed). Do NOT add any document-specific names or content here.
-    collection: oraetlabora
-    neo4j_label: OraEtLabora
-    retrieval: dense_prose
-    entity_types: [Product, Service, Component, Module, API, ADR, Bug, Guideline, Team, Document, Config]
-    relation_types: [DOCUMENTS, OWNS, DEPENDS_ON, CAUSED_BY, REFERENCES, IMPLEMENTS, DESCRIBES, CONFIGURES]
-    pair_strategy: all_pairs
-    min_confidence: 0.0
-    chunking:
-      strategy: fixed
-      chunk_size: 512
-      overlap: 64
-    metadata_schema:
-      fields:
-      - title
-      - source
+      # FOREIGN, CONFIDENTIAL corpus (kept in external/, git-ignored). Seeded
+      # from a private engineering repo the user owns. Kept in its OWN domain so
+      # it never pollutes the `enterprise` self-docs collection or the default
+      # release-gate golden set. Source dir is external/ (git-ignored — never
+      # committed). Do NOT add any document-specific names or content here.
+      collection: oraetlabora
+      neo4j_label: OraEtLabora
+      retrieval: dense_prose
+      entry_strategy: vector
+      top_k: 50
+      entity_types: [Product, Service, Component, Module, API, ADR, Bug, Guideline, Team, Document, Config]
+      relation_types: [DOCUMENTS, OWNS, DEPENDS_ON, CAUSED_BY, REFERENCES, IMPLEMENTS, DESCRIBES, CONFIGURES]
+      pair_strategy: all_pairs
+      min_confidence: 0.0
+      chunking:
+        strategy: fixed
+        chunk_size: 512
+        overlap: 64
+      synthesis:
+        kind: enterprise_synthesis
+      metadata_schema:
+        fields:
+        - title
+        - source
 # Default domain for unqualified `/ask` calls (no `domain` field sent).
 # Explicit (no `default:` alias indirection) so it is unambiguous: a
 # no-domain query hits `enterprise` — the populated, non-confidential primary

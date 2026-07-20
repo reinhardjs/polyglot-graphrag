@@ -78,16 +78,25 @@ def _resolve_retrieval(profile: dict, name: str, req: FederateRequest,
     Graceful degradation (P3.12): a per-domain retriever failure is recorded in
     ``failed`` and does NOT crash the whole /ask call — the other domains still
     return results.
+
+    The effective top_k is taken from the domain's profile (configurable via
+    domain_config.yaml `top_k`), falling back to the request's top_k.
     """
     try:
         retrieve = get_retriever(name, temporal=bool(req.presentation), vec=req.vec)
+        domain_profile = get_domain(name)
+        domain_top_k = domain_profile.get("top_k", req.top_k)
         if req.presentation is not None:
-            hits_raw = retrieve(req.presentation, top_k=req.top_k)
+            hits_raw = retrieve(req.presentation, top_k=domain_top_k)
         else:
-            hits_raw = retrieve(req.query, top_k=req.top_k)
+            hits_raw = retrieve(req.query, top_k=domain_top_k)
         for h in hits_raw:
-            sig = _as_record(h).get("_sig", name)
-            tagged = _tag_signal(_as_record(h), sig)
+            rec = _as_record(h)
+            # Ensure 'text' field exists (some retrievers may omit it)
+            if "text" not in rec or rec["text"] is None:
+                rec["text"] = ""
+            sig = rec.get("_sig", name)
+            tagged = _tag_signal(rec, sig)
             out.append(tagged)
             if name not in signals:
                 signals.append(name)

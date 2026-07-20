@@ -147,22 +147,27 @@ cmd_doctor() {
 
 # ── model / daemon starters ───────────────────────────────────────────────────
 start_llm() {
-  local port="$1" model="$2" log="$3" ctx="${4:-32768}"
+  local port="$1" model="$2" log="$3" ctx="${4:-32768}" gpu_layers="${5:-999}"
   if curl -s --max-time 2 "http://localhost:$port/v1/models" >/dev/null 2>&1; then
     echo "  :$port already up"; return 0; fi
   if [ -z "$LLAMA_BIN" ]; then
     echo "  :$port SKIP — llama.cpp server not found. Set LLAMA_BIN or install llama.cpp." >&2; return 1; fi
   if [ ! -f "$model" ]; then
     echo "  :$port SKIP — model not found: $model" >&2; echo "$MODEL_HINT" >&2; return 1; fi
-  echo "  starting llama-server :$port ($(basename "$model"), ctx=$ctx)"
+  echo "  starting llama-server :$port ($(basename "$model"), ctx=$ctx, gpu_layers=$gpu_layers)"
   # --reasoning off: gemma-4 puts answers in content (not thinking channel)
   nohup "$LLAMA_BIN" --model "$model" --host 127.0.0.1 --port "$port" \
-    --gpu-layers 999 --ctx-size "$ctx" --reasoning off > "$log" 2>&1 &
+    --gpu-layers "$gpu_layers" --ctx-size "$ctx" --reasoning off > "$log" 2>&1 &
   for i in $(seq 1 90); do
     curl -s --max-time 2 "http://localhost:$port/v1/models" >/dev/null 2>&1 && { echo "  :$port ready (${i}s)"; return 0; }
     sleep 1
   done
   echo "  :$port FAILED to start — see $log" >&2; return 1
+}
+
+start_llm_cpu() {
+  # E2B on CPU: gpu_layers=0 (no GPU offload)
+  start_llm "$1" "$2" "$3" "$4" 0
 }
 
 start_daemon() {
@@ -210,7 +215,35 @@ cmd_retrieve() {
 case "${1:-help}" in
   doctor)   cmd_doctor ;;
   setup)    ensure_venv && echo "Setup complete — next: docker compose up -d && bash run.sh serve" ;;
-  serve)    cmd_doctor || true; start_llm 8082 "$E2B_MODEL" "$ROOT/logs/llm_e2b.log" "$E2B_CTX" || true; start_daemon ;;
+  serve)
+    if [ "${2:-}" = "--cpu" ] || [ "${2:-}" = "-c" ]; then
+      # CPU mode: optionally start E2B on CPU (gpu_layers=0), then start daemon
+      ensure_venv || { echo "venv setup failed — run 'bash run.sh doctor'." >&2; exit 1; }
+      if curl -s --max-time 2 http://127.0.0.1:8000/health >/dev/null 2>&1; then
+        echo "CPU daemon already running"; exit 0; fi
+
+      # Check if user wants local E2B on CPU (has GGUF file)
+      if [ -f "$E2B_MODEL" ] && [ "${3:-}" != "--no-llm" ]; then
+        echo "Starting E2B on CPU (gpu_layers=0)..."
+        start_llm_cpu 8082 "$E2B_MODEL" "$ROOT/logs/llm_e2b_cpu.log" "$E2B_CTX" || true
+      else
+        echo "E2B on OpenRouter (no local GGUF or --no-llm flag)"
+      fi
+
+      echo "Starting CPU daemon (Jina/BGE on CPU)..."
+      CUDA_VISIBLE_DEVICES="" CONDA_NO_PLUGINS=1 nohup "$PY" serve_cpu.py > "$ROOT/logs/daemon_cpu.log" 2>&1 &
+      echo $! > "$DAEMON_PID"
+      for i in $(seq 1 200); do
+        curl -s --max-time 2 http://127.0.0.1:8000/health >/dev/null 2>&1 && { echo "CPU daemon ready (${i}s)"; exit 0; }
+        sleep 1
+      done
+      echo "Daemon failed — see logs/daemon_cpu.log" >&2; exit 1
+    else
+      cmd_doctor || true
+      start_llm 8082 "$E2B_MODEL" "$ROOT/logs/llm_e2b.log" "$E2B_CTX" || true
+      start_daemon
+    fi
+    ;;
   ask)      shift; cmd_ask "$@" ;;
   retrieve) shift; cmd_retrieve "$@" ;;
   ingest)   shift; ensure_up; "$PY" scripts/ingest_corpus_docs.py --docs "${DOCS:-corpus}" --domain "${DOMAIN:-enterprise}" --source "${SOURCE:-my-corpus}" "$@" ;;
@@ -221,10 +254,13 @@ case "${1:-help}" in
   *)        echo "Usage:"
             echo "  bash run.sh doctor              check setup, show what's missing"
             echo "  bash run.sh setup               create venv + install dependencies"
-            echo "  bash run.sh serve               start models + daemon"
+            echo "  bash run.sh serve               start GPU models + daemon"
+            echo "  bash run.sh serve --cpu         start CPU daemon (E2B on OpenRouter if no GGUF)"
+            echo "  bash run.sh serve --cpu --no-llm  CPU daemon only (no local E2B, OpenRouter only)"
+            echo "  bash run.sh serve --cpu         with GGUF: starts E2B on CPU (gpu_layers=0)"
             echo "  bash run.sh ask \"your question\"  ask (starts stack if needed)"
             echo "  bash run.sh retrieve \"query\"    retrieval-only (no synthesis)"
             echo "  bash run.sh ingest              ingest ./corpus/*.md (see corpus/README.md)"
-            echo "  bash run.sh health              service + VRAM status"
+            echo "  bash run.sh health              service + VRAM/CPU status"
             echo "  bash run.sh stop                stop everything" ;;
 esac

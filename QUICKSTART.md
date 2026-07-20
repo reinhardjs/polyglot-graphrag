@@ -11,6 +11,7 @@ four example domains — **`snomed`** (clinical terminology graph), **`enterpris
 
 ## 0. One-time: get the model file + check setup
 
+### GPU path (RTX 3060 12GB recommended)
 Download ONE GGUF into `<project-root>/models/` (it's NOT in the repo):
 - `gemma-4-E2B-it-QAT-Q4_0.gguf` ← extraction + answer writing (HuggingFace `lmstudio-community/gemma-4-E2B-it-QAT-GGUF`)
 
@@ -19,9 +20,21 @@ Download ONE GGUF into `<project-root>/models/` (it's NOT in the repo):
 > The larger E4B (:8084) is retired (gave ~22s answers for no
 > quality gain on the 12 GB card; E2B is ~2.2s p95).
 
-Everything else (Neo4j, Qdrant, Jina embed, BGE rerank, llama.cpp server) is
-pulled or installed automatically. You need **Python 3.11** (the venv is
-created with `python3.11` automatically). Create the venv with one command:
+### CPU-only path (no GPU required)
+**Two options for synthesis:**
+1. **Local E2B on CPU** — if you have `./models/gemma-4-E2B-it-QAT-Q4_0.gguf`, runs via llama.cpp with `gpu_layers=0`
+2. **Remote/OpenRouter** — set `SYNTHESIS_LLM_BASE_URL` to any OpenAI-compatible endpoint (e.g., OpenRouter)
+
+Embedding (Jina v3) + Reranker (BGE) run locally on CPU (fp32) in both cases.
+
+```bash
+# Set CPU mode before any command:
+export CUDA_VISIBLE_DEVICES=""  # forces CPU
+export CONDA_NO_PLUGINS=1       # required to avoid subprocess SIGTERM issues
+```
+
+Everything else (Neo4j, Qdrant, Jina embed, BGE rerank) is
+pulled or installed automatically. You need **Python 3.11**. Create the venv:
 ```bash
 bash run.sh setup      # creates venv + installs pinned requirements
 # (or manually: python3.11 -m venv venv && pip install -r requirements.txt)
@@ -40,10 +53,22 @@ cd polyglot-graphrag   # or: cd <project-root>
 # 1) Supporting stores (Neo4j + Qdrant) — Docker, runs in background.
 docker compose up -d
 
-# 2) GPU models (E2B on :8082 — extraction + synthesis) + the daemon.
+# 2a) GPU path: GPU models (E2B on :8082 — extraction + synthesis) + the daemon.
+#     Requires the GGUF model file in ./models/
 bash run.sh serve
 
-# 3) Confirm everything is up (daemon + E2B + VRAM).
+# 2b) CPU-only path: Export CPU env vars FIRST:
+export CUDA_VISIBLE_DEVICES=""  # forces CPU
+export CONDA_NO_PLUGINS=1       # required
+
+# Option 1: E2B on OpenRouter (no GGUF needed)
+bash run.sh serve --cpu --no-llm
+# (or: CUDA_VISIBLE_DEVICES="" CONDA_NO_PLUGINS=1 ./venv/bin/python serve_cpu.py &)
+
+# Option 2: Local E2B on CPU (requires GGUF in ./models/)
+# bash run.sh serve --cpu   # auto-starts E2B with gpu_layers=0 if GGUF exists
+
+# 3) Confirm everything is up (daemon + stores + VRAM/CPU).
 bash run.sh health
 ```
 

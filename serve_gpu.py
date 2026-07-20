@@ -550,6 +550,11 @@ def ask(req: AskReq):
             }
     profile = domain_loader.get_domain(req.domain) if isinstance(req.domain, str) else None
 
+    # Use domain-configured top_k if available, else fall back to request top_k
+    effective_top_k: int = req.top_k
+    if profile and profile.get("top_k") is not None:
+        effective_top_k = int(profile.get("top_k"))
+
     # 1. Embed query in-process (resident model on GPU)
     #    Phase 1: modulate first (expand domain aliases) so embedding is grounded.
     from query_modulator import QueryModulator
@@ -578,21 +583,26 @@ def ask(req: AskReq):
             f"domain={dom}",
             f"mode={req.mode or ''}",
             f"minconf={req.min_confidence or ''}",
-            f"topk={req.top_k}",
+            f"topk={effective_top_k}",
         ])
 
     _scope = _cache_scope()
     if not req.skip_cache:
         try:
+            from qdrant_client import QdrantClient
             from qdrant_client.models import Filter, FieldCondition, MatchValue
             qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
             if qc.collection_exists(C.COLL_CACHE):
+                print(f"[CACHE DEBUG] Lookup: query={req.query[:50]}, scope={_scope}, vec[:5]={vec[:5]}", flush=True)
                 hits = qc.query_points(
                     C.COLL_CACHE, query=vec, limit=1,
                     score_threshold=C.CACHE_THRESHOLD, with_payload=True,
                     query_filter=Filter(must=[FieldCondition(
                         key="scope", match=MatchValue(value=_scope))]),
                 ).points
+                print(f"[CACHE DEBUG] Lookup hits: {len(hits)}", flush=True)
+                if hits:
+                    print(f"[CACHE DEBUG] Hit score: {hits[0].score}, threshold: {C.CACHE_THRESHOLD}", flush=True)
                 if hits:
                     p = hits[0].payload
                     _record_metric("ok", _time.time() - _t0)
@@ -616,8 +626,10 @@ def ask(req: AskReq):
                         "notice": "",
                         "request_id": _req_id,
                     }
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[CACHE DEBUG] Lookup failed: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
 
     # 2b. CRAG mode (Phase 3): adaptive routing + corrective retrieval.
     # CRAG is gated behind config.ENABLE_CRAG (default false).
@@ -711,7 +723,7 @@ def ask(req: AskReq):
         def _run_domain(dom):
             sub = F.assemble(
                 F.FederateRequest(
-                    domain=dom, query=req.query, top_k=req.top_k,
+                    domain=dom, query=req.query, top_k=effective_top_k,
                     presentation=presentation, synthesize=req.synthesize,
                     mode=req.mode, vec=vec,
                 ), vec=vec, rag=rag)
@@ -738,7 +750,7 @@ def ask(req: AskReq):
         # Single-domain path (original).
         fed = F.assemble(F.FederateRequest(
             domain=req.domain or "",
-            query=req.query, top_k=req.top_k,
+            query=req.query, top_k=effective_top_k,
             presentation=presentation, synthesize=req.synthesize, mode=req.mode,
             vec=vec,
         ), vec=vec, rag=rag)
@@ -875,10 +887,10 @@ def ask(req: AskReq):
                 sc += C.GRAPH_EDGE_BOOST
             ranked.append((i, sc))
         ranked.sort(key=lambda x: x[1], reverse=True)
-        ranked = ranked[:req.top_k]
+        ranked = ranked[:effective_top_k]
         rerank_scores = [float(pool[i].get("_dual_signal", False)) for i, _ in ranked]
     else:
-        scores = _reranker.predict([(req.query, r["text"]) for r in pool])
+        scores = _reranker.predict([(req.query, r.get("text", "")) for r in pool])
         ranked = []
         for i, s in enumerate(scores):
             sc = float(s)
@@ -888,7 +900,7 @@ def ask(req: AskReq):
                 sc += C.GRAPH_EDGE_BOOST
             ranked.append((i, sc))
         ranked.sort(key=lambda x: x[1], reverse=True)
-        ranked = ranked[:req.top_k]
+        ranked = ranked[:effective_top_k]
         rerank_scores = [s for _, s in ranked]
 
     # Confidence label per ranked differential. Computed on the DE-BOOSTED
@@ -1045,8 +1057,11 @@ def ask(req: AskReq):
     _cache_worthy = (not degraded) and (not _synth_failed)
     if not req.skip_cache and _cache_worthy:
         try:
+            from qdrant_client import QdrantClient
+            from qdrant_client.models import PointStruct
             qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
             if qc.collection_exists(C.COLL_CACHE):
+                print(f"[CACHE DEBUG] Upserting to cache: query={req.query[:50]}, scope={_scope}, degraded={degraded}", flush=True)
                 qc.upsert(
                     C.COLL_CACHE,
                     [PointStruct(
@@ -1069,8 +1084,12 @@ def ask(req: AskReq):
                     )],
                     wait=True,
                 )
-        except Exception:
-            pass
+                count = qc.count(C.COLL_CACHE)
+                print(f"[CACHE DEBUG] Cache count after upsert: {count.count}", flush=True)
+        except Exception as e:
+            print(f"[CACHE DEBUG] Upsert failed: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
 
     # 7. Persist structured differential to Neo4j (audit / graph review).
     persisted = False
@@ -1805,7 +1824,7 @@ def on_startup():
     # Ensure Qdrant cache collection exists
     try:
         from qdrant_client import QdrantClient
-        from qdrant_client.models import Distance, VectorParams
+        from qdrant_client.models import Distance, VectorParams, SparseVectorParams
         qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
         if not qc.collection_exists(C.COLL_CACHE):
             qc.create_collection(
@@ -1813,6 +1832,7 @@ def on_startup():
                 vectors_config=VectorParams(
                     size=C.VECTOR_DIM, distance=Distance.COSINE,
                 ),
+                sparse_vectors_config={"text": SparseVectorParams()},
             )
             print(f"[{LOG_PREFIX}] created cache collection '{C.COLL_CACHE}'",
                   flush=True)

@@ -105,7 +105,7 @@ EXTRACTION_LLM_MODEL    = "gemma-4-E2B_q4_0-it.gguf"
 # long docs) | hybrid | llm (single-pass).
 # Default is "sliding_window" — richest extraction (per-window LLM + GLiNER,
 # parallelized). For speed on huge corpora, set EXTRACTION_MODE=llm.
-EXTRACTION_MODE = os.environ.get("EXTRACTION_MODE", "sliding_window")
+EXTRACTION_MODE = os.environ.get("EXTRACTION_MODE", "llm")
 
 # Parallel sliding-window extraction: number of windows processed concurrently.
 # Each window does GLiNER + E2B calls; E2B shares ONE KV cache across parallel
@@ -298,7 +298,9 @@ GRAPH_ENTRY_MIN_SIM = float(os.environ.get("GRAPH_ENTRY_MIN_SIM", "0.30"))
 # top_k (pool is Qdrant-first) and the LLM never sees the chain. Boosting
 # them surfaces the chain for graph questions and is a no-op when no graph
 # edges are present (normal RAG queries unchanged).
-GRAPH_EDGE_BOOST = float(os.environ.get("GRAPH_EDGE_BOOST", "1.0"))
+# Reduced from 1.0 to 0.001 so vector similarity dominates for dense_prose
+# domains; graph edges still get a tiny tiebreaker preference.
+GRAPH_EDGE_BOOST = float(os.environ.get("GRAPH_EDGE_BOOST", "0.001"))
 
 # ── CRAG (Phase 3): Corrective RAG & adaptive routing ────────────────────────
 CRAG_USE_LLM_ROUTER = False  # True → confirm route + rewrite with E4B (slower, smarter)

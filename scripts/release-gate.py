@@ -314,16 +314,13 @@ def run():
         # EVAL_USE_RAGAS=1 and ragas is installed, else the local lexical
         # proxy. A fresh clone has no ragas, so it stays green on the proxy;
         # a CI/deep run sets EVAL_USE_RAGAS=1 for stricter semantic grounding.
-        # We set it here when ragas is importable so the gate's quality check
-        # measures true semantic faithfulness (the local proxy is too harsh on
-        # synthesized answers and would red-fail a genuinely good pipeline).
-        backend_flag = ["--backend", "auto"]
+        # IMPORTANT: We do NOT auto-enable ragas when installed — the docstring
+        # says ragas is NOT the default hard gate. Only use ragas when explicitly
+        # requested via EVAL_USE_RAGAS=1 in the environment.
+        # Force local backend to avoid ragas (opt-in only per docstring)
+        backend_flag = ["--backend", "local"]
         _eval_env = dict(os.environ)
-        try:
-            import ragas  # noqa: F401
-            _eval_env["EVAL_USE_RAGAS"] = "1"
-        except Exception:
-            pass
+        _eval_env["EVAL_USE_RAGAS"] = "0"  # explicitly disable ragas
         cmd = [os.path.join(BASE, "venv", "bin", "python"),
                "evaluate_pipeline.py", golden, "--live", "--domain", domain,
                *backend_flag]

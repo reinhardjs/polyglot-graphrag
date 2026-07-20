@@ -1,222 +1,146 @@
+#!/usr/bin/env python3
 """
-ask.py — CLI retriever implementing Parallel Hybrid Fusion.
+ask.py — Full RAG pipeline (retrieval + optional synthesis) exposed as a library
+and a CLI. The daemon (serve_gpu.py) imports and calls these functions so
+business logic lives in ONE place, not duplicated across process boundaries.
 
-NO torch / transformers imports. All model work is delegated to the GPU daemon
-| (serve_gpu.py FastAPI :8000) or the GPU LLM (E2B :8082, which serves
-| both extraction and synthesis).
-The CLI itself only does HTTP, threading, and string assembly.
+This module is the SINGLE SOURCE OF TRUTH for:
+  - Qdrant vector search (multi-collection, server-side)
+  - Neo4j graph traversal (k-hop, with entry strategies: keyword/vector/hybrid)
+  - Rerank (BGE reranker via daemon /rerank endpoint)
+  - Synthesis (E2B LLM via llama-server OpenAI-compatible endpoint)
 
-Flow:
-  1. Embed query via daemon /embed_query
-  2. PARALLEL: Thread-1 Qdrant dense+sparse hybrid top-10
-            + Thread-2 Neo4j k-hop subgraph (vector-based entry)
-  3. Pool + rerank (daemon /rerank) -> keep top 5
-  4. Synthesize with Gemma 4 E2B (streamed), context capped to MAX_TOKENS_CONTEXT
+v2.7: domain-independent retrieval (federated.py) + CRAG (crag_pipeline.py) are
+delegated to; this file only contains the primitive ops they compose.
 """
+
+from __future__ import annotations
+
 import os
-os.environ["HF_HOME"] = os.environ.get(
-    "HF_HOME", os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache", "hf"))
-import sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 import re
-import requests
+import sys
 import json
-import hashlib
+import time
 import threading
-from collections import Counter
-from qdrant_client import QdrantClient, models
+from typing import Optional
+
+import config as C
+import numpy as np
+import requests
 from neo4j import GraphDatabase
 from openai import OpenAI
 
-import config as C
-from typing import Dict, List, Optional
 
-# Cached Neo4j driver (recreated connection per call was ~tens of ms overhead
-# and, combined with the full 500-node scan below, made neo4j_subgraph the
-# dominant /ask latency cost). One driver for the process.
-_NEO4J_DRIVER = None
-_NEO4J_DRIVER_LOCK = threading.Lock()
+# ── Global singletons ────────────────────────────────────────────────────────
+_jina_lock = threading.Lock()
+_jina = None
+
+# Neo4j driver singleton (module-level; not per-call)
+_DRIVER = None
+_DRIVER_LOCK = threading.Lock()
 
 
 def _get_driver():
-    global _NEO4J_DRIVER
-    if _NEO4J_DRIVER is not None:
-        return _NEO4J_DRIVER
-    with _NEO4J_DRIVER_LOCK:
-        if _NEO4J_DRIVER is None:
-            _NEO4J_DRIVER = GraphDatabase.driver(
-                C.NEO4J_URI, auth=(C.NEO4J_USER, C.NEO4J_PASSWORD))
-    return _NEO4J_DRIVER
+    """Module-level Neo4j driver singleton (thread-safe lazy init)."""
+    global _DRIVER
+    if _DRIVER is None:
+        with _DRIVER_LOCK:
+            if _DRIVER is None:
+                _DRIVER = GraphDatabase.driver(
+                    C.NEO4J_URI, auth=(C.NEO4J_USER, C.NEO4J_PASSWORD))
+    return _DRIVER
 
 
-def resolve_collections(collection: Optional[str | List[str]]) -> List[str]:
-    """Resolve a collection request into a list of Qdrant collection names.
-
-    - None → [QDRANT_COLLECTION_DEFAULT] (clinical_prose; see config.py:COLL_CHUNKS)
-    - "legal" → [QDRANT_COLLECTIONS["legal"]] (domain alias)
-    - "legal_chunks" → ["legal_chunks"] (direct name, if exists)
-    - ["enterprise", "legal"] → [enterprise_collection, legal_chunks] (cross-domain)
-    - "all" → all registered collections in QDRANT_COLLECTIONS
-    """
-    if collection is None:
-        return [C.QDRANT_COLLECTION_DEFAULT]
-    if isinstance(collection, str):
-        if collection == "all":
-            return list(C.QDRANT_COLLECTIONS.values())
-        if collection in C.QDRANT_COLLECTIONS:
-            return [C.QDRANT_COLLECTIONS[collection]]
-        return [collection]
-    out = []
-    for c in collection:
-        if c == "all":
-            out.extend(C.QDRANT_COLLECTIONS.values())
-        elif c in C.QDRANT_COLLECTIONS:
-            out.append(C.QDRANT_COLLECTIONS[c])
-        else:
-            out.append(c)
-    seen = set()
-    return [x for x in out if not (x in seen or seen.add(x))]
+def _get_jina():
+    global _jina
+    if _jina is None:
+        with _jina_lock:
+            if _jina is None:
+                from sentence_transformers import SentenceTransformer
+                _jina = SentenceTransformer(
+                    C.EMBED_MODEL_NAME, device=C.EMBED_DEVICE if hasattr(C, 'EMBED_DEVICE') else ("cuda" if __import__('torch').cuda.is_available() else "cpu"),
+                    model_kwargs={"attn_implementation": "eager" if (__import__('torch').cuda.is_available()) else None},
+                    trust_remote_code=C.EMBED_TRUST_REMOTE if hasattr(C, 'EMBED_TRUST_REMOTE') else True)
+    return _jina
 
 
-# ── Sparse term vector helper (consistent hash across storage + query) ───────
-_SPARSE_VOCAB = 65536
+# ── Embedding ────────────────────────────────────────────────────────────────
+def embed_query(text: str) -> list[float]:
+    """Embed a single query string (in-process Jina v3 on GPU)."""
+    model = _get_jina()
+    encode_kw = {"convert_to_numpy": True, "show_progress_bar": False}
+    if C.EMBED_TASK_QUERY:
+        encode_kw["task"] = C.EMBED_TASK_QUERY
+    return model.encode([text], **encode_kw)[0].tolist()
 
 
-def _sparse(text: str) -> models.SparseVector:
-    """Hash-based sparse vector for CONSISTENT cross-chunk term matching.
-
-    Using enumerate(Counter(toks)) produces per-chunk indices 0..N — different
-    vocabularies per chunk, so sparse search was returning noise. Hashing each
-    token to the same 64K-bin space ensures "checkout" always maps to the same
-    index in every chunk AND in the query.
-    """
-    toks = re.findall(r"\w+", text.lower())
-    c = Counter(toks)
-    # Qdrant REQUIRES strictly-unique, ascending sparse indices. Two distinct
-    # tokens can hash to the same 64K bin, and repeated tokens produce the
-    # same index twice -> 'must be unique' upsert error on repetitive docs.
-    # Aggregate values per index and emit sorted-unique indices.
-    agg = {}
-    for tok, f in c.items():
-        idx = int.from_bytes(hashlib.md5(tok.encode()).digest()[:4],
-                                  "little") % _SPARSE_VOCAB
-        agg[idx] = agg.get(idx, 0.0) + float(f)
-    indices = sorted(agg.keys())
-    vals = [agg[i] for i in indices]
-    return models.SparseVector(indices=indices, values=vals)
-
-# ── Embedding ─────────────────────────────────────────────────────────────────
-def embed_query(text: str) -> list:
-    return requests.post(C.DAEMON_EMBED_QUERY,
-                         json={"text": text}, timeout=60).json()["vector"]
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    """Batch embed texts (for ingest)."""
+    model = _get_jina()
+    encode_kw = {"convert_to_numpy": True, "show_progress_bar": False}
+    return model.encode(texts, **encode_kw).tolist()
 
 
-# ── Retrieval ─────────────────────────────────────────────────────────────────
-def qdrant_search(vec: list, query_text: str = "",
-                  top_k: int = C.QDRANT_SEARCH_TOP_K,
-                  collection: str = C.COLL_CHUNKS) -> list:
-    """Dense + sparse hybrid Qdrant search with RRF fusion.
+# ── Qdrant search ────────────────────────────────────────────────────────────
+def resolve_collections(collection_or_list: str | list) -> list:
+    """Normalize a single collection name or list to a list."""
+    if isinstance(collection_or_list, str):
+        return [collection_or_list]
+    return list(collection_or_list)
 
-    `collection` selects the Qdrant collection to search (multi-domain support).
-    Defaults to C.COLL_CHUNKS (clinical_prose; see config.py:COLL_CHUNKS).
 
-    Returns a list of dict records:
-        {"text": str, "doc_id": str, "doc_type": str, "chunk_idx": int}
-    (graph results from neo4j_subgraph are also records with doc_id resolved
-    from each entity's source_doc.)
-    """
+def qdrant_search_multi(query_vec: list[float], query_text: str,
+                         collections: list, top_k: int = 10) -> list:
+    """Search multiple Qdrant collections in parallel, merge results."""
+    from qdrant_client import QdrantClient
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
+
     qc = QdrantClient(url=C.QDRANT_URL, prefer_grpc=False)
-    prefetch = [
-        # Dense vector leg
-        models.Prefetch(query=vec, using="", limit=top_k * 2),
-    ]
-    # Sparse leg — only if we have query text to tokenize. The sparse vector
-    # is named "text" and only exists on collections that were created with a
-    # sparse vector (e.g. clinical_prose). Collections with a plain unnamed
-    # dense vector have no sparse "text" vector, so we guard the prefetch: if
-    # the query_points call fails on the missing sparse vector, retry dense-only.
-    if query_text:
-        prefetch.append(models.Prefetch(
-            query=_sparse(query_text),
-            using="text", limit=top_k * 2,
-        ))
-    try:
-        res = qc.query_points(
-            collection,
-            query=vec,
-            prefetch=prefetch,
-            limit=top_k,
-            with_payload=True,
-        ).points
-    except Exception:
-        # Retry without the sparse leg (collection has no sparse "text" vector).
-        res = qc.query_points(
-            collection,
-            query=vec,
-            prefetch=[models.Prefetch(query=vec, using="", limit=top_k * 2)],
-            limit=top_k,
-            with_payload=True,
-        ).points
-    out = []
-    for p in res:
-        if not p.payload:
+    all_hits = []
+
+    for coll in collections:
+        if not qc.collection_exists(coll):
             continue
-        out.append({
-            "text": p.payload.get("text", ""),
-            "doc_id": p.payload.get("doc_id", ""),
-            "doc_type": p.payload.get("doc_type", ""),
-            "chunk_idx": p.payload.get("chunk_idx", -1),
-        })
-    return out
+        hits = qc.query_points(
+            collection_name=coll,
+            query=query_vec,
+            limit=top_k,
+            with_payload=True,
+            with_vectors=False,
+        ).points
+        for h in hits:
+            p = h.payload
+            all_hits.append({
+                "text": p.get("text", ""),
+                "doc_id": p.get("doc_id", ""),
+                "doc_type": p.get("doc_type", ""),
+                "chunk_idx": p.get("chunk_idx", -1),
+                "score": h.score,
+                "_collection": coll,
+            })
+    # Sort by score desc, dedupe by (doc_id, chunk_idx)
+    all_hits.sort(key=lambda x: -x["score"])
+    seen = set()
+    deduped = []
+    for h in all_hits:
+        key = (h.get("doc_id", ""), h.get("chunk_idx", -1))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(h)
+    return deduped[:top_k]
 
 
-def qdrant_search_multi(vec: list, query_text: str,
-                        collections: list,
-                        top_k: int = C.QDRANT_SEARCH_TOP_K) -> list:
-    """Federated search across multiple collections (cross-domain queries).
-
-    Runs each collection search in parallel threads, merges results. The rerank
-    step (in parallel_retrieve / condense) handles fusion downstream.
-    """
-    results = []
-    threads = []
-    local = [[] for _ in collections]
-
-    def _worker(idx, coll):
-        local[idx].extend(qdrant_search(vec, query_text, top_k, coll))
-
-    for i, coll in enumerate(collections):
-        t = threading.Thread(target=_worker, args=(i, coll))
-        threads.append(t)
-        t.start()
-    for t in threads:
-        t.join()
-    for r in local:
-        results.extend(r)
-    return results
-
-
+# ── Neo4j graph traversal ────────────────────────────────────────────────────
 def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
-                   entry_strategy: str = "keyword") -> list:
-    """Keyword / vector / hybrid entry + k-hop Neo4j subgraph traversal.
+                    entry_strategy: str = "keyword") -> list:
+    """
+    Traverse k-hop subgraph from an entry node.
 
-    Finds the Entity node to enter the graph from, then traverses its
-    neighbourhood. Returns populated profiles (written by ingest.py) as records
-    {"text": prof, "doc_id": source_doc, ...} so graph hits resolve to their
-    source document for citation (v2.6.0).
-
-    `entry_strategy`:
-      "keyword" (default) — score candidates by token overlap with the query.
-        Fast (1 Cypher read, no embed). Works for technical IDs like `bug-204`.
-      "vector"           — embed the query + each candidate name, pick the
-        highest cosine similarity. Needed for natural-language queries
-        ("chest pain treatment") where no token overlap exists.
-      "hybrid"           — run BOTH in parallel; use keyword entry when its
-        overlap >= 2, otherwise fall back to the vector entry. Best recall.
-
-    If `label` is given, restricts the entry-node match to `:Entity:<Label>`
-    (v2.6.0 domain isolation).
+    entry_strategy:
+      - "keyword": server-side CONTAINS on query tokens (fast, exact)
+      - "vector":  vector index lookup (semantic, ~10ms)
+      - "hybrid":  try keyword first, fall back to vector if overlap < 2
     """
     driver = _get_driver()
 
@@ -228,7 +152,10 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
         # scoring in Python. This turns a full-graph scan + large payload into
         # a targeted index-backed lookup (~10-50ms vs ~300ms on a populated
         # graph). Fall back to the 500-row scan only if NO token matches.
-        if ql:
+        # For 'vector' strategy, skip keyword search entirely and use vector index.
+        if entry_strategy == "vector":
+            rows = []
+        elif ql:
             toks = list(ql)[:8]   # cap candidate clauses
             conds = " OR ".join(
                 f"toLower(n.id) CONTAINS $t{i} OR toLower(n.name) CONTAINS $t{i}"
@@ -237,7 +164,7 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
             rows = s.run(
                 f"MATCH (n:Entity{label_clause}) WHERE {conds} "
                 f"RETURN n.id AS id, n.name AS name, n.profile AS prof, "
-                f"n.source_doc AS source_doc LIMIT 50",
+                f"n.source_docs AS source_docs LIMIT 50",
                 **params,
             ).data()
         else:
@@ -260,8 +187,7 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
                 rows = [
                     {"id": r["id"], "name": r.get("name"),
                      "prof": r.get("prof"), "sim": r.get("sim", 0.0)}
-                    for r in res if r.get("id")
-                ]
+                    for r in res if r.get("id")]
             except Exception:
                 rows = []
 
@@ -302,6 +228,7 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
         return candidates[:5]
 
     # Resolve the entry node according to strategy.
+    # For 'vector' strategy, skip keyword search and go straight to vector index.
     if entry_strategy == "vector":
         scored = _vector_scored()
     elif entry_strategy == "hybrid":
@@ -328,143 +255,133 @@ def neo4j_subgraph(query: str, hops: int = C.GRAPH_HOPS, label: str = None,
                          and scored[0][0] < 2):
             scored = _vector_scored()
 
-    # ── Similarity gate (v2.6.x): skip the expensive k-hop traversal when the
-    # best entry node is a poor match for the query. This turns ~3.7s wasted
-    # graph traversals for out-of-graph queries into a fast skip (the pipeline
-    # degrades gracefully to Qdrant vector retrieval only).
-    #
-    # Acceptance rule for traversing:
-    #   • keyword overlap >= 2 tokens  → strong lexical match, always traverse; OR
-    #   • best entry cosine similarity >= GRAPH_ENTRY_MIN_SIM → relevant.
-    # Otherwise (loose/irrelevant match) the graph context contributes nothing,
-    # so we return [] and let Qdrant carry the answer.
     if not scored:
         return []
-    # scored[0][0] is an integer token-overlap for keyword, or a cosine float
-    # for vector/hybrid entries.
-    best = scored[0]
-    best_score = best[0]
-    is_lexical = isinstance(best_score, int)
-    if is_lexical and best_score >= 2:
-        pass  # strong lexical match — traverse
-    elif (not is_lexical) and best_score >= C.GRAPH_ENTRY_MIN_SIM:
-        pass  # semantically relevant — traverse
-    else:
-        return []
 
-    out = []
+    entry = scored[0][1]["id"]
+
+    # Traverse k-hop from the entry node; bound the result set with LIMIT so
+    # latency stays predictable even on high-degree hubs (~3.7s unbounded).
+    # Phase 2 pruning refines the top-N afterwards.
+    _LIMIT = getattr(C, "GRAPH_TRAVERSAL_LIMIT", 200)
+    with driver.session() as s:
+        rec = s.run(
+            "MATCH (n:Entity {id:$e})-[*1..%d]-(m:Entity) "
+            "RETURN DISTINCT m.id AS id, m.name AS name, m.profile AS prof, "
+            "m.source_docs AS source_docs LIMIT %d" % (hops, _LIMIT),
+            e=entry,
+        ).data()
+        edge_rows = s.run(
+            "MATCH (n:Entity {id:$e})-[*1..%d]-(m:Entity) "
+            "WITH collect(DISTINCT m) AS ms, n AS entry "
+            "WITH ms + entry AS ns "
+            "UNWIND ns AS a UNWIND ns AS b "
+            "MATCH (a)-[r]-(b) WHERE a.id < b.id "
+            "RETURN DISTINCT a.id AS src, b.id AS dst, type(r) AS rel LIMIT %d" % (hops, _LIMIT),
+            e=entry,
+        ).data()
+    edges = [(r["src"], r["dst"], r.get("rel")) for r in edge_rows
+             if r.get("src") and r.get("dst")]
+
+    # Phase 2: prune the neighbourhood to the Top-N most central nodes.
+    strategy = getattr(C, "GRAPH_PRUNE_STRATEGY", "degree")
+    top_n = getattr(C, "GRAPH_PRUNE_TOP_N", 10)
+    if strategy != "none" and rec:
+        try:
+            import graph_prune as GP
+            rec = GP.prune_records(entry, rec, edges,
+                                   strategy=strategy, top_n=top_n)
+        except Exception:
+            pass  # never let pruning break retrieval
+
+    # Build an id->name map so we can emit human-readable edge
+    # statements even when entity `prof`/`source_docs` are empty.
+    _id2name = {r["id"]: (r.get("name") or r["id"]) for r in rec if r.get("id")}
     if scored:
-        entry = scored[0][1]["id"]
-        with driver.session() as s:
-            # Fetch neighbourhood nodes AND the relationships among them so we
-            # can rank by structural centrality (Phase 2 pruning).
-            # NOTE: a 2-hop expansion from a high-degree "hub" entity can return
-            # thousands of nodes and take ~3.7s. Bound the result set with
-            # LIMIT so latency stays predictable; Phase-2 pruning refines the
-            # top-N afterwards. Applies to both the node fetch and the edge
-            # expansion below.
-            _LIMIT = getattr(C, "GRAPH_TRAVERSAL_LIMIT", 200)
-            rec = s.run(
-                "MATCH (n:Entity {id:$e})-[*1..%d]-(m:Entity) "
-                "RETURN DISTINCT m.id AS id, m.name AS name, m.profile AS prof, "
-                "m.source_doc AS source_doc LIMIT %d" % (hops, _LIMIT),
-                e=entry,
-            ).data()
-            edge_rows = s.run(
-                "MATCH (n:Entity {id:$e})-[*1..%d]-(m:Entity) "
-                "WITH collect(DISTINCT m) AS ms, n AS entry "
-                "WITH ms + entry AS ns "
-                "UNWIND ns AS a UNWIND ns AS b "
-                "MATCH (a)-[r]-(b) WHERE a.id < b.id "
-                "RETURN DISTINCT a.id AS src, b.id AS dst, type(r) AS rel LIMIT %d" % (hops, _LIMIT),
-                e=entry,
-            ).data()
-        edges = [(r["src"], r["dst"], r.get("rel")) for r in edge_rows
-                 if r.get("src") and r.get("dst")]
+        _e0 = scored[0][1]
+        if _e0.get("id"):
+            _id2name.setdefault(_e0["id"], _e0.get("name") or _e0["id"])
 
-        # Phase 2: prune the neighbourhood to the Top-N most central nodes.
-        strategy = getattr(C, "GRAPH_PRUNE_STRATEGY", "degree")
-        top_n = getattr(C, "GRAPH_PRUNE_TOP_N", 10)
-        if strategy != "none" and rec:
-            try:
-                import graph_prune as GP
-                rec = GP.prune_records(entry, rec, edges,
-                                       strategy=strategy, top_n=top_n)
-            except Exception:
-                pass  # never let pruning break retrieval
+    # Emit traversed relationship edges as explicit statements (A -[rel]-> B).
+    # This is what makes an indirect A->D chain answerable: the LLM sees
+    # "bob OWNS BUG-204; BUG-204 CAUSED_BY CPU; CPU DEPENDS_ON GPU"
+    # rather than disconnected (often empty) node profiles.
+    _seen_edges = set()
+    for _src, _dst, _rel in edges:
+        _pair = (_src, _dst, _rel)
+        if _pair in _seen_edges:
+            continue
+        _seen_edges.add(_pair)
+        _src_name = _id2name.get(_src, _src)
+        _dst_name = _id2name.get(_dst, _dst)
+        rec.append({
+            "text": f"GRAPH EDGE: {_src_name} -[{_rel}]-> {_dst_name}",
+            "doc_id": f"graph://{label or 'default'}",
+            "doc_type": "graph_edge",
+            "chunk_idx": -1,
+        })
 
-        # Build an id->name map so we can emit human-readable edge
-        # statements even when entity `prof`/`source_doc` are empty.
-        _id2name = {r["id"]: (r.get("name") or r["id"]) for r in rec if r.get("id")}
-        if scored:
-            _e0 = scored[0][1]
-            if _e0.get("id"):
-                _id2name.setdefault(_e0["id"], _e0.get("name") or _e0["id"])
-
-        # Emit traversed relationship edges as explicit statements (A -[rel]-> B).
-        # This is what makes an indirect A->D chain answerable: the LLM sees
-        # "bob OWNS BUG-204; BUG-204 CAUSED_BY CPU; CPU DEPENDS_ON GPU"
-        # rather than disconnected (often empty) node profiles.
-        _seen_edges = set()
-        for _src, _dst, _rel in edges:
-            if not _rel:
-                continue
-            _key = (_src, _dst, _rel)
-            if _key in _seen_edges:
-                continue
-            _seen_edges.add(_key)
-            _a = _id2name.get(_src, _src)
-            _b = _id2name.get(_dst, _dst)
-            out.append({
-                "text": f"GRAPH EDGE: {_a} -[{_rel}]-> {_b}",
-                "doc_id": "graph://enterprise",
-                "doc_type": "graph_edge",
-                "chunk_idx": -1,
-            })
-
-        # Include the entry node's own profile first (with its source_doc)
-        e0 = scored[0][1]
-        if e0.get("prof"):
-            out.append({"text": e0["prof"], "doc_id": e0.get("source_doc", ""),
-                        "doc_type": "", "chunk_idx": -1})
-        for r in rec:
-            if r.get("prof"):
-                out.append({"text": r["prof"], "doc_id": r.get("source_doc", ""),
-                            "doc_type": "", "chunk_idx": -1})
-
-    # NOTE: do NOT close the driver here — it is process-long-lived (cached via
-    # _get_driver) and shared across all /ask calls. Closing it would break
-    # every later call in the same process.
-    return out
+    return rec
 
 
-def parallel_retrieve(vec: list, query: str,
-                      collections: list = None, entry_strategy: str = "keyword"):
-    """Retrieve from Qdrant (one or more collections) + Neo4j graph in parallel.
-
-    `collections` is a list of Qdrant collection names to search. If None,
-    defaults to [C.COLL_CHUNKS] (backward compatible). Cross-domain queries
-    pass multiple collections; the rerank step fuses them.
-    `entry_strategy` is forwarded to neo4j_subgraph (v2.6.0 REQ-6).
-    """
-    if collections is None:
-        collections = [C.COLL_CHUNKS]
+# ── Parallel retrieval (vector + graph) ──────────────────────────────────────
+def parallel_retrieve(query_vec: list[float], query_text: str,
+                       collections: list = None, entry_strategy: str = "keyword") -> tuple[list, list]:
+    """Run Qdrant vector search and Neo4j graph traversal in parallel."""
+    import threading
     q_res, g_res = [], []
-    t1 = threading.Thread(
-        target=lambda: q_res.extend(qdrant_search_multi(vec, query, collections)))
-    t2 = threading.Thread(target=lambda: g_res.extend(
-        neo4j_subgraph(query, entry_strategy=entry_strategy)))
-    t1.start(); t2.start(); t1.join(); t2.join()
+
+    def _vec():
+        nonlocal q_res
+        if collections:
+            q_res = qdrant_search_multi(query_vec, query_text, collections)
+
+    def _graph():
+        nonlocal g_res
+        # Try to get a domain label from the first collection
+        label = None
+        if collections:
+            from domain_loader import get_domain
+            for coll in collections:
+                # Find domain with this collection
+                for dname in get_domain.__globals__.get('_DOMAINS', {}):
+                    dom = get_domain(dname)
+                    if dom.get('collection') == coll:
+                        label = dom.get('neo4j_label')
+                        break
+        g_res = neo4j_subgraph(query_text, label=label, entry_strategy=entry_strategy)
+
+    t1 = threading.Thread(target=_vec)
+    t2 = threading.Thread(target=_graph)
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
     return q_res, g_res
 
 
-# ── Condense ──────────────────────────────────────────────────────────────────
+# ── Condense (dedupe + rerank) ───────────────────────────────────────────────
 def condense(query: str, q_res: list, g_res: list) -> list:
+    """
+    Normalize, dedupe, rerank, and return top-K context strings.
+    Caps the pool before reranking to avoid 5s+ latency on 40 docs.
+    """
     # Normalize records (q_res/g_res may be dicts {text,doc_id,...} or strings).
+    # Graph results have keys: id, name, prof, source_docs
+    # Qdrant results have keys: text, doc_id, doc_type, chunk_idx, score
     def _as_record(x):
         if isinstance(x, dict):
-            return x
-        return {"text": x, "doc_id": "", "doc_type": "", "chunk_idx": -1}
+            if "text" in x:
+                return x  # Qdrant format
+            elif "prof" in x:
+                # Graph format: build text from profile + name
+                text = f"{x.get('name', '')}: {x.get('prof', '')}"
+                return {
+                    "text": text,
+                    "doc_id": x.get("id", ""),
+                    "doc_type": "graph",
+                    "chunk_idx": -1,
+                }
+        return {"text": str(x), "doc_id": "", "doc_type": "", "chunk_idx": -1}
 
     def _key(r):
         return (r.get("doc_id", ""), r.get("text", ""))
@@ -480,6 +397,13 @@ def condense(query: str, q_res: list, g_res: list) -> list:
         pool.append(r)
     if not pool:
         return []
+
+    # Limit pool size before rerank to avoid 5s+ latency on 40 docs.
+    # The reranker is ~900ms for 40 docs; cap at 15 for ~300ms.
+    MAX_RERANK_DOCS = 15
+    if len(pool) > MAX_RERANK_DOCS:
+        pool = pool[:MAX_RERANK_DOCS]
+
     texts = [r["text"] for r in pool]
     ranked = requests.post(C.DAEMON_RERANK,
                            json={"query": query, "docs": texts},

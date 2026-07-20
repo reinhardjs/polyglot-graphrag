@@ -50,8 +50,9 @@ If anything shows `[ACTION]`, run the suggested command and re-run `doctor` unti
 
 ---
 
-## 1. Start the Stack (≈30 s)
+## 1. Start the Stack
 
+### GPU path (RTX 3060 12GB recommended) — ≈30s
 The stack has **three layers**:
 
 | Layer | What | How to start | Port |
@@ -77,6 +78,44 @@ bash run.sh health
 ```
 
 > **If health shows `degraded` or a backend `down`**: restart the daemon: `bash run.sh stop && bash run.sh serve`. The daemon recreates missing Qdrant collections (`query_cache`, `entity_vector_idx`) on startup.
+
+### CPU-only path (no GPU required) — ≈60s first run
+**Two options for synthesis:**
+1. **Local E2B on CPU** — if you have `./models/gemma-4-E2B-it-QAT-Q4_0.gguf`, runs via llama.cpp with `gpu_layers=0`
+2. **Remote/OpenRouter** — set `SYNTHESIS_LLM_BASE_URL` to any OpenAI-compatible endpoint (e.g., OpenRouter)
+
+Embedding (Jina v3) + Reranker (BGE) run locally on CPU (fp32) in both cases.
+
+```bash
+# 1a) Start Neo4j + Qdrant (same as GPU path)
+docker compose up -d
+
+# 1b) Wait for them healthy
+curl -s -o /dev/null -w "%{http_code}" http://localhost:6333   # → 200
+curl -s -o /dev/null -w "%{http_code}" http://localhost:7474   # → 200
+
+# 1c) Start CPU daemon
+#     Set CPU env vars FIRST:
+export CUDA_VISIBLE_DEVICES=""  # forces CPU
+export CONDA_NO_PLUGINS=1       # required to avoid subprocess SIGTERM issues
+
+# Option 1: Local E2B on CPU (requires GGUF in ./models/)
+# bash run.sh serve --cpu   # auto-starts E2B with gpu_layers=0 if GGUF exists
+
+# Option 2: Remote synthesis (OpenRouter or other)
+# Set the endpoint first:
+# export SYNTHESIS_LLM_BASE_URL="https://openrouter.ai/api/v1"
+# export SYNTHESIS_LLM_API_KEY="your-key"
+# export SYNTHESIS_LLM_MODEL="nvidia/nemotron-3-ultra-550b-a55b:free"
+# Then:
+bash run.sh serve --cpu --no-llm
+
+# 1d) Confirm everything green
+bash run.sh health
+# Expected: all backends ok, daemon pid shown (no VRAM on CPU)
+```
+
+> **Performance note**: CPU retrieval is ~23× slower than GPU (3.8s vs 0.16s p95) because Jina embed + BGE rerank run in fp32 on CPU. However, synthesis latency depends on your backend — local E2B on CPU is ~10-15s; remote (OpenRouter) varies. Full pipeline: ~7-15s CPU vs ~6.5s GPU. See [CPU vs GPU benchmark](../benchmarks/cpu-vs-gpu-benchmark.md) for details.
 
 ---
 
