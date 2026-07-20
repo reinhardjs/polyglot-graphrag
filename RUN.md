@@ -78,8 +78,9 @@ and synthesis — there is no second model to download.
      automatically.
 
 > What is "Gemma E2B"? Gemma 4 is Google's open model family. **E2B** =
-> the "Extraction 2-Billion-parameter" variant — small/fast, used here to pull
-> entities & relationships out of text AND to write the final cited answer
+> the **"Edge 2-Billion effective parameters"** variant — small/fast, designed
+> for edge devices (phones, laptops, IoT), used here to pull entities &
+> relationships out of text AND to write the final cited answer
 > (synthesis runs on E2B since v1.0.2; the larger E4B was retired — it gave
 > ~22s answers for no quality gain on the 12 GB card, E2B is ~2.2s p95).
 > Both ran locally via **llama.cpp** (a C++ engine that serves GGUF-format
