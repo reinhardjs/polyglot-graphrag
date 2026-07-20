@@ -29,7 +29,7 @@ domains:
       strategy: fixed
       chunk_size: 512
       overlap: 64
-    extraction_mode: llm
+    extraction_mode: hybrid  # GLiNER entities + E2B relations, 100% precision (recommended for ≤4K tokens)
     entry_strategy: vector
     synthesis:
       kind: enterprise_synthesis

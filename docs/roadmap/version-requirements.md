@@ -81,7 +81,7 @@ Content-Type: application/json
   "entities": 7,
   "edges": 11,
   "vectors_upserted": 43,
-  "extraction_method": "llm",   // "llm" | "gliner"
+  "extraction_method": "hybrid",   // "hybrid" (primary, 100% precision) | "sliding_window" | "llm" | "gliner"
   "timing": {
     "embed": 0.42,
     "extract": 3.18,

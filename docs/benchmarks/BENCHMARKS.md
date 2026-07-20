@@ -125,7 +125,7 @@ chunking + coreference summaries) with the same 100% short-doc precision.
 `llm` is the fallback; `index_routing` (Qwen) is deprecated (20%).
 
 | **VRAM** | **5.4 GB** | 5.8 GB | close |
-**Ruling:** E2B llm mode is primary. Qwen index-routing is too inaccurate for production use (20% precision = 80% wrong edges). The 10× latency cost is acceptable — extraction runs once per document at ingest time, not at query time.
+**Ruling:** **`hybrid` mode is the production default** (100% precision, GLiNER+E2B, ≤4K tokens). `sliding_window` handles long docs (>4K). `llm` is the speed fallback (89% precision). `index_routing` (Qwen) is deprecated (20% precision). The 10× latency cost is acceptable — extraction runs once per document at ingest time, not at query time.
 
 ### E2B llm Mode — Gold-Standard Match
 ```

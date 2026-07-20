@@ -35,8 +35,7 @@ per session.)
 - **`run.sh` CPU flags**: `--cpu` (auto: local E2B if GGUF, else OpenRouter),
   `--cpu --no-llm` (force remote synthesis), default `serve` = GPU.
 
-- **`EXTRACTION_MODE` default: `llm`** (was `sliding_window`) — faster, simpler
-  single-pass extraction.
+- **`EXTRACTION_MODE` default: `hybrid`** (was `sliding_window` → `llm` → `hybrid`) — GLiNER entities + E2B relations, **100% precision**, comparable latency to `llm` (10.7–15.2s vs 11.8s). See `docs/benchmarks/BENCHMARKS.md §1.1`.
 
 ### Docs
 - `QUICKSTART.md`: Explicit CPU paths (Option 1: local E2B on CPU; Option 2:

@@ -614,8 +614,9 @@ def extract_graph_llm(doc_id: str, text: str, chunk_size: int = 512,
                       profile: dict = None) -> dict:
     """LLM-based graph extraction via the configured extraction model.
 
-    PRIMARY extraction path. The extraction model (config: EXTRACTION_LLM)
-    is prompted with the domain profile's [extraction].prompt when a profile
+    SECONDARY extraction path (primary is hybrid per config.EXTRACTION_MODE).
+    The extraction model (config: EXTRACTION_LLM) is prompted with the domain
+    profile's [extraction].prompt when a profile
     is supplied (v2.6.0 REQ-4); otherwise falls back to config.EXTRACTION_PROMPT.
     Entities are extracted VERBATIM — exactly as they appear in the source text.
     NO translation. Jina v3's cross-lingual vector space handles merging via

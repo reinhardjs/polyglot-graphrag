@@ -53,7 +53,7 @@ The `/ingest` endpoint enables:
   "entities": 7,               // Neo4j Entity nodes created/merged
   "edges": 11,                 // Neo4j edges created
   "vectors_upserted": 43,      // Qdrant chunks written
-  "extraction_method": "llm",  // "llm" (E2B) or "gliner" (fallback)
+  "extraction_method": "hybrid",  // primary: "hybrid" (GLiNER+E2B, 100% precision, ≤4K tokens), "sliding_window" (long docs), "llm" (E2B single-pass, 89% precision), or "gliner" (no-E2B fallback)
   "timing": {
     "embed_late": 0.42,
     "extract_graph": 3.18,
