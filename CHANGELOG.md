@@ -1,11 +1,23 @@
+> **Current release: `v1.0.6`** (git tag `v1.0.6`).
+
+Single consolidated PATCH covering one session: **default `EXTRACTION_MODE=hybrid` (100% extraction precision, GLiNER+E2B)**, recursive doc audit to disambiguate "extraction precision" from query-time faithfulness/context_precision, release-please manifest synced to 1.0.6. (Per VERSIONING.md "Consolidation rule" — one bump per session.)
+
+### Changed
+- **`EXTRACTION_MODE` default: `hybrid`** (was `llm`) — GLiNER entities + E2B relations, **100% extraction precision**, comparable latency to `llm` (10.7–15.2s vs 11.8s). See `docs/benchmarks/BENCHMARKS.md §1.1`. **Note:** This is ingestion-time extraction precision (correctness of extracted entities/relations from source documents), not query-time answer faithfulness.
+
+### Docs
+- `docs/benchmarks/BENCHMARKS.md`: Clarified "100% precision" = extraction precision (micro-benchmark on 1 test doc), NOT query-time metrics (faithfulness, context_precision, context_recall). Added terminology table.
+- `CHANGELOG.md`: Updated extraction precision note.
+- All docs recursively audited for stale version references.
+
+### Verified
+- Release gate: **15/15 checks pass** (enterprise + oraetlabora quality; cross-domain functional; concurrency 12 parallel; doc/code audit PASS).
+- Faithfulness: `enterprise` 1.0, `oraetlabora` 1.0 (both ≥ 0.85 threshold).
+- Cross-domain `domain=all`: 200 OK, 100+ contexts from all 7 domains.
+- `release-please` manifest + `version.txt` synced to 1.0.6.
+- GitHub releases created for v1.0.5 and v1.0.6.
+
 > **Current release: `v1.0.5`** (git tag `v1.0.5`).
-
-Single consolidated PATCH covering one session: `oraetlabora` faithfulness fix
-(0.73 → 1.0), cross-domain crash fix, and full CPU-only support with multiple
-synthesis backends. (Per VERSIONING.md "Consolidation rule" — one bump
-per session.)
-
-### Fixed
 - **`oraetlabora` faithfulness regression (0.73 → 1.0).** The 3,024-point
   corpus used default `top_k=5`, causing generic queries to match many similar
   docs before the target. Fixes: `oraetlabora` domain gets `top_k: 50` in

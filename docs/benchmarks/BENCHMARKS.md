@@ -119,6 +119,8 @@ if last_tag != -1:
 | **`hybrid` (GLiNER+E2B)** | 13 (GLiNER) | **5** | **100%** | 10.7–15.2s | **Best extraction precision** |
 | **`sliding_window` (our design; E2B backend)** | 13 (GLiNER) | **5 (short) / 15 (36K)** | **100% (short)** | 21s (short) / 63s (36K) | **Long-doc capable** |
 
+**⚠️ Scope:** These numbers come from a **single 648-char test document** (`/tmp/prove_extraction.md`, PR-482 incident). They are a **micro-benchmark**, not corpus-scale. Extraction precision = % of extracted edges matching human gold standard on that one doc.
+
 **Note:** "Extraction Precision" = correctness of entities+relations extracted **during ingestion** from a single test document. This is NOT the same as query-time retrieval/answer metrics (faithfulness, context_precision, context_recall) measured by the release gate.
 
 **Verdict:** `hybrid` is the production recommendation for docs ≤4K tokens. `sliding_window` extends coverage to **any document length** (sentence-boundary chunking + coreference summaries) with the same 100% short-doc extraction precision. `llm` is the fallback; `index_routing` (Qwen) is deprecated (20%).

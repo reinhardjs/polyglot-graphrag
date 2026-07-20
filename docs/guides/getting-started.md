@@ -1,4 +1,4 @@
-# New User Walkthrough — polyglot-graphrag v1.0.4
+# New User Walkthrough — polyglot-graphrag v1.0.6
 
 > **Audience:** You want the guided tutorial — concepts explained, your confidential corpus in `external/`, quality benchmark run.
 > - For 5-minute copy-paste → [QUICKSTART.md](../QUICKSTART.md)
@@ -278,13 +278,13 @@ print('HYBRID OK')
 
 The repo has a **corpus-matched golden set** for the ora-et-labora corpus (`external/ora-et-labora-golden.json`). The release gate runs quality checks against it.
 
-### 5.1 Run the full release gate (14 checks)
+### 5.1 Run the full release gate (15 checks)
 ```bash
 ./venv/bin/python scripts/release-gate.py
 ```
-**Expected (v1.0.4 on RTX 3060 12 GB):**
+**Expected (v1.0.6 on RTX 3060 12 GB):**
 ```
-14/14 checks passed  |  ALL SYSTEMS GO
+15/15 checks passed  |  ALL SYSTEMS GO
 ```
 Checks include:
 - Health, metrics, `/ask`, unknown domain, cross-domain, synthesis
