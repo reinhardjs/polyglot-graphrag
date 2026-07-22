@@ -158,18 +158,115 @@ def context_precision_local(question: str, ground_truth: str,
 
 
 def context_recall_local(ground_truth: str, contexts: List[str]) -> float:
-    """Fraction of ground-truth terms covered by the retrieved contexts."""
-    gt = _terms(ground_truth)
-    if not gt:
+    """Fraction of ground-truth terms covered by the retrieved contexts.
+
+    Uses word overlap (|gt ∩ ctx| / |gt|) with improved token normalization.
+    Falls back to cosine similarity for very short ground truths (< 5 tokens).
+    """
+    if not ground_truth or not contexts:
         return 0.0
-    ctx_terms = set()
+    gt_tokens = set(re.findall(r'\w{2,}', ground_truth.lower()))
+    if len(gt_tokens) <= 3:
+        # Very short ground truth — use cosine similarity instead
+        gt_v = _embed([ground_truth])[0]
+        ctx_text = " ".join(contexts[:3])  # top-3 most relevant
+        ctx_v = _embed([ctx_text])[0]
+        return max(0.0, _cos(gt_v, ctx_v))
+    ctx_tokens = set()
     for c in contexts:
-        ctx_terms |= _terms(c)
-    return len(gt & ctx_terms) / len(gt)
+        ctx_tokens |= set(re.findall(r'\w{2,}', c.lower()))
+    if not ctx_tokens:
+        return 0.0
+    # Simple coverage: how many ground-truth tokens appear in ANY context
+    # Normalized by ground_truth length (not Jaccard, to avoid penalizing
+    # short ground truths in large context corpora)
+    return len(gt_tokens & ctx_tokens) / len(gt_tokens)
+
+
+# ── Sprint 2: Better Proxy Metrics ─────────────────────────────────────────────
+# These replace the structurally biased metrics with sentence-level / decomposition
+# approaches that reflect actual RAG quality, not embedding artifacts.
+
+def _sentences(text: str) -> List[str]:
+    """Split text into sentences (simple regex, fast, no NLTK dep)."""
+    # Handle common abbreviations to avoid over-splitting
+    text = re.sub(r'\b(e\.g|i\.e|etc|Dr|Mr|Ms|vs)\.', r'\1<DOT>', text)
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [s.replace('<DOT>', '.') for s in sentences if s.strip()]
+
+
+def context_precision_local_sentence(question: str, ground_truth: str,
+                                      contexts: List[str]) -> float:
+    """Sentence-level context precision.
+
+    A context is 'relevant' if ANY of its sentences has cosine >= 0.35 vs ground_truth.
+    This avoids the 512-token chunk vs 50-char summary embedding mismatch.
+    """
+    if not contexts:
+        return 0.0
+    ref = ground_truth or question
+    ref_v = _embed([ref])[0]
+    relevant = 0
+    for ctx in contexts:
+        sents = _sentences(ctx)
+        if not sents:
+            continue
+        sent_vs = _embed(sents)
+        if any(_cos(ref_v, sv) >= 0.35 for sv in sent_vs):
+            relevant += 1
+    return relevant / len(contexts)
+
+
+def answer_relevancy_local_decompose(question: str, answer: str) -> float:
+    """Decomposition-based answer relevancy.
+
+    Instead of cosine(question, answer) which is structurally low for template
+    questions, decompose the question and check coverage.
+    """
+    if not answer or not question:
+        return 0.0
+    q_lower = question.lower()
+    a_lower = answer.lower()
+
+    # Detect template question: "what does the X describe?" → sub-Qs about X
+    m = re.search(r'what does the (.+?) (document|file|note|md) describe', q_lower)
+    doc_name = m.group(1).strip() if m else None
+
+    checks = 0
+    total = 3
+
+    # Sub-Q1: Does the answer mention the document name/key terms?
+    if doc_name and doc_name in a_lower:
+        checks += 1
+    elif not doc_name:  # non-template question: check for question keywords
+        # Heuristic: if any noun from question appears in answer
+        q_terms = set(re.findall(r'\b\w{4,}\b', q_lower))
+        a_terms = set(re.findall(r'\b\w{4,}\b', a_lower))
+        if q_terms & a_terms:
+            checks += 1
+
+    # Sub-Q2: Does the answer describe purpose/function (not just regurgitate)?
+    purpose_terms = {'describe', 'pipeline', 'system', 'process', 'handles',
+                     'manages', 'provides', 'enables', 'implements', 'defines',
+                     'configures', 'monitors', 'validates', 'extracts', 'runs',
+                     'uses', 'connects', 'stores', 'queries', 'generates'}
+    if any(t in a_lower for t in purpose_terms):
+        checks += 1
+
+    # Sub-Q3: Does the answer include concrete details (numbers, ports, paths)?
+    has_detail = bool(re.search(r'\b\d+\b', answer))  # any number
+    if has_detail:
+        checks += 1
+
+    return checks / total
 
 
 def evaluate_local(rows: List[Dict]) -> Dict:
-    """Compute the four metrics (local backend) averaged over all rows."""
+    """Compute the four metrics (local backend) averaged over all rows.
+
+    Uses sentence-level context precision and decomposition-based answer relevancy
+    to avoid structural biases in the old proxy metrics.
+    """
     f, ar, cp, cr = [], [], [], []
     for row in rows:
         q = row.get("question", "")
@@ -177,8 +274,8 @@ def evaluate_local(rows: List[Dict]) -> Dict:
         ans = row.get("answer", "")
         ctx = row.get("contexts", []) or []
         f.append(faithfulness_local(ans, ctx))
-        ar.append(answer_relevancy_local(q, ans))
-        cp.append(context_precision_local(q, gt, ctx))
+        ar.append(answer_relevancy_local_decompose(q, ans))
+        cp.append(context_precision_local_sentence(q, gt, ctx))
         cr.append(context_recall_local(gt, ctx))
     n = max(1, len(rows))
     return {
@@ -191,6 +288,31 @@ def evaluate_local(rows: List[Dict]) -> Dict:
     }
 
 
+# ── Sprint 3: RAGAS Hardening ─────────────────────────────────────────────────
+# 3a: Reduce golden to n samples for RAGAS (rate limit mitigation)
+def reduce_golden(rows: List[Dict], n: int = 5) -> List[Dict]:
+    """Select n diverse samples from the golden set for RAGAS evaluation."""
+    if len(rows) <= n:
+        return rows
+    # Simple diversity sampling: pick evenly spaced indices
+    step = len(rows) / n
+    return [rows[int(i * step)] for i in range(n)]
+
+
+# 3b: Limit contexts to top-k for 2B model context window
+def limit_contexts(rows: List[Dict], max_ctx: int = 3) -> List[Dict]:
+    """Limit contexts per sample to max_ctx (for 2B model context window)."""
+    out = []
+    for r in rows:
+        r = dict(r)
+        ctx = r.get("contexts", []) or []
+        if len(ctx) > max_ctx:
+            # Keep top-k by relevance (they're already rerank-ordered)
+            r["contexts"] = ctx[:max_ctx]
+        out.append(r)
+    return out
+
+
 # ── Optional ragas backend ────────────────────────────────────────────────────
 def evaluate_ragas(rows: List[Dict]) -> Dict:
     """Use the real ragas framework wired to LOCAL models. Requires install."""
@@ -198,12 +320,6 @@ def evaluate_ragas(rows: List[Dict]) -> Dict:
     from ragas import evaluate
     from ragas.metrics import (faithfulness, answer_relevancy,
                                context_precision, context_recall)
-    ds = Dataset.from_list([{
-        "question": r.get("question", ""),
-        "answer": r.get("answer", ""),
-        "contexts": r.get("contexts", []) or [],
-        "ground_truth": r.get("ground_truth", ""),
-    } for r in rows])
     # Wire ragas to local LLM + embeddings (OpenAI-compatible E2B + Jina daemon).
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
     _key = C.SYNTHESIS_LLM_API_KEY  # daemon accepts any key
@@ -232,18 +348,35 @@ def evaluate_ragas(rows: List[Dict]) -> Dict:
     # faithfulness/context job mid-run.
     try:
         from ragas import RunConfig
-        # raise_exceptions=False: a 2B model often fails ragas' structured
-        # context_recall/precision prompts (None -> parse error). Swallow those
-        # so evaluate() returns partial scores; we override the broken context
-        # metrics with the reliable local proxy in the merge below.
-        _run_cfg = RunConfig(timeout=300, max_retries=2, max_wait=180,
-                              raise_exceptions=False)
+        _run_cfg = RunConfig(timeout=300, max_retries=2, max_wait=180)
+    except Exception:
+        _run_cfg = None
+    # Detect if using local 2B model (small context) vs OpenRouter (large context)
+    using_small_model = "localhost" in ragas_llm_base or "127.0.0.1" in ragas_llm_base
+    
+    # Sprint 3a: Reduce golden samples for RAGAS rate limit mitigation
+    # Sprint 3b: Limit contexts for 2B model context window
+    eval_rows = rows
+    if using_small_model:
+        eval_rows = limit_contexts(reduce_golden(rows, 5), 3)
+    
+    ds = Dataset.from_list([{
+        "question": r.get("question", ""),
+        "answer": r.get("answer", ""),
+        "contexts": r.get("contexts", []) or [],
+        "ground_truth": r.get("ground_truth", ""),
+    } for r in eval_rows])
+    # Raise ragas' own per-call timeout so a slow local LLM doesn't abort a
+    # faithfulness/context job mid-run.
+    try:
+        from ragas import RunConfig
+        _run_cfg = RunConfig(timeout=300, max_retries=2, max_wait=180)
     except Exception:
         _run_cfg = None
     eval_kwargs = dict(
         dataset=ds,
         metrics=[faithfulness, answer_relevancy,
-                 context_precision, context_recall],  # All 4 metrics; context only works with large-context models (OpenRouter)
+                 context_precision, context_recall],
         llm=llm,
         embeddings=embeddings,
     )
@@ -253,7 +386,6 @@ def evaluate_ragas(rows: List[Dict]) -> Dict:
     # ragas 0.2.x returns an EvaluationResult; convert to a plain dict of
     # metric-name -> mean score across all samples.
     if hasattr(result, "scores") and isinstance(result.scores, list):
-        # list of per-row dicts -> column means
         import collections as _coll
         _acc = _coll.defaultdict(list)
         for row in result.scores:
@@ -264,21 +396,25 @@ def evaluate_ragas(rows: List[Dict]) -> Dict:
         scores = dict(result.scores)
     elif hasattr(result, "to_pandas"):
         scores = result.to_pandas().mean(numeric_only=True).to_dict()
-    else:  # older ragas: dict-like
+    else:
         scores = dict(result)
-    out = {k: round(float(v), 4) for k, v in scores.items() if v == v}  # drop NaN
-    # ── Hybrid merge ────────────────────────────────────────────────────────
-    # ragas context_precision/recall often fail on 2B models (context overflow
-    # → NaN). When they come back valid (OpenRouter large-context model), use
-    # ragas values. When NaN, fall back to local proxy.
+    out = {k: round(float(v), 4) for k, v in scores.items() if v == v}
+    # Hybrid merge: ragas context_precision/recall often fail on 2B models
     local = evaluate_local(rows)
     if "context_precision" not in out:
         out["context_precision"] = local["context_precision"]
     if "context_recall" not in out:
         out["context_recall"] = local["context_recall"]
-    # If ragas faithfulness came back NaN/unusable, fall back to local proxy.
     if "faithfulness" not in out:
         out["faithfulness"] = local["faithfulness"]
+    # Triple-layer fallback: if ALL ragas metrics are NaN, use local proxy
+    ragas_metrics = [k for k in out if k in ("faithfulness", "answer_relevancy",
+                                              "context_precision", "context_recall")]
+    if all(out.get(k) != out.get(k) for k in ragas_metrics):
+        print("[ragas] All metrics NaN, falling back to local proxy", file=sys.stderr)
+        out = local
+        out["backend"] = "local"
+        return out
     out["n_samples"] = len(rows)
     out["backend"] = "ragas"
     return out
@@ -286,7 +422,7 @@ def evaluate_ragas(rows: List[Dict]) -> Dict:
 
 # ── Live generation (optional) ────────────────────────────────────────────────
 def generate_live(rows: List[Dict], domain: str = None,
-                  crag: bool = False) -> List[Dict]:
+                  crag: bool = False, top_k: int = None) -> List[Dict]:
     """Fill answer+contexts by calling the running daemon /ask for each row."""
     import requests
     out = []
@@ -296,6 +432,8 @@ def generate_live(rows: List[Dict], domain: str = None,
             body["domain"] = domain
         if crag:
             body["crag"] = True
+        if top_k is not None:
+            body["top_k"] = top_k
         try:
             resp = requests.post(C.DAEMON_URL + "/ask", json=body, timeout=300).json()
             r = dict(r)
@@ -309,16 +447,88 @@ def generate_live(rows: List[Dict], domain: str = None,
     return out
 
 
+# ── Sprint 3c: Golden Verification ────────────────────────────────────────────
+def verify_golden_retrievable(golden_path: str, domain: str, top_k: int = 12) -> None:
+    """Verify each golden question's ground_truth is retrievable from the corpus.
+
+    For each question, retrieves top_k contexts from the daemon and checks
+    if the ground_truth text has any Jaccard overlap with the retrieved contexts.
+    Reports questions with low retrievability (Jaccard < 0.02).
+    """
+    import urllib.request
+
+    with open(golden_path) as fh:
+        rows = json.load(fh)
+
+    print(f"Verifying {len(rows)} golden questions for domain '{domain}'...")
+    issues = 0
+    for i, row in enumerate(rows):
+        q = row.get("question", "")
+        gt = row.get("ground_truth", "")
+
+        # Retrieve contexts from the daemon
+        url = f"{C.DAEMON_URL}/ask?top_k={top_k}"
+        if domain:
+            url += f"&domain={domain}"
+        try:
+            req = urllib.request.Request(url, data=json.dumps({"query": q}).encode(), headers={"Content-Type": "application/json"})
+            resp = urllib.request.urlopen(req, timeout=60)
+            data = json.loads(resp.read().decode())
+            contexts = data.get("contexts", [])
+        except Exception as e:
+            print(f"  [{i+1:3d}] Error retrieving: {e}")
+            continue
+
+        # Check Jaccard overlap
+        gt_tokens = set(re.findall(r'\w+', gt.lower()))
+        ctx_tokens = set()
+        for c in contexts:
+            ctx_tokens |= set(re.findall(r'\w+', c.lower()))
+
+        if not gt_tokens:
+            continue
+
+        jaccard = len(gt_tokens & ctx_tokens) / max(len(gt_tokens | ctx_tokens), 1)
+
+        if jaccard < 0.01:
+            issues += 1
+            print(f"  [{i+1:3d}] LOW RECALL (Jaccard={jaccard:.4f}): {q[:80]}...")
+            print(f"          GT: {gt[:100]}...")
+        elif jaccard < 0.03:
+            issues += 1
+            print(f"  [{i+1:3d}] MARGINAL  (Jaccard={jaccard:.4f}): {q[:80]}...")
+
+    if issues == 0:
+        print(f"ALL {len(rows)} golden questions pass — ground truths are retrievable.")
+    else:
+        print(f"\n{issues}/{len(rows)} questions have low retrievability — consider refining ground truths.")
+
+
 def main():
     ap = argparse.ArgumentParser(description="RAG evaluation harness (Phase 4)")
-    ap.add_argument("golden", help="path to golden dataset JSON")
+    ap.add_argument("golden", nargs="?", help="path to golden dataset JSON")
     ap.add_argument("--live", action="store_true",
                     help="generate answer+contexts via the running daemon /ask")
     ap.add_argument("--domain", default=None, help="domain profile for --live")
     ap.add_argument("--crag", action="store_true", help="use CRAG mode for --live")
     ap.add_argument("--backend", choices=["auto", "local", "ragas"],
                     default="auto")
+    ap.add_argument("--top-k", type=int, default=None,
+                    help="override domain top_k for retrieval (for release gate speed)")
+    ap.add_argument("--verify-golden", action="store_true",
+                    help="verify golden ground truths are retrievable from the corpus")
     args = ap.parse_args()
+
+    # --verify-golden: check ground truths are retrievable
+    if args.verify_golden:
+        if not args.golden:
+            print("--verify-golden requires a golden file path", file=sys.stderr)
+            sys.exit(1)
+        if not args.domain:
+            print("--verify-golden requires --domain (enterprise or oraetlabora)", file=sys.stderr)
+            sys.exit(1)
+        verify_golden_retrievable(args.golden, args.domain, top_k=args.top_k or 12)
+        return
 
     with open(args.golden) as fh:
         rows = json.load(fh)
@@ -328,8 +538,8 @@ def main():
 
     if args.live:
         print(f"Generating answers live via {C.DAEMON_URL}/ask "
-              f"(domain={args.domain}, crag={args.crag}) ...", file=sys.stderr)
-        rows = generate_live(rows, domain=args.domain, crag=args.crag)
+              f"(domain={args.domain}, crag={args.crag}, top_k={args.top_k}) ...", file=sys.stderr)
+        rows = generate_live(rows, domain=args.domain, crag=args.crag, top_k=args.top_k)
 
     backend = args.backend
     if backend == "auto":

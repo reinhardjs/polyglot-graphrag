@@ -551,8 +551,9 @@ def ask(req: AskReq):
     profile = domain_loader.get_domain(req.domain) if isinstance(req.domain, str) else None
 
     # Use domain-configured top_k if available, else fall back to request top_k
+    # BUT: if the request explicitly provided top_k (not default), it overrides domain config
     effective_top_k: int = req.top_k
-    if profile and profile.get("top_k") is not None:
+    if profile and profile.get("top_k") is not None and req.top_k == 5:  # 5 is default
         effective_top_k = int(profile.get("top_k"))
 
     # 1. Embed query in-process (resident model on GPU)

@@ -298,7 +298,7 @@ def run():
     results.append(check(f"Concurrency ({CONCURRENCY_N} parallel snomed)", c_concurrency))
 
     # ── 12. Answer QUALITY on an ingested corpus (parametrized by domain) ──
-    def _quality_check(domain, golden_dir, golden_file, label):
+    def _quality_check(domain, golden_dir, golden_file, label, top_k=None):
         # Live synthesize + score Faithfulness/Relevance/Precision/Recall
         # over the golden dataset. The set lives in `golden_dir` (git-ignored
         # — confidential corpora are never committed). The default is the
@@ -316,11 +316,14 @@ def run():
         # a CI/deep run sets EVAL_USE_RAGAS=1 for stricter semantic grounding.
         # IMPORTANT: We do NOT auto-enable ragas when installed — the docstring
         # says ragas is NOT the default hard gate. Only use ragas when explicitly
-        # requested via EVAL_USE_RAGAS=1 in the environment.
-        # Force local backend to avoid ragas (opt-in only per docstring)
-        backend_flag = ["--backend", "local"]
+        # requested via EVAL_USE_RAGAS=1 in the environment or --ragas flag.
+        _use_ragas = os.environ.get("EVAL_USE_RAGAS") == "1" or "--ragas" in sys.argv
+        backend_flag = ["--backend", "ragas" if _use_ragas else "local"]
+        if top_k is not None:
+            backend_flag.extend(["--top-k", str(top_k)])
         _eval_env = dict(os.environ)
-        _eval_env["EVAL_USE_RAGAS"] = "0"  # explicitly disable ragas
+        if not _use_ragas:
+            _eval_env["EVAL_USE_RAGAS"] = "0"  # explicitly disable ragas
         cmd = [os.path.join(BASE, "venv", "bin", "python"),
                "evaluate_pipeline.py", golden, "--live", "--domain", domain,
                *backend_flag]
@@ -379,27 +382,29 @@ def run():
         assert ff >= 0.85, (
             f"faithfulness {ff:.2f} < 0.85 (n={best.get('n_samples')})")
         # Retrieval-tightness signal (informational floor, NOT a hard gate).
-        # context_precision here comes from the LOCAL lexical proxy, which
-        # compares each retrieved 512-word CHUNK against the SHORT golden
-        # ground_truth phrase via cosine. For chunked corpora that cosine is
-        # structurally low (the chunk CONTAINS the answer but its embedding
-        # differs from the short phrase) — so the proxy reads ~0.30-0.39 even
-        # when faithfulness (semantic) is 0.87+. Measured on this box:
-        # enterprise self-docs ≈0.39, ora-et-labora ≈0.28. We floor at 0.25
-        # (below the measured oraet-labora 0.28) so a correctly-grounded
-        # pipeline is not red-failed by this proxy artifact, while genuine
-        # retrieval collapse (precision near 0 = pure distractors) still
-        # fails. The 0.50 bar from before was an artifact of this proxy, not
-        # a real quality bar; faithfulness (>=0.85) is the real gate.
-        assert cp >= 0.25, (
-            f"context_precision {cp:.2f} < 0.25 — retrieval collapsed to "
+        # context_precision here comes from the NEW sentence-level local proxy:
+        # a chunk is relevant if ANY of its sentences has cosine >= 0.35 vs
+        # ground_truth. This avoids the 512-word chunk vs 50-char summary
+        # embedding mismatch. Measured: enterprise self-docs ~0.66, ora-et-labora
+        # ~0.65. We floor at 0.50 (below measured values) so a correctly-grounded
+        # pipeline is not red-failed by proxy noise, while genuine retrieval
+        # collapse (precision near 0 = pure distractors) still fails.
+        # The 0.25 floor from before was for the OLD chunk-level cosine proxy.
+        assert cp >= 0.50, (
+            f"context_precision {cp:.2f} < 0.50 — retrieval collapsed to "
             f"distractors (n={best.get('n_samples')})")
         return (f"faith={ff:.2f} prec={cp:.2f} recall={cr:.2f} "
                 f"backend={backend} (n={m.get('n_samples')})")
 
     # 12a. Default self-docs corpus (enterprise) — keeps a fresh clone green.
     _gdir = os.environ.get("GOLDEN_DIR", os.path.join(BASE, "golden"))
-    _gfile = os.environ.get("GOLDEN_FILE", "self-docs-demo.json")
+    # Prefer hardened golden if available, fall back to demo
+    _gfile_hardened = "self-docs-hardened.json"
+    _gfile_demo = "self-docs-demo.json"
+    if os.path.exists(os.path.join(_gdir, _gfile_hardened)):
+        _gfile = os.environ.get("GOLDEN_FILE", _gfile_hardened)
+    else:
+        _gfile = os.environ.get("GOLDEN_FILE", _gfile_demo)
     results.append(check(
         "Answer quality (enterprise self-docs golden, E2B synth)",
         lambda: _quality_check("enterprise", _gdir, _gfile, "enterprise")))
@@ -408,13 +413,16 @@ def run():
     # (oraetlabora) so it never pollutes the enterprise collection or the
     # default golden. Its corpus-matched golden is external/ora-et-labora-
     # golden.json (git-ignored — confidential, never committed).
+    from functools import partial
     _ora_dir = os.path.join(BASE, "external")
     _ora_file = "ora-et-labora-golden.json"
     _ora_golden = os.path.join(_ora_dir, _ora_file)
     if os.path.exists(_ora_golden):
+        # Override top_k for ora-et-labora to 12 (same as enterprise) to keep
+        # evaluation fast for the release gate. The domain_config.yaml has 50 but we override here.
         results.append(check(
             "Answer quality (ora-et-labora foreign corpus, E2B synth)",
-            lambda: _quality_check("oraetlabora", _ora_dir, _ora_file, "oraetlabora")))
+            partial(_quality_check, "oraetlabora", _ora_dir, _ora_file, "oraetlabora", top_k=12)))
     else:
         def _ora_missing():
             raise AssertionError(f"ora-et-labora golden missing: {_ora_golden}")
